@@ -1,0 +1,4 @@
+INFO:     127.0.0.1:54987 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54987 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54988 - "GET /login HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:54990 - "GET /product/101576 HTTP/1.1" 404 Not Found
