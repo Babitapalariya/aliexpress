@@ -731,7 +731,7 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
     return {"message": "Variant prices updated and mode reset to Auto", "product_id": mapping.shopify_product_id, "price_mode": "auto"}
 
 
-    
+
 @app.post("/mappings/sync-all")
 def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Background sync for all mapped products that have track_price=True."""
@@ -1176,17 +1176,95 @@ def update_shipping_inventory_for_all():
 
 # In app/main.py
 
+# @app.get("/dashboard/products/{product_id}/details")
+# def get_product_details(product_id: int, db: Session = Depends(get_db)):
+#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not product:
+#         raise HTTPException(404, "Product not found")
+#     return {
+#         "aliexpress_id": product.aliexpress_id,
+#         "last_shipment_fetch": product.last_shipment_fetch.isoformat() if product.last_shipment_fetch else None,
+#         "shipping_cost": product.shipping_cost,
+#         "shipping_method": product.shipping_method,
+#         "total_stock": product.total_stock,
+#     }
+
+
+
+# ─────────────────────────────────────────────
+# REPLACEMENT for the /dashboard/products/{product_id}/details endpoint
+# in main.py — replace the existing @app.get("/dashboard/products/{product_id}/details")
+# ─────────────────────────────────────────────
+
 @app.get("/dashboard/products/{product_id}/details")
 def get_product_details(product_id: int, db: Session = Depends(get_db)):
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
+
+    # Always fetch fresh data from AliExpress so the modal shows live info.
+    # Shipping and inventory are embedded in the product response — no extra call.
+    live_data = None
+    fetch_error = None
+    try:
+        from .aliexpress import get_product as ali_get_product
+        live_data = ali_get_product(product.aliexpress_id, db)
+    except Exception as e:
+        fetch_error = str(e)
+
+    if live_data:
+        # Persist shipping to DB while we have fresh data
+        shipping = live_data.get("shipping_info", {})
+        if shipping.get("cost") and shipping["cost"] != "Calculated at checkout":
+            product.shipping_cost = shipping["cost"]
+        if shipping.get("method"):
+            product.shipping_method = shipping["method"]
+
+        # Persist stock if we actually got a number
+        if live_data.get("total_stock") is not None:
+            product.total_stock = live_data["total_stock"]
+
+        from sqlalchemy.sql import func as sqlfunc
+        product.last_shipment_fetch = sqlfunc.now()
+        db.commit()
+
+    # Build response — prefer live data, fall back to DB cache
+    def _shipping_cost():
+        if live_data:
+            return live_data.get("shipping_info", {}).get("cost") or product.shipping_cost or "Calculated at checkout"
+        return product.shipping_cost or "Calculated at checkout"
+
+    def _shipping_method():
+        if live_data:
+            return live_data.get("shipping_info", {}).get("method") or product.shipping_method or "Standard Shipping"
+        return product.shipping_method or "Standard Shipping"
+
+    def _shipping_days():
+        if live_data:
+            return live_data.get("shipping_info", {}).get("days") or ""
+        return ""
+
     return {
-        "aliexpress_id": product.aliexpress_id,
+        "aliexpress_id":      product.aliexpress_id,
         "last_shipment_fetch": product.last_shipment_fetch.isoformat() if product.last_shipment_fetch else None,
-        "shipping_cost": product.shipping_cost,
-        "shipping_method": product.shipping_method,
-        "total_stock": product.total_stock,
+
+        # Shipping
+        "shipping_cost":   _shipping_cost(),
+        "shipping_method": _shipping_method(),
+        "shipping_days":   _shipping_days(),
+
+        # Inventory
+        "total_stock":     live_data.get("total_stock")     if live_data else product.total_stock,
+        "stock_available": live_data.get("stock_available") if live_data else None,
+        "stock_source":    live_data.get("stock_source")    if live_data else "cached",
+        "stock_note":      live_data.get("stock_note")      if live_data else (
+            "Using cached data — live fetch failed." if fetch_error else None
+        ),
+        "sku_inventory":   live_data.get("sku_inventory")   if live_data else [],
+
+        # Context
+        "orders":          live_data.get("orders")          if live_data else None,
+        "fetch_error":     fetch_error,
     }
 
 
@@ -1328,3 +1406,84 @@ def reset_mapping_mode(mapping_id: int, db: Session = Depends(get_db)):
     # Optionally sync immediately
     sync_mapped_product_price(mapping.aliexpress_id, db)
     return {"message": "Mapping reset to auto sync mode", "price_mode": "auto"}
+
+
+# Add this temporary debug endpoint to main.py to see the raw AliExpress response
+# GET /debug/aliexpress-raw/{aliexpress_id}
+# Call it once, check what fields are actually in the response, then remove it.
+
+@app.get("/debug/aliexpress-raw/{aliexpress_id}")
+def debug_aliexpress_raw(aliexpress_id: str, db: Session = Depends(get_db)):
+    """
+    Returns the FULL raw AliExpress API response so you can see exactly
+    what fields are available for shipping and inventory.
+    Remove this endpoint after debugging.
+    """
+    from .auth import get_latest_token
+    from .aliexpress import _call, _sign, _check_error
+    import time, urllib.parse, hashlib, http.client, json
+    from .config import get_settings
+    settings = get_settings()
+
+    token = get_latest_token(db)
+
+    sys_params = {
+        "app_key":      settings.ALIEXPRESS_APP_KEY,
+        "method":       "aliexpress.ds.product.get",
+        "timestamp":    str(int(time.time() * 1000)),
+        "sign_method":  "md5",
+        "v":            "2.0",
+        "access_token": token.access_token,
+    }
+    app_params = {
+        "product_id":      aliexpress_id,
+        "local":           "en_US",
+        "ship_to_country": "US",
+        "target_currency": "USD",
+    }
+    sign_str = settings.ALIEXPRESS_APP_SECRET + "".join(
+        f"{k}{({**sys_params, **app_params})[k]}" for k in sorted({**sys_params, **app_params}.keys())
+    ) + settings.ALIEXPRESS_APP_SECRET
+    sys_params["sign"] = hashlib.md5(sign_str.encode()).hexdigest().upper()
+
+    url  = "/sync?" + urllib.parse.urlencode(sys_params)
+    body = urllib.parse.urlencode(app_params)
+    conn = http.client.HTTPSConnection("api-sg.aliexpress.com", timeout=30)
+    conn.request("POST", url, body=body, headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"})
+    resp   = conn.getresponse()
+    result = json.loads(resp.read().decode("utf-8"))
+    conn.close()
+
+    # Extract just the parts relevant to shipping and inventory
+    r = result.get("aliexpress_ds_product_get_response", {}).get("result", {})
+    base = r.get("ae_item_base_info_dto", {})
+    sku_list = r.get("ae_item_sku_info_dtos", {}).get("ae_item_sku_info_d_t_o", [])
+
+    return {
+        "shipping_related_fields": {
+            "ae_item_properties":  r.get("ae_item_properties"),
+            "logistics_info_dto":  r.get("logistics_info_dto"),
+            "freight_template":    r.get("ae_item_properties", {}).get("freight_template"),
+            "delivery_days":       base.get("delivery_days"),
+        },
+        "inventory_related_fields": {
+            "total_available_stock":          base.get("total_available_stock"),
+            "product_inventory_quantity":     base.get("product_inventory_quantity"),
+            "total_stock":                    base.get("total_stock"),
+            "lastest_volume":                 base.get("lastest_volume"),
+            "volume":                         base.get("volume"),
+            "sku_stocks": [
+                {
+                    "sku_id":         s.get("sku_id"),
+                    "sku_attr":       s.get("sku_attr"),
+                    "ipm_sku_stock":  s.get("ipm_sku_stock"),
+                    "sku_stock":      s.get("sku_stock"),          # alternate field name
+                    "available":      s.get("available"),          # alternate field name
+                    "all_sku_fields": list(s.keys()),              # show ALL field names
+                }
+                for s in sku_list[:5]  # first 5 SKUs only
+            ],
+        },
+        "all_result_keys":    list(r.keys()),
+        "all_base_info_keys": list(base.keys()),
+    }

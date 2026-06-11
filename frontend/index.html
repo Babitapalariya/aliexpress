@@ -1120,83 +1120,210 @@ function openModal(p) {
 }
 function closeModal() { document.getElementById("edit-overlay").classList.remove("open"); }
 document.getElementById("edit-overlay").addEventListener("click", function(e){ if(e.target === this) closeModal(); });
+
+
+
+
 // async function refreshProductDetails() {
-//   const aliexpressId = document.getElementById("m-aeid").value;
-//   if (!aliexpressId) return;
-//   try {
-//     const r = await fetch(`${API}/dashboard/products/{product_id}/details}`);
-//     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-//     const data = await r.json();
-//     const shipping = data.shipping_info || { cost: "N/A", method: "Standard" };
-//     document.getElementById("modal-shipping-info").innerHTML = `<i class="ti ti-truck-delivery"></i> ${shipping.cost} · ${shipping.method}`;
-//     let totalStock = data.total_stock;
-//     const skuInventory = data.sku_inventory || [];
-//     if ((totalStock === undefined || totalStock === "—" || totalStock === null) && skuInventory.length) {
-//       let calculated = 0;
-//       for (const sku of skuInventory) { const stock = parseInt(sku.stock,10); if (!isNaN(stock)) calculated += stock; }
-//       totalStock = calculated > 0 ? calculated : "—";
+//     const productId = document.getElementById("m-dbid").value;   // numeric database ID
+//     if (!productId) {
+//         console.warn("No product ID found in modal");
+//         return;
 //     }
-//     const hasAnyStock = skuInventory.some(sku => { const stock = parseInt(sku.stock,10); return !isNaN(stock) && stock > 0; });
-//     if (totalStock === "—" || totalStock === 0 || !hasAnyStock) {
-//       document.getElementById("modal-inventory-info").innerHTML = `<i class="ti ti-package"></i> Stock information not available from AliExpress.<span style="display:block; font-size:11px; color:var(--t3); margin-top:4px;">Some products do not expose real-time stock via the API.</span>`;
-//     } else {
-//       let inventoryHtml = `<i class="ti ti-package"></i> Total stock: ${totalStock} units`;
-//       if (skuInventory.length) {
-//         const nonNullSkus = skuInventory.filter(sku => sku.stock !== null && sku.stock !== undefined);
-//         if (nonNullSkus.length) {
-//           inventoryHtml += `<details><summary style="cursor:pointer; margin-top:4px;">SKU breakdown</summary><pre style="font-size:10px; margin-top:4px; white-space:pre-wrap;">${JSON.stringify(nonNullSkus, null, 2)}</pre></details>`;
+//     try {
+//         const response = await fetch(`${API}/dashboard/products/${productId}/details`);
+//         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+//         const data = await response.json();
+
+//         // Shipping info
+//         const shippingCost = data.shipping_cost || "Calculated at checkout";
+//         const shippingMethod = data.shipping_method || "Standard Shipping";
+//         document.getElementById("modal-shipping-info").innerHTML = 
+//             `<i class="ti ti-truck-delivery"></i> ${shippingCost} · ${shippingMethod}`;
+
+//         // Inventory info
+//         if (data.total_stock && data.total_stock > 0) {
+//             document.getElementById("modal-inventory-info").innerHTML = 
+//                 `<i class="ti ti-package"></i> Total stock: ${data.total_stock} units`;
+//         } else {
+//             document.getElementById("modal-inventory-info").innerHTML = 
+//                 `<i class="ti ti-package"></i> Stock information not available from AliExpress.<span style="display:block; font-size:11px; color:var(--t3); margin-top:4px;">The API does not expose real‑time stock for dropshipping products.</span>`;
 //         }
-//       }
-//       document.getElementById("modal-inventory-info").innerHTML = inventoryHtml;
+
+//         // Last fetch timestamp
+//         if (data.last_shipment_fetch) {
+//             const lastFetch = new Date(data.last_shipment_fetch).toLocaleString();
+//             document.getElementById("modal-inventory-info").innerHTML += 
+//                 `<div style="margin-top:6px; font-size:10px; color:var(--t3)">Last updated: ${lastFetch}</div>`;
+//         }
+//     } catch (error) {
+//         console.error("Error loading details:", error);
+//         document.getElementById("modal-shipping-info").innerHTML = "Shipping info temporarily unavailable";
+//         document.getElementById("modal-inventory-info").innerHTML = "Could not load inventory details.";
 //     }
-//   } catch(e) {
-//     console.error(e);
-//     document.getElementById("modal-shipping-info").innerHTML = "Shipping info temporarily unavailable";
-//     document.getElementById("modal-inventory-info").innerHTML = "Could not load inventory details.";
-//   }
 // }
 
 
 
+
+// ─────────────────────────────────────────────
+// REPLACEMENT for the refreshProductDetails() function in your HTML frontend
+// ─────────────────────────────────────────────
+
+// Replace refreshProductDetails() in your HTML with this version.
+// Now correctly handles:
+// - "7 days to US" shipping display (from logistics_info_dto.delivery_time)
+// - sku_available_stock for real inventory numbers
+// - sales_count for order count proxy
+// - Human-readable SKU labels (Red / XL instead of 5:100014065;14:200002987)
+
 async function refreshProductDetails() {
-    const productId = document.getElementById("m-dbid").value;   // numeric database ID
-    if (!productId) {
-        console.warn("No product ID found in modal");
-        return;
-    }
+    const productId    = document.getElementById("m-dbid").value;
+    const aliexpressId = document.getElementById("m-aeid").value;
+    if (!productId) return;
+
+    document.getElementById("modal-shipping-info").innerHTML =
+        `<i class="ti ti-loader-2 spin"></i> Loading…`;
+    document.getElementById("modal-inventory-info").innerHTML = "";
+
     try {
         const response = await fetch(`${API}/dashboard/products/${productId}/details`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        // Shipping info
-        const shippingCost = data.shipping_cost || "Calculated at checkout";
-        const shippingMethod = data.shipping_method || "Standard Shipping";
-        document.getElementById("modal-shipping-info").innerHTML = 
-            `<i class="ti ti-truck-delivery"></i> ${shippingCost} · ${shippingMethod}`;
+        // ── Shipping ──────────────────────────────────────────
+        const cost   = data.shipping_cost   || "Calculated at checkout";
+        const method = data.shipping_method || "Standard Shipping";
+        const days   = data.shipping_days;
+        const isFree = cost.toLowerCase() === "free" || cost === "0" || cost === "0.00";
 
-        // Inventory info
-        if (data.total_stock && data.total_stock > 0) {
-            document.getElementById("modal-inventory-info").innerHTML = 
-                `<i class="ti ti-package"></i> Total stock: ${data.total_stock} units`;
+        let shippingHtml = `<i class="ti ti-truck-delivery"></i> `;
+        shippingHtml += `<strong style="color:${isFree ? 'var(--green)' : 'var(--t1)'}">${cost}</strong>`;
+        shippingHtml += ` via ${method}`;
+        if (days) {
+            shippingHtml += ` <span class="badge b-blue" style="margin-left:4px">
+                <i class="ti ti-clock" style="font-size:10px"></i> ${days}
+            </span>`;
+        }
+        document.getElementById("modal-shipping-info").innerHTML = shippingHtml;
+
+        // ── Inventory ─────────────────────────────────────────
+        let invHtml = "";
+        const skus        = data.sku_inventory || [];
+        const salesCount  = data.sales_count;
+        const stockAvail  = data.stock_available;
+        const totalStock  = data.total_stock;
+
+        if (stockAvail === true && totalStock > 0) {
+            // ✅ Real stock numbers from sku_available_stock
+            invHtml += `
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+                <span class="badge b-green"><i class="ti ti-package"></i> In stock</span>
+                <span style="font-weight:700;font-size:14px">${totalStock.toLocaleString()} units total</span>
+            </div>`;
+
+            // SKU breakdown table with human-readable labels
+            const stockedSkus = skus.filter(s => s.stock !== null && s.stock !== undefined);
+            if (stockedSkus.length > 0) {
+                invHtml += `
+                <details ${stockedSkus.length <= 4 ? "open" : ""}>
+                    <summary style="cursor:pointer;font-size:12px;color:var(--t2);font-weight:600;margin-bottom:6px">
+                        ${stockedSkus.length} SKU variant${stockedSkus.length !== 1 ? 's' : ''}
+                    </summary>
+                    <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+                    <table style="font-size:12px;width:100%;border-collapse:collapse">
+                        <thead style="background:var(--bg)"><tr>
+                            <th style="text-align:left;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Variant</th>
+                            <th style="text-align:right;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Stock</th>
+                        </tr></thead>
+                        <tbody>
+                        ${stockedSkus.map((s, i) => `
+                        <tr style="background:${i % 2 === 0 ? 'transparent' : 'var(--bg)'}">
+                            <td style="padding:5px 10px;color:var(--t2)">${s.attr || s.sku_id || "—"}</td>
+                            <td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-weight:600;color:${s.stock > 0 ? 'var(--green)' : 'var(--red)'}">${s.stock ?? "—"}</td>
+                        </tr>`).join("")}
+                        </tbody>
+                    </table>
+                    </div>
+                </details>`;
+            }
+
         } else {
-            document.getElementById("modal-inventory-info").innerHTML = 
-                `<i class="ti ti-package"></i> Stock information not available from AliExpress.<span style="display:block; font-size:11px; color:var(--t3); margin-top:4px;">The API does not expose real‑time stock for dropshipping products.</span>`;
+            // ⚠️ Stock hidden — show all available signals
+            invHtml += `
+            <div style="background:var(--orange-bg);border:1px solid var(--orange-border);border-radius:10px;padding:12px 14px">
+                <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px">
+                    <i class="ti ti-info-circle" style="color:var(--orange);font-size:16px;flex-shrink:0;margin-top:1px"></i>
+                    <div>
+                        <div style="font-weight:700;color:var(--orange);font-size:13px;margin-bottom:3px">
+                            Stock not reported by AliExpress
+                        </div>
+                        <div style="font-size:12px;color:#92400e;line-height:1.5">
+                            The DS API doesn't expose inventory for this product — 
+                            this does <strong>not</strong> mean it's out of stock. 
+                            Suppliers fulfil on demand.
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:flex;flex-wrap:wrap;gap:8px">
+                    ${salesCount ? `
+                    <div style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px">
+                        <i class="ti ti-shopping-cart" style="color:var(--orange)"></i>
+                        <strong>${Number(salesCount).toLocaleString()}+</strong>
+                        <span style="color:#92400e">orders</span>
+                    </div>` : ""}
+
+                    ${skus.length > 0 ? `
+                    <div style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px">
+                        <i class="ti ti-layers-subtract" style="color:var(--orange)"></i>
+                        <strong>${skus.length}</strong>
+                        <span style="color:#92400e">variant${skus.length !== 1 ? 's' : ''}</span>
+                    </div>` : ""}
+
+                    ${aliexpressId ? `
+                    <a href="https://www.aliexpress.com/item/${aliexpressId}.html" target="_blank"
+                       style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;
+                              text-decoration:none;display:inline-flex;align-items:center;gap:5px;color:#92400e">
+                        <i class="ti ti-external-link" style="color:var(--orange)"></i>
+                        Check on AliExpress
+                    </a>` : ""}
+                </div>
+
+                ${skus.length > 0 ? `
+                <details style="margin-top:10px">
+                    <summary style="cursor:pointer;font-size:11px;color:#92400e">Show ${skus.length} SKU variant${skus.length !== 1 ? 's' : ''}</summary>
+                    <div style="margin-top:6px;max-height:120px;overflow-y:auto">
+                    ${skus.map(s => `<div style="font-size:11px;color:#92400e;padding:2px 0">${s.attr || s.sku_id}</div>`).join("")}
+                    </div>
+                </details>` : ""}
+            </div>`;
         }
 
-        // Last fetch timestamp
         if (data.last_shipment_fetch) {
-            const lastFetch = new Date(data.last_shipment_fetch).toLocaleString();
-            document.getElementById("modal-inventory-info").innerHTML += 
-                `<div style="margin-top:6px; font-size:10px; color:var(--t3)">Last updated: ${lastFetch}</div>`;
+            invHtml += `
+            <div style="margin-top:8px;font-size:10px;color:var(--t3);display:flex;align-items:center;gap:4px">
+                <i class="ti ti-clock" style="font-size:11px"></i>
+                Last updated: ${new Date(data.last_shipment_fetch).toLocaleString()}
+            </div>`;
         }
+
+        if (data.fetch_error) {
+            invHtml += `
+            <div style="margin-top:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px">
+                <i class="ti ti-alert-circle" style="font-size:11px"></i> Live fetch failed — showing cached data.
+            </div>`;
+        }
+
+        document.getElementById("modal-inventory-info").innerHTML = invHtml;
+
     } catch (error) {
-        console.error("Error loading details:", error);
-        document.getElementById("modal-shipping-info").innerHTML = "Shipping info temporarily unavailable";
-        document.getElementById("modal-inventory-info").innerHTML = "Could not load inventory details.";
+        document.getElementById("modal-shipping-info").innerHTML =
+            `<i class="ti ti-alert-circle" style="color:var(--red)"></i> Could not load shipping info`;
+        document.getElementById("modal-inventory-info").innerHTML =
+            `<span style="color:var(--red);font-size:12px">${error.message}</span>`;
     }
 }
-
 
 
 async function saveModal() {
