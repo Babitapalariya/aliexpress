@@ -40,6 +40,9 @@ scheduler = None
 # PRICE SYNC HELPERS
 # ─────────────────────────────────────────────
 
+
+
+
 # def sync_product_price(product_id: int, db: Session) -> bool:
 #     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
 #     if not product or not product.track_price or not product.aliexpress_id:
@@ -83,12 +86,14 @@ scheduler = None
 #     print(f"[Sync] Product {product.aliexpress_id} processed. Shopify updated: {shopify_updated}")
 #     return shopify_updated
 
-
-
-
 def sync_product_price(product_id: int, db: Session) -> bool:
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product or not product.track_price or not product.aliexpress_id:
+        return False
+
+    # Skip if manual mode – user has fixed price
+    if product.price_mode == 'manual':
+        print(f"[Sync] Skipping manual product {product.aliexpress_id}")
         return False
 
     try:
@@ -102,13 +107,12 @@ def sync_product_price(product_id: int, db: Session) -> bool:
         print(f"[Sync] No SKUs for {product.aliexpress_id}")
         return False
 
-    # Apply price increase to each SKU
-    increase = product.price_increase or 0.0
-    if increase != 0.0:
+    # Apply increase if mode is 'increase'
+    if product.price_mode == 'increase' and product.price_increase != 0.0:
         for sku in new_skus:
             current_price = sku.get("sale_price") or sku.get("price")
             if current_price is not None:
-                new_price = float(current_price) + increase
+                new_price = float(current_price) + product.price_increase
                 sku["sale_price"] = str(new_price)
                 sku["price"] = str(new_price)
 
@@ -118,18 +122,14 @@ def sync_product_price(product_id: int, db: Session) -> bool:
             product.shopify_product_id, new_skus
         )
 
-    # Update local original price (without increase)
+    # Update local original price
     original_price = latest_data.get("sale_price") or latest_data.get("original_price")
     if original_price:
         product.original_price = original_price
-        if not product.custom_price:
-            product.custom_price = None
+
     db.commit()
-
-    print(f"[Sync] Product {product.aliexpress_id} processed. Shopify updated: {shopify_updated}")
+    print(f"[Sync] Product {product.aliexpress_id} processed (mode={product.price_mode}). Shopify updated: {shopify_updated}")
     return shopify_updated
-
-
 
 def sync_existing_shopify_products_to_db():
     """Fetch all Shopify products with tag 'aliexpress-import' and create local DB records if missing."""
@@ -315,35 +315,39 @@ def list_products(
             "custom_rating": p.custom_rating,
             "custom_description": p.custom_description,
             "track_price": p.track_price,
+            "price_mode": p.price_mode,
+            "price_increase": p.price_increase,
         })
     return {"products": result, "total": total, "page": page, "pages": pages}
 
 
-@app.get("/dashboard/products/{product_id}")
-def get_single_product(product_id: int, db: Session = Depends(get_db)):
-    p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return {
-        "id": p.id,
-        "aliexpress_id": p.aliexpress_id,
-        "title": p.custom_title or p.original_title,
-        "original_title": p.original_title,
-        "price": p.custom_price or p.original_price,
-        "currency": p.currency,
-        "main_image": p.main_image,
-        "store_name": p.store_name,
-        "avg_rating": p.custom_rating or p.avg_rating,
-        "sku_count": p.sku_count,
-        "shopify_status": p.shopify_status,
-        "shopify_product_id": p.shopify_product_id,
-        "imported_at": p.imported_at.isoformat() if p.imported_at else None,
-        "custom_title": p.custom_title,
-        "custom_price": p.custom_price,
-        "custom_rating": p.custom_rating,
-        "custom_description": p.custom_description,
-        "track_price": p.track_price,
-    }
+# @app.get("/dashboard/products/{product_id}")
+# def get_single_product(product_id: int, db: Session = Depends(get_db)):
+#     p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not p:
+#         raise HTTPException(status_code=404, detail="Product not found")
+#     return {
+#         "id": p.id,
+#         "aliexpress_id": p.aliexpress_id,
+#         "title": p.custom_title or p.original_title,
+#         "original_title": p.original_title,
+#         "price": p.custom_price or p.original_price,
+#         "currency": p.currency,
+#         "main_image": p.main_image,
+#         "store_name": p.store_name,
+#         "avg_rating": p.custom_rating or p.avg_rating,
+#         "sku_count": p.sku_count,
+#         "shopify_status": p.shopify_status,
+#         "shopify_product_id": p.shopify_product_id,
+#         "imported_at": p.imported_at.isoformat() if p.imported_at else None,
+#         "custom_title": p.custom_title,
+#         "custom_price": p.custom_price,
+#         "custom_rating": p.custom_rating,
+#         "custom_description": p.custom_description,
+#         "track_price": p.track_price,
+#     }
+
+
 
 
 @app.put("/dashboard/products/{product_id}")
@@ -602,7 +606,6 @@ def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
 
 @app.post("/mappings/add")
 def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_title: str = None, db: Session = Depends(get_db)):
-    """Create a new mapping between AliExpress ID and Shopify product ID."""
     existing = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
     if existing:
         raise HTTPException(400, "Mapping for this AliExpress ID already exists")
@@ -610,19 +613,38 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
         aliexpress_id=aliexpress_id,
         shopify_product_id=shopify_product_id,
         shopify_product_title=shopify_product_title,
-        track_price=True
+        track_price=True,
+        price_mode="auto",
+        price_increase=0.0
     )
     db.add(mapping)
     db.commit()
     db.refresh(mapping)
-    return {"message": "Mapping added", "mapping": {"id": mapping.id, "aliexpress_id": mapping.aliexpress_id, "shopify_product_id": mapping.shopify_product_id, "title": mapping.shopify_product_title}}
-
+    return {
+        "message": "Mapping added",
+        "mapping": {
+            "id": mapping.id,
+            "aliexpress_id": mapping.aliexpress_id,
+            "shopify_product_id": mapping.shopify_product_id,
+            "title": mapping.shopify_product_title,
+            "track_price": mapping.track_price,
+            "price_mode": mapping.price_mode,
+            "price_increase": mapping.price_increase
+        }
+    }
 
 @app.get("/mappings/list")
 def list_mappings(db: Session = Depends(get_db)):
     mappings = db.query(ProductMapping).all()
-    return [{"id": m.id, "aliexpress_id": m.aliexpress_id, "shopify_product_id": m.shopify_product_id, "title": m.shopify_product_title, "track_price": m.track_price} for m in mappings]
-
+    return [{
+        "id": m.id,
+        "aliexpress_id": m.aliexpress_id,
+        "shopify_product_id": m.shopify_product_id,
+        "title": m.shopify_product_title,
+        "track_price": m.track_price,
+        "price_mode": m.price_mode,
+        "price_increase": m.price_increase
+    } for m in mappings]
 
 @app.delete("/mappings/{mapping_id}")
 def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
@@ -633,36 +655,83 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Mapping deleted"}
 
+# @app.post("/mappings/sync-price")
+# def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db)):
+#     mapping = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
+#     if not mapping or not mapping.track_price:
+#         raise HTTPException(404, "Mapping not found or price tracking disabled")
+
+#     get_latest_token(db)
+
+#     try:
+#         from .aliexpress import get_product
+#         raw = get_product(aliexpress_id, db)
+#     except HTTPException as e:
+#         raise HTTPException(status_code=e.status_code, detail=f"AliExpress API error: {e.detail}")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to fetch from AliExpress: {str(e)}")
+
+#     # Get SKUs from AliExpress response
+#     aliexpress_skus = raw.get("skus", [])
+#     if not aliexpress_skus:
+#         raise HTTPException(500, "No SKUs found in AliExpress product")
+
+#     # Update Shopify variant prices using SKU matching
+#     from .shopify import update_shopify_product_prices_with_skus
+#     success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+
+#     if not success:
+#         raise HTTPException(502, "Failed to update Shopify variant prices (no matching variants or API error)")
+
+#     return {"message": "Variant prices updated successfully", "product_id": mapping.shopify_product_id}
+
+
+
+
 @app.post("/mappings/sync-price")
 def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db)):
     mapping = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
     if not mapping or not mapping.track_price:
         raise HTTPException(404, "Mapping not found or price tracking disabled")
 
+    # If manual mode, do not sync (keep as is)
+    if mapping.price_mode == "manual":
+        raise HTTPException(400, "Mapping is in manual mode – use 'Set Price' to change")
+
     get_latest_token(db)
 
     try:
-        from .aliexpress import get_product
         raw = get_product(aliexpress_id, db)
-    except HTTPException as e:
-        raise HTTPException(status_code=e.status_code, detail=f"AliExpress API error: {e.detail}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch from AliExpress: {str(e)}")
+        raise HTTPException(500, f"Failed to fetch from AliExpress: {str(e)}")
 
-    # Get SKUs from AliExpress response
     aliexpress_skus = raw.get("skus", [])
     if not aliexpress_skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
 
-    # Update Shopify variant prices using SKU matching
+    # If increase mode, apply stored increase
+    if mapping.price_mode == "increase" and mapping.price_increase != 0.0:
+        for sku in aliexpress_skus:
+            price = sku.get("sale_price") or sku.get("price")
+            if price:
+                sku["sale_price"] = str(float(price) + mapping.price_increase)
+                sku["price"] = str(float(price) + mapping.price_increase)
+
     from .shopify import update_shopify_product_prices_with_skus
     success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
     if not success:
-        raise HTTPException(502, "Failed to update Shopify variant prices (no matching variants or API error)")
+        raise HTTPException(502, "Failed to update Shopify variant prices")
 
-    return {"message": "Variant prices updated successfully", "product_id": mapping.shopify_product_id}
+    # **RESET mode to auto after manual sync**
+    mapping.price_mode = "auto"
+    mapping.price_increase = 0.0
+    db.commit()
 
+    return {"message": "Variant prices updated and mode reset to Auto", "product_id": mapping.shopify_product_id, "price_mode": "auto"}
+
+
+    
 @app.post("/mappings/sync-all")
 def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Background sync for all mapped products that have track_price=True."""
@@ -719,41 +788,27 @@ def sync_all_mapped_products_background():
     try:
         mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
         for m in mappings:
+            if m.price_mode == "manual":
+                continue
             try:
                 raw = get_product(m.aliexpress_id, db)
                 skus = raw.get("skus", [])
-                if skus:
-                    update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
-                    print(f"[Hourly] Updated variant prices for {m.aliexpress_id}")
+                if not skus:
+                    continue
+                if m.price_mode == "increase" and m.price_increase != 0.0:
+                    for sku in skus:
+                        price = sku.get("sale_price") or sku.get("price")
+                        if price:
+                            sku["sale_price"] = str(float(price) + m.price_increase)
+                            sku["price"] = str(float(price) + m.price_increase)
+                update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
+                print(f"[Hourly] Updated variant prices for {m.aliexpress_id} (mode={m.price_mode})")
             except Exception as e:
                 print(f"[Hourly] Error for {m.aliexpress_id}: {e}")
     finally:
         db.close()
-    """Background task: fetch prices for all mapped products and update Shopify."""
-    from .database import SessionLocal
-    db = SessionLocal()
-    try:
-        mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
-        print(f"[Hourly] Starting price sync for {len(mappings)} mapped products")
-        for m in mappings:
-            try:
-                raw = get_product(m.aliexpress_id, db)
-                # Extract price: try top-level, then first SKU
-                new_price = raw.get("sale_price") or raw.get("original_price")
-                if not new_price and raw.get("skus") and len(raw["skus"]) > 0:
-                    first_sku = raw["skus"][0]
-                    new_price = first_sku.get("sale_price") or first_sku.get("price")
-                if new_price:
-                    update_shopify_product_price(m.shopify_product_id, float(new_price))
-                    print(f"[Hourly] Updated mapped product {m.aliexpress_id} price to {new_price}")
-                else:
-                    print(f"[Hourly] No price found for mapped product {m.aliexpress_id}")
-            except Exception as e:
-                print(f"[Hourly] Error for {m.aliexpress_id}: {e}")
-    except Exception as e:
-        print(f"[Hourly] Background task error: {e}")
-    finally:
-        db.close()
+
+
 
 @app.get("/debug/product/{shopify_product_id}")
 def debug_product_prices(shopify_product_id: str, db: Session = Depends(get_db)):
@@ -768,16 +823,61 @@ def debug_product_prices(shopify_product_id: str, db: Session = Depends(get_db))
         "variants": [{"id": v["id"], "option1": v.get("option1"), "price": v["price"]} for v in product.get("variants", [])]
     }
 
+# @app.post("/dashboard/products/{product_id}/sync-price")
+# def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
+#     """Force sync price from AliExpress to Shopify for this imported product."""
+#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not product:
+#         raise HTTPException(404, "Product not found")
+#     if not product.shopify_product_id:
+#         raise HTTPException(400, "This product has no Shopify ID attached")
+#     success = sync_product_price(product_id, db)
+#     return {"message": "Price sync completed" if success else "Price sync failed (no change or error)"}
+
+
 @app.post("/dashboard/products/{product_id}/sync-price")
 def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
-    """Force sync price from AliExpress to Shopify for this imported product."""
+    """Manual sync: fetch latest AliExpress price, update Shopify, and reset mode to auto."""
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
     if not product.shopify_product_id:
         raise HTTPException(400, "This product has no Shopify ID attached")
-    success = sync_product_price(product_id, db)
-    return {"message": "Price sync completed" if success else "Price sync failed (no change or error)"}
+    if not product.track_price:
+        raise HTTPException(400, "Price tracking is disabled for this product")
+
+    try:
+        # 1. Fetch fresh AliExpress data
+        latest_data = get_product(product.aliexpress_id, db)
+        new_skus = latest_data.get("skus", [])
+        if not new_skus:
+            raise HTTPException(500, "No SKUs found in AliExpress product")
+
+        # 2. Update Shopify variants WITHOUT any increase
+        success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
+        if not success:
+            raise HTTPException(502, "Shopify variant price update failed")
+
+        # 3. Update local original price
+        original_price = latest_data.get("sale_price") or latest_data.get("original_price")
+        if original_price:
+            product.original_price = original_price
+
+        # 4. Reset price mode to auto and clear increase
+        product.price_mode = "auto"
+        product.price_increase = 0.0
+        product.custom_price = None   # remove any manual override
+        db.commit()
+
+        return {
+            "message": "Price synced from AliExpress and mode reset to Auto",
+            "price_mode": "auto"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Sync failed: {str(e)}")
 
 
 @app.post("/mappings/{mapping_id}/update-price")
@@ -794,13 +894,40 @@ def update_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(g
     except ValueError:
         raise HTTPException(400, "Invalid price format")
     
-    # Update Shopify product price (simple version – updates first variant)
+    # Set mode to manual
+    mapping.price_mode = "manual"
+    mapping.price_increase = 0.0
+    db.commit()
+    
     from .shopify import update_shopify_product_price
     success = update_shopify_product_price(mapping.shopify_product_id, new_price)
     if not success:
         raise HTTPException(502, "Failed to update Shopify product price")
     
-    return {"message": f"Price updated to {new_price}", "product_id": mapping.shopify_product_id}
+    return {"message": f"Price updated to {new_price} (manual mode)", "product_id": mapping.shopify_product_id, "price_mode": "manual"}
+
+
+# @app.post("/mappings/{mapping_id}/increase-price")
+# def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
+#     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+#     if not mapping:
+#         raise HTTPException(404, "Mapping not found")
+    
+#     increase_by = payload.get("increase_by")
+#     if increase_by is None:
+#         raise HTTPException(400, "increase_by amount is required")
+#     try:
+#         increase_by = float(increase_by)
+#     except ValueError:
+#         raise HTTPException(400, "Invalid amount format")
+    
+#     from .shopify import increase_shopify_product_price
+#     success = increase_shopify_product_price(mapping.shopify_product_id, increase_by)
+#     if not success:
+#         raise HTTPException(502, "Failed to increase Shopify product prices")
+    
+#     return {"message": f"Increased all variants by ${increase_by:.2f}", "product_id": mapping.shopify_product_id}
+
 
 @app.post("/mappings/{mapping_id}/increase-price")
 def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
@@ -816,12 +943,16 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
     except ValueError:
         raise HTTPException(400, "Invalid amount format")
     
+    mapping.price_mode = "increase"
+    mapping.price_increase = increase_by
+    db.commit()
+    
     from .shopify import increase_shopify_product_price
     success = increase_shopify_product_price(mapping.shopify_product_id, increase_by)
     if not success:
         raise HTTPException(502, "Failed to increase Shopify product prices")
     
-    return {"message": f"Increased all variants by ${increase_by:.2f}", "product_id": mapping.shopify_product_id}
+    return {"message": f"Increased all variants by ${increase_by:.2f} (increase mode)", "product_id": mapping.shopify_product_id, "price_mode": "increase", "price_increase": increase_by}
 
 
 # @app.post("/dashboard/products/{product_id}/increase-price")
@@ -833,6 +964,8 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
 #     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
 #     if not product:
 #         raise HTTPException(404, "Product not found")
+#     if not product.shopify_product_id:
+#         raise HTTPException(400, "Product has no Shopify ID linked")
 
 #     increase_by = payload.get("increase_by")
 #     if increase_by is None:
@@ -842,17 +975,66 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
 #     except ValueError:
 #         raise HTTPException(400, "Invalid amount")
 
+#     # 1. Update the stored price increase in DB
 #     product.price_increase = increase_by
 #     db.commit()
 
-#     # Immediately sync to apply the new increase
-#     sync_product_price(product_id, db)
+#     # 2. Directly update Shopify variants (same logic as mapping increase)
+#     from .shopify import _base, _h
+#     import requests
 
-#     return {
-#         "message": f"Price increase set to ${increase_by:.2f}",
-#         "price_increase": increase_by,
-#         "shopify_updated": True
-#     }
+#     try:
+#         # Fetch current product variants
+#         shop_url = f"{_base()}/products/{product.shopify_product_id}.json"
+#         resp = requests.get(shop_url, params={"fields": "id,variants"}, headers=_h(), timeout=15)
+#         if resp.status_code != 200:
+#             raise HTTPException(502, f"Failed to fetch product: {resp.text}")
+
+#         product_data = resp.json().get("product", {})
+#         variants = product_data.get("variants", [])
+#         if not variants:
+#             raise HTTPException(400, "No variants found in Shopify product")
+
+#         # Calculate new prices
+#         updated_variants = []
+#         for variant in variants:
+#             try:
+#                 current_price = float(variant["price"])
+#             except (ValueError, TypeError):
+#                 current_price = 0.0
+#             new_price = current_price + increase_by
+#             updated_variants.append({
+#                 "id": variant["id"],
+#                 "price": f"{new_price:.2f}"
+#             })
+
+#         # Send update to Shopify
+#         update_payload = {"product": {"variants": updated_variants}}
+#         update_resp = requests.put(
+#             f"{_base()}/products/{product.shopify_product_id}.json",
+#             json=update_payload,
+#             headers=_h(),
+#             timeout=30
+#         )
+#         if update_resp.status_code != 200:
+#             raise HTTPException(502, f"Shopify update failed: {update_resp.text}")
+
+#         # Update local custom_price for UI display
+#         first_new_price = updated_variants[0]["price"] if updated_variants else None
+#         if first_new_price:
+#             product.custom_price = first_new_price
+#             db.commit()
+
+#         return {
+#             "message": f"Increased all variants by ${increase_by:.2f}",
+#             "price_increase": increase_by,
+#             "updated_variants": len(updated_variants)
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(500, f"Error updating Shopify: {str(e)}")
+
 
 
 @app.post("/dashboard/products/{product_id}/increase-price")
@@ -875,16 +1057,17 @@ def increase_imported_product_price(
     except ValueError:
         raise HTTPException(400, "Invalid amount")
 
-    # 1. Update the stored price increase in DB
+    # Set mode and amount
+    product.price_mode = "increase"
     product.price_increase = increase_by
+    product.custom_price = None   # ensure manual override is cleared
     db.commit()
 
-    # 2. Directly update Shopify variants (same logic as mapping increase)
+    # Directly update Shopify variants
     from .shopify import _base, _h
     import requests
 
     try:
-        # Fetch current product variants
         shop_url = f"{_base()}/products/{product.shopify_product_id}.json"
         resp = requests.get(shop_url, params={"fields": "id,variants"}, headers=_h(), timeout=15)
         if resp.status_code != 200:
@@ -895,7 +1078,6 @@ def increase_imported_product_price(
         if not variants:
             raise HTTPException(400, "No variants found in Shopify product")
 
-        # Calculate new prices
         updated_variants = []
         for variant in variants:
             try:
@@ -908,7 +1090,6 @@ def increase_imported_product_price(
                 "price": f"{new_price:.2f}"
             })
 
-        # Send update to Shopify
         update_payload = {"product": {"variants": updated_variants}}
         update_resp = requests.put(
             f"{_base()}/products/{product.shopify_product_id}.json",
@@ -919,7 +1100,7 @@ def increase_imported_product_price(
         if update_resp.status_code != 200:
             raise HTTPException(502, f"Shopify update failed: {update_resp.text}")
 
-        # Update local custom_price for UI display
+        # Optionally update custom_price for UI consistency
         first_new_price = updated_variants[0]["price"] if updated_variants else None
         if first_new_price:
             product.custom_price = first_new_price
@@ -927,6 +1108,7 @@ def increase_imported_product_price(
 
         return {
             "message": f"Increased all variants by ${increase_by:.2f}",
+            "price_mode": "increase",
             "price_increase": increase_by,
             "updated_variants": len(updated_variants)
         }
@@ -934,6 +1116,7 @@ def increase_imported_product_price(
         raise
     except Exception as e:
         raise HTTPException(500, f"Error updating Shopify: {str(e)}")
+
 
 
 @app.post("/admin/backfill-sku-metafields")
@@ -1053,44 +1236,6 @@ def bulk_increase_imported_products(
 
 
 # ---------- BULK INCREASE FOR MAPPED PRODUCTS ----------
-@app.post("/mappings/bulk-increase")
-def bulk_increase_mappings(
-    payload: dict,
-    db: Session = Depends(get_db)
-):
-    """
-    payload: {
-        "mapping_ids": [1,2,3],
-        "increase_by": 5.00
-    }
-    """
-    mapping_ids = payload.get("mapping_ids", [])
-    increase_by = payload.get("increase_by")
-    if not mapping_ids or increase_by is None:
-        raise HTTPException(400, "Missing mapping_ids or increase_by")
-    try:
-        increase_by = float(increase_by)
-    except ValueError:
-        raise HTTPException(400, "Invalid increase amount")
-
-    mappings = db.query(ProductMapping).filter(
-        ProductMapping.id.in_(mapping_ids),
-        ProductMapping.track_price == True
-    ).all()
-
-    if not mappings:
-        raise HTTPException(404, "No active mappings found")
-
-    from .shopify import increase_shopify_product_price
-    results = []
-    for m in mappings:
-        success = increase_shopify_product_price(m.shopify_product_id, increase_by)
-        results.append({
-            "id": m.id,
-            "aliexpress_id": m.aliexpress_id,
-            "success": success
-        })
-    return {"message": f"Bulk increase applied to {len(results)} mappings", "results": results}
 
 
 @app.post("/mappings/bulk-increase")
@@ -1148,3 +1293,38 @@ def bulk_increase_mappings(
     }
 
 
+def get_product_display_price(product: ImportedProduct, live_aliexpress_price: float = None) -> float:
+    if product.custom_price:
+        return float(product.custom_price)
+    if product.price_mode == 'increase' and product.price_increase:
+        base = live_aliexpress_price or float(product.original_price or 0)
+        return base + product.price_increase
+    # auto or no increase
+    return live_aliexpress_price or float(product.original_price or 0)
+
+
+@app.post("/dashboard/products/{product_id}/reset-price-mode")
+def reset_product_price_mode(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    product.price_mode = "auto"
+    product.price_increase = 0.0
+    product.custom_price = None
+    db.commit()
+    # Trigger a sync to fetch latest AliExpress price
+    sync_product_price(product_id, db)
+    return {"message": "Price mode reset to auto", "price_mode": "auto"}
+
+
+@app.post("/mappings/{mapping_id}/reset-mode")
+def reset_mapping_mode(mapping_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    mapping.price_mode = "auto"
+    mapping.price_increase = 0.0
+    db.commit()
+    # Optionally sync immediately
+    sync_mapped_product_price(mapping.aliexpress_id, db)
+    return {"message": "Mapping reset to auto sync mode", "price_mode": "auto"}

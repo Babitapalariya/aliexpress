@@ -48,6 +48,7 @@ class ImportedProduct(Base):
     shipping_method = Column(String(100), nullable=True)
     total_stock = Column(Integer, nullable=True)
     last_shipment_fetch = Column(DateTime(timezone=True), nullable=True)
+    price_mode = Column(String(20), default='auto', nullable=False)
 
  
 class ProductMapping(Base):
@@ -58,5 +59,7 @@ class ProductMapping(Base):
     shopify_product_id = Column(String(64), nullable=False, index=True)
     shopify_product_title = Column(String(500), nullable=True)  # optional, for display
     track_price = Column(Boolean, default=True, nullable=False)
+    price_mode = Column(String(20), default='auto', nullable=False)
+    price_increase = Column(Float, default=0.0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

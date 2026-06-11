@@ -574,7 +574,7 @@ tbody tr:last-child td{border-bottom:none}
 </div>
           <div class="tbl-wrap"><table>
             <thead>
-  <tr><th style="width:28px"></th><th style="width:52px"></th><th>Product</th><th>AliExpress ID</th><th>Price</th><th>Rating</th><th>SKUs</th><th>Status</th><th>Imported</th><th>Actions</th></tr>
+  <tr><th style="width:28px"></th><th style="width:52px"></th><th>Product</th><th>AliExpress ID</th><th>Price</th><th>Mode</th> <th>Rating</th><th>SKUs</th><th>Status</th><th>Imported</th><th>Actions</th></tr>
 </thead>
 
             <tbody id="prod-tbody"><tr><td colspan="10"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList</tbody></table></div>
@@ -616,7 +616,7 @@ tbody tr:last-child td{border-bottom:none}
           
           <div class="tbl-wrap"><table>
             <thead>
-  <tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify Product ID</th><th>Product Title</th><th>Track Price</th><th>Actions</th></tr>
+  <tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify Product ID</th><th>Product Title</th><th>Track Price</th><th>Price Mode</th><th>Actions</th></tr>
 </thead>
             <tbody id="mappings-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div>NonNullList</tbody></table></div>
         </div>
@@ -936,6 +936,7 @@ async function loadProducts(page) {
     buildPag(d.total, d.page, d.pages);
   } catch(e) { tb.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--red);padding:40px">${e.message}NonNullList`; }
 }
+
 function fullRow(p) {
   const title = p.title||p.original_title||"—";
   const price = p.price||p.sale_price||"—";
@@ -945,6 +946,22 @@ function fullRow(p) {
   const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
   const sb = p.shopify_status==="active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
   const edited = (p.custom_title||p.custom_price||p.custom_rating||p.custom_description) ? `<span class="badge b-indigo" style="margin-left:4px">Edited</span>` : "";
+
+  // ---- PRICE MODE BADGE ----
+  let modeBadge = '';
+  if (!p.track_price) {
+    modeBadge = `<span class="badge b-gray" title="Price tracking is disabled"><i class="ti ti-pause"></i> Paused</span>`;
+  } else if (p.price_mode === 'auto') {
+    modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
+  } else if (p.price_mode === 'increase') {
+    modeBadge = `<span class="badge b-orange" title="Increase $${p.price_increase} added on each sync"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+  } else if (p.price_mode === 'manual') {
+    modeBadge = `<span class="badge b-purple" title="Manual price – will not sync"><i class="ti ti-pencil"></i> Manual</span>`;
+  } else {
+    modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
+  }
+  // ---------------------------------
+
   const pj = escJson(p);
   return `<tr>
     <td style="width: 28px"><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
@@ -952,6 +969,7 @@ function fullRow(p) {
     <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name||""}</div></td>
     <td><span class="td-id">${p.aliexpress_id}</span></td>
     <td><span class="td-price">${cur} ${price}</span></td>
+    <td style="text-align:center; white-space:nowrap;">${modeBadge}</td>   <!-- NEW COLUMN -->
     <td style="font-size:12px;color:var(--t2)">${rating?`<span style="color:var(--orange)">★</span> ${parseFloat(rating).toFixed(1)}`:"—"}</td>
     <td style="font-size:12px;color:var(--t2);text-align:center">${p.sku_count||"—"}</td>
     <td>${sb}${edited}</td>
@@ -963,10 +981,9 @@ function fullRow(p) {
       ${p.shopify_product_id?`<a href="https://admin.shopify.com/products/${p.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
       <button class="btn btn-icon sm" title="Delete" style="color:var(--red);border-color:var(--red-border)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
     </div></td>
-
-   
   </tr>`;
 }
+
 function buildPag(total, page, pages) {
   const el = document.getElementById("prod-pag");
   if (pages<=1){el.style.display="none";return;}
@@ -1219,22 +1236,38 @@ function escapeHtml(str) { if (!str) return ""; return str.replace(/[&<>]/g, fun
 async function loadMappings() {
     const tbody = document.getElementById("mappings-tbody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
     try {
         const r = await fetch(`${API}/mappings/list`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const mappings = await r.json();
         if (!mappings.length) {
-            tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet. Add one above.</p></div></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet. Add one above.</p></div></tr>`;
             return;
         }
-        tbody.innerHTML = mappings.map(m => `
+        tbody.innerHTML = mappings.map(m => {
+            // ---- PRICE MODE BADGE ----
+            let modeBadge = '';
+            if (!m.track_price) {
+                modeBadge = `<span class="badge b-gray" title="Price tracking disabled"><i class="ti ti-pause"></i> Paused</span>`;
+            } else if (m.price_mode === 'auto') {
+                modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
+            } else if (m.price_mode === 'increase') {
+                modeBadge = `<span class="badge b-orange" title="Increase $${m.price_increase} added on each sync"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
+            } else if (m.price_mode === 'manual') {
+                modeBadge = `<span class="badge b-purple" title="Manual price – will not sync"><i class="ti ti-pencil"></i> Manual</span>`;
+            } else {
+                modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
+            }
+            // ---------------------------------
+            return `
             <tr>
                 <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
                 <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
                 <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
                 <td>${escapeHtml(m.title || "—")}</td>
                 <td>${m.track_price ? '<span class="badge b-green">Enabled</span>' : '<span class="badge b-gray">Disabled</span>'}</td>
+                <td style="white-space:nowrap;">${modeBadge}</td>   <!-- NEW COLUMN -->
                 <td class="td-actions">
                     <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
                     <button class="btn btn-primary btn-sm" onclick="openPriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-edit"></i> Set Price</button>
@@ -1243,13 +1276,13 @@ async function loadMappings() {
                     <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
                 </td>
             </tr>
-        `).join("");
-        // Re-attach selection counter
+        `}).join("");
         attachMappingCheckboxListeners();
     } catch(e) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red)">Error: ${e.message}</tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;
     }
 }
+
 
 function attachMappingCheckboxListeners() {
     const checkboxes = document.querySelectorAll('.mapping-checkbox');
