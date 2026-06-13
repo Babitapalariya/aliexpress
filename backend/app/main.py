@@ -251,15 +251,39 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AliShopify Backend", lifespan=lifespan)
 
 # CORS
-app.add_middleware(
-    CORSMiddleware,
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+app.include_router(auth_router)
+
+#app.include_router(auth_router, prefix="/api")
+
+
+
+
+from fastapi import FastAPI as _RootFastAPI
+from fastapi.middleware.cors import CORSMiddleware as _RootCORS
+ 
+root_app = _RootFastAPI(title="AliShopify Backend Root")
+ 
+# Re-apply CORS on the root app as well (covers the mount boundary)
+root_app.add_middleware(
+    _RootCORS,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+ 
+# Mount your existing fully-configured app under /api
+root_app.mount("/api", app)
 
-app.include_router(auth_router)
+
 
 from .database import SessionLocal
 
