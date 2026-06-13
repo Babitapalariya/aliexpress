@@ -249,26 +249,94 @@ def create_shopify_product(product: dict) -> dict:
 # ─────────────────────────────────────────────
 # UPDATE FUNCTIONS
 # ─────────────────────────────────────────────
+
+# def update_shopify_product(shopify_product_id: str, updates: dict):
+#     if not settings.SHOPIFY_STORE:
+#         raise HTTPException(500, "SHOPIFY_STORE missing")
+#     payload = {}
+#     if updates.get("title"):
+#         payload["title"] = updates["title"]
+#     if updates.get("price"):
+#         payload["variants"] = [{"price": str(updates["price"])}]
+#     if updates.get("body_html"):
+#         payload["body_html"] = updates["body_html"]
+#     if payload:
+#         try:
+#             res = requests.put(f"{_base()}/products/{shopify_product_id}.json", json={"product": payload}, headers=_h(), timeout=30)
+#             res.raise_for_status()
+#         except Exception as e:
+#             detail = getattr(e.response, "text", str(e)) if hasattr(e, "response") else str(e)
+#             raise HTTPException(502, f"Shopify update failed: {detail}")
+#     rating = str(updates.get("rating") or "").strip()
+#     if rating:
+#         save_rating_to_shopify(shopify_product_id, rating)
+
+
+# ─────────────────────────────────────────────
+# FIX for update_shopify_product() in shopify.py
+# 
+# BUG: payload["variants"] = [{"price": str(updates["price"])}]
+# This sends ONE variant with no "id" → Shopify deletes all other variants
+# and replaces them with a single default variant.
+#
+# FIX: Fetch existing variants first, update price on EACH while keeping
+# their "id", and send the full list back.
+# ─────────────────────────────────────────────
+
 def update_shopify_product(shopify_product_id: str, updates: dict):
     if not settings.SHOPIFY_STORE:
         raise HTTPException(500, "SHOPIFY_STORE missing")
+
     payload = {}
     if updates.get("title"):
         payload["title"] = updates["title"]
-    if updates.get("price"):
-        payload["variants"] = [{"price": str(updates["price"])}]
     if updates.get("body_html"):
         payload["body_html"] = updates["body_html"]
+
+    # ── PRICE UPDATE: must preserve all existing variants ──
+    if updates.get("price"):
+        try:
+            res = requests.get(
+                f"{_base()}/products/{shopify_product_id}.json",
+                params={"fields": "id,variants"},
+                headers=_h(), timeout=15,
+            )
+            res.raise_for_status()
+            existing_variants = res.json().get("product", {}).get("variants", [])
+
+            if existing_variants:
+                # Apply the new price to EVERY variant, keeping each variant's id
+                updated_variants = []
+                for v in existing_variants:
+                    updated_variants.append({
+                        "id": v["id"],
+                        "price": str(updates["price"]),
+                    })
+                payload["variants"] = updated_variants
+            else:
+                # No existing variants (shouldn't normally happen) — safe fallback
+                payload["variants"] = [{"price": str(updates["price"])}]
+
+        except Exception as e:
+            detail = getattr(e.response, "text", str(e)) if hasattr(e, "response") else str(e)
+            raise HTTPException(502, f"Failed to fetch existing variants: {detail}")
+
     if payload:
         try:
-            res = requests.put(f"{_base()}/products/{shopify_product_id}.json", json={"product": payload}, headers=_h(), timeout=30)
+            res = requests.put(
+                f"{_base()}/products/{shopify_product_id}.json",
+                json={"product": payload},
+                headers=_h(), timeout=30,
+            )
             res.raise_for_status()
         except Exception as e:
             detail = getattr(e.response, "text", str(e)) if hasattr(e, "response") else str(e)
             raise HTTPException(502, f"Shopify update failed: {detail}")
+
     rating = str(updates.get("rating") or "").strip()
     if rating:
         save_rating_to_shopify(shopify_product_id, rating)
+        
 
 def update_shopify_product_price(shopify_product_id: str, new_price: float) -> bool:
     if not settings.SHOPIFY_STORE:

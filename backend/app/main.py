@@ -1174,20 +1174,6 @@ def update_shipping_inventory_for_all():
             db.rollback()
     db.close()
 
-# In app/main.py
-
-# @app.get("/dashboard/products/{product_id}/details")
-# def get_product_details(product_id: int, db: Session = Depends(get_db)):
-#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
-#     if not product:
-#         raise HTTPException(404, "Product not found")
-#     return {
-#         "aliexpress_id": product.aliexpress_id,
-#         "last_shipment_fetch": product.last_shipment_fetch.isoformat() if product.last_shipment_fetch else None,
-#         "shipping_cost": product.shipping_cost,
-#         "shipping_method": product.shipping_method,
-#         "total_stock": product.total_stock,
-#     }
 
 
 
@@ -1486,4 +1472,117 @@ def debug_aliexpress_raw(aliexpress_id: str, db: Session = Depends(get_db)):
         },
         "all_result_keys":    list(r.keys()),
         "all_base_info_keys": list(base.keys()),
+    }
+
+# ─────────────────────────────────────────────
+# NEW ENDPOINT — add to main.py
+# Returns all Shopify variants for a product with their current prices,
+# plus the AliExpress SKU label for each (so the modal can show
+# "Red / XL — $19.99" etc.)
+# ─────────────────────────────────────────────
+
+
+@app.get("/dashboard/products/{product_id}/variants")
+def get_product_variants(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        return {"variants": [], "message": "No Shopify product linked"}
+
+    from .shopify import _base, _h
+    res = requests.get(
+        f"{_base()}/products/{product.shopify_product_id}.json",
+        params={"fields": "id,title,variants,options"},
+        headers=_h(), timeout=15,
+    )
+    if res.status_code != 200:
+        raise HTTPException(502, res.text)
+
+    shopify_product = res.json().get("product", {})
+    variants = shopify_product.get("variants", [])
+
+    result = []
+    for v in variants:
+        # Build a readable label from option1/2/3
+        label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
+        label = " / ".join(label_parts) if label_parts else "Default"
+
+        result.append({
+            "variant_id": v["id"],
+            "label": label,
+            "sku": v.get("sku"),
+            "price": v.get("price"),
+            "compare_at_price": v.get("compare_at_price"),
+            "inventory_quantity": v.get("inventory_quantity"),
+        })
+
+    return {
+        "shopify_product_id": product.shopify_product_id,
+        "title": shopify_product.get("title"),
+        "variants": result,
+    }
+
+
+# ─────────────────────────────────────────────
+# NEW ENDPOINT — bulk update variant prices individually
+# Use this when the user edits each variant's price separately in the modal
+# ─────────────────────────────────────────────
+
+@app.post("/dashboard/products/{product_id}/update-variant-prices")
+def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(get_db)):
+    """
+    payload: {
+        "variants": [
+            {"variant_id": 123456, "price": "19.99"},
+            {"variant_id": 123457, "price": "21.99"}
+        ]
+    }
+    """
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        raise HTTPException(400, "Product has no Shopify ID linked")
+
+    variants_payload = payload.get("variants", [])
+    if not variants_payload:
+        raise HTTPException(400, "No variants provided")
+
+    from .shopify import _base, _h
+
+    updated_variants = []
+    for v in variants_payload:
+        vid = v.get("variant_id")
+        price = v.get("price")
+        if vid is None or price is None:
+            continue
+        try:
+            updated_variants.append({"id": int(vid), "price": str(float(price))})
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Invalid price for variant {vid}")
+
+    if not updated_variants:
+        raise HTTPException(400, "No valid variant updates provided")
+
+    res = requests.put(
+        f"{_base()}/products/{product.shopify_product_id}.json",
+        json={"product": {"variants": updated_variants}},
+        headers=_h(), timeout=30,
+    )
+    if res.status_code != 200:
+        raise HTTPException(502, f"Shopify update failed: {res.text}")
+
+    # Switch to manual mode since the user explicitly set prices per-variant
+    product.price_mode = "manual"
+    product.price_increase = 0.0
+    # Update custom_price to reflect the first variant's price for table display
+    if updated_variants:
+        product.custom_price = updated_variants[0]["price"]
+    db.commit()
+
+    return {
+        "message": f"Updated {len(updated_variants)} variant price(s) (manual mode)",
+        "price_mode": "manual",
+        "updated": len(updated_variants),
     }

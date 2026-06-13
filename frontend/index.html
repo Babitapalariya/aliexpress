@@ -645,7 +645,21 @@ tbody tr:last-child td{border-bottom:none}
       <input type="hidden" id="m-aeid"/>
       <div class="form-grid">
         <div class="fg full"><label>Custom Title <span style="text-transform:none;font-weight:400;color:var(--t3)">(blank = keep original)</span></label><input type="text" id="m-title" placeholder="Override product title…"/></div>
-        <div class="fg"><label>Sale Price (USD)</label><input type="text" id="m-price" placeholder="e.g. 19.99"/></div>
+        
+        <div class="fg full">
+  <label>Variant Prices (USD)</label>
+  <div id="m-variants-wrap" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-top:2px">
+    <div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
+      <i class="ti ti-loader-2 spin"></i> Loading variants…
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--t3);margin-top:4px">
+    Editing prices here switches this product to <strong>Manual</strong> pricing mode (no auto-sync).
+  </div>
+</div>
+        
+        
+        
         <div class="fg"><label>Rating Override <span style="text-transform:none;font-weight:400;color:var(--t3)">(0–5)</span></label><input type="text" id="m-rating" placeholder="e.g. 4.5"/></div>
         <div class="fg full"><label>Description <span style="text-transform:none;font-weight:400;color:var(--t3)">(HTML supported)</span></label><textarea id="m-desc" placeholder="Custom description…"></textarea></div>
       </div>
@@ -765,7 +779,8 @@ tbody tr:last-child td{border-bottom:none}
 </div>
 
 <script>
-const API = "http://127.0.0.1:8001";
+//const API = "http://127.0.0.1:8001";
+const API = "/api";
 
 let authUrl = "";
 let fp = {};
@@ -1102,6 +1117,15 @@ function clearFetch(){fp={};document.getElementById("ids-input").value="";docume
 
 // MODAL + SHIPPING/INVENTORY
 function escJson(p) { return JSON.stringify(p).replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+
+
+
+// ─────────────────────────────────────────────
+// REPLACE your existing openModal() with this — adds variant loading.
+// The only addition is the loadVariantsForModal() call and removal
+// of the single m-price field population (since variants handle price now).
+// ─────────────────────────────────────────────
+
 function openModal(p) {
   document.getElementById("m-dbid").value = p.id;
   document.getElementById("m-aeid").value = p.aliexpress_id;
@@ -1112,12 +1136,27 @@ function openModal(p) {
     <div><div class="mp-title">${p.original_title || p.title || "—"}</div><div class="mp-sub">ID: ${p.aliexpress_id} · ${p.currency || "USD"} ${displayPrice}</div></div>
   `;
   document.getElementById("m-title").value = p.custom_title || "";
-  document.getElementById("m-price").value = p.custom_price || p.price || p.sale_price || "";
   document.getElementById("m-rating").value = p.custom_rating || p.avg_rating || "";
   document.getElementById("m-desc").value = p.custom_description || "";
   document.getElementById("edit-overlay").classList.add("open");
+
+  // NEW: load all variant prices
+  loadVariantsForModal(p.id);
+
   refreshProductDetails();
 }
+
+
+// ─────────────────────────────────────────────
+// REPLACE your existing saveModal() with this — sends variant prices
+// to the new /update-variant-prices endpoint alongside the normal
+// title/rating/description update.
+// ─────────────────────────────────────────────
+
+
+
+
+
 function closeModal() { document.getElementById("edit-overlay").classList.remove("open"); }
 document.getElementById("edit-overlay").addEventListener("click", function(e){ if(e.target === this) closeModal(); });
 
@@ -1326,26 +1365,69 @@ async function refreshProductDetails() {
 }
 
 
+ // ═══════════════════════════════════════════════════════════
+// FINAL CLEAN saveModal() — use this as your ONLY saveModal()
+// definition. Delete BOTH versions currently in your file and
+// paste this ONE in their place (right after openModal()).
+// ═══════════════════════════════════════════════════════════
+
 async function saveModal() {
   const id = document.getElementById("m-dbid").value;
   const btn = document.getElementById("btn-save-modal");
   btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving…`;
+
   const body = {
-    custom_title: document.getElementById("m-title").value.trim()||null,
-    custom_price: document.getElementById("m-price").value.trim()||null,
-    custom_rating: document.getElementById("m-rating").value.trim()||null,
-    custom_description: document.getElementById("m-desc").value.trim()||null,
+    custom_title: document.getElementById("m-title").value.trim() || null,
+    custom_rating: document.getElementById("m-rating").value.trim() || null,
+    custom_description: document.getElementById("m-desc").value.trim() || null,
   };
+
   try {
-    const r = await fetch(`${API}/dashboard/products/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
-    if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b?.detail||`HTTP ${r.status}`); }
+    const r = await fetch(`${API}/dashboard/products/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      throw new Error(b?.detail || `HTTP ${r.status}`);
+    }
     const d = await r.json();
+
+    // Save variant prices (if any)
+    const variantPrices = getEditedVariantPrices();
+    let priceMsg = "";
+    if (variantPrices.length > 0) {
+      const pr = await fetch(`${API}/dashboard/products/${id}/update-variant-prices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variants: variantPrices })
+      });
+      if (!pr.ok) {
+        const pb = await pr.json().catch(() => ({}));
+        throw new Error(pb?.detail || "Variant price update failed");
+      }
+      const pd = await pr.json();
+      priceMsg = " · " + pd.message;
+    }
+
     closeModal();
-    showToast(d.shopify_synced?"Saved & synced to Shopify!":"Saved to database (Shopify sync failed)", d.shopify_synced?"ok":"info");
-    loadProducts(prodPage); loadStats();
-  } catch(e) { showToast("Save failed: "+e.message,"err"); }
-  btn.disabled=false; btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
+    showToast(
+      (d.shopify_synced ? "Saved & synced to Shopify!" : "Saved to database") + priceMsg,
+      d.shopify_synced ? "ok" : "info"
+    );
+    loadProducts(prodPage);
+    loadStats();
+
+  } catch (e) {
+    showToast("Save failed: " + e.message, "err");
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
 }
+
+
 async function delProduct(id){
   if(!confirm("Remove from database?\n(Product stays in Shopify)"))return;
   try{
@@ -1610,6 +1692,88 @@ async function submitBulkIncreaseMappings() {
     } catch(e) {
         showToast("Bulk increase failed: " + e.message, "err");
     }
+}
+
+
+let currentVariants = [];
+
+// ── Call this from openModal() after setting m-dbid ──
+async function loadVariantsForModal(productId) {
+    const wrap = document.getElementById("m-variants-wrap");
+    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
+        <i class="ti ti-loader-2 spin"></i> Loading variants…
+    </div>`;
+    currentVariants = [];
+
+    try {
+        const r = await fetch(`${API}/dashboard/products/${productId}/variants`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        currentVariants = data.variants || [];
+
+        if (!currentVariants.length) {
+            wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
+                <i class="ti ti-package-off"></i> No variants found (product not linked to Shopify yet)
+            </div>`;
+            return;
+        }
+
+        wrap.innerHTML = `
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+            <thead style="background:var(--bg)">
+                <tr>
+                    <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
+                    <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
+                    <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:130px">Price (USD)</th>
+                </tr>
+            </thead>
+            <tbody>
+            ${currentVariants.map((v, i) => `
+                <tr style="background:${i % 2 === 0 ? 'transparent' : 'var(--bg)'}">
+                    <td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td>
+                    <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
+                    <td style="padding:6px 8px;text-align:right">
+                        <input type="number" step="0.01" min="0"
+                               class="variant-price-input"
+                               data-variant-id="${v.variant_id}"
+                               value="${v.price}"
+                               style="width:100px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+                    </td>
+                </tr>
+            `).join("")}
+            </tbody>
+        </table>
+        <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px">
+            <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()">
+                <i class="ti ti-copy"></i> Apply first price to all
+            </button>
+        </div>`;
+    } catch (e) {
+        wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px">
+            <i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}
+        </div>`;
+    }
+}
+
+// Helper: copy the first variant's price into all other variant inputs
+function applyPriceToAllVariants() {
+    const inputs = document.querySelectorAll(".variant-price-input");
+    if (!inputs.length) return;
+    const firstVal = inputs[0].value;
+    inputs.forEach(inp => inp.value = firstVal);
+}
+
+// ── Collect edited variant prices for saving ──
+function getEditedVariantPrices() {
+    const inputs = document.querySelectorAll(".variant-price-input");
+    const variants = [];
+    inputs.forEach(inp => {
+        variants.push({
+            variant_id: inp.dataset.variantId,
+            price: inp.value,
+        });
+    });
+    return variants;
 }
 
 </script>
