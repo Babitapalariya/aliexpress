@@ -308,7 +308,7 @@ def dashboard_stats(db: Session = Depends(get_db)):
 @app.get("/dashboard/products")
 def list_products(
     page: int = Query(1, ge=1),
-    page_size: int = Query(15, ge=1, le=100),
+    page_size: int = Query(5, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
     query = db.query(ImportedProduct)
@@ -657,18 +657,51 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
         }
     }
 
+# @app.get("/mappings/list")
+# def list_mappings(db: Session = Depends(get_db)):
+#     mappings = db.query(ProductMapping).all()
+#     return [{
+#         "id": m.id,
+#         "aliexpress_id": m.aliexpress_id,
+#         "shopify_product_id": m.shopify_product_id,
+#         "title": m.shopify_product_title,
+#         "track_price": m.track_price,
+#         "price_mode": m.price_mode,
+#         "price_increase": m.price_increase
+#     } for m in mappings]
+
+
 @app.get("/mappings/list")
-def list_mappings(db: Session = Depends(get_db)):
-    mappings = db.query(ProductMapping).all()
-    return [{
-        "id": m.id,
-        "aliexpress_id": m.aliexpress_id,
-        "shopify_product_id": m.shopify_product_id,
-        "title": m.shopify_product_title,
-        "track_price": m.track_price,
-        "price_mode": m.price_mode,
-        "price_increase": m.price_increase
-    } for m in mappings]
+def list_mappings(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    total = db.query(ProductMapping).count()
+    pages = (total + page_size - 1) // page_size if total > 0 else 1
+    offset = (page - 1) * page_size
+
+    mappings = db.query(ProductMapping)\
+        .order_by(ProductMapping.created_at.desc())\
+        .offset(offset)\
+        .limit(page_size)\
+        .all()
+
+    return {
+        "mappings": [{
+            "id": m.id,
+            "aliexpress_id": m.aliexpress_id,
+            "shopify_product_id": m.shopify_product_id,
+            "title": m.shopify_product_title,
+            "track_price": m.track_price,
+            "price_mode": m.price_mode,
+            "price_increase": m.price_increase
+        } for m in mappings],
+        "total": total,
+        "page": page,
+        "pages": pages
+    }
+
 
 @app.delete("/mappings/{mapping_id}")
 def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):

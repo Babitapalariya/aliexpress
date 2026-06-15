@@ -614,11 +614,21 @@ tbody tr:last-child td{border-bottom:none}
             </div>
         </div>
           
-          <div class="tbl-wrap"><table>
+          <div class="tbl-wrap">
+            <table>
             <thead>
-  <tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify Product ID</th><th>Product Title</th><th>Track Price</th><th>Price Mode</th><th>Actions</th></tr>
-</thead>
-            <tbody id="mappings-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div>NonNullList</tbody></table></div>
+              <tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify Product ID</th><th>Product Title</th><th>Track Price</th><th>Price Mode</th><th>Actions</th></tr>
+            </thead>
+
+            <tbody id="mappings-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div>NonNullList</tbody>
+
+              <div class="pag" id="mappings-pag" style="display:none">
+    <span id="mappings-pag-info"></span>
+    <div class="pag-btns" id="mappings-pag-btns"></div>
+</div>
+            </table>
+          </div>
+
         </div>
       </div>
 
@@ -788,6 +798,8 @@ let fp = {};
 let prodPage = 1;
 let prodPages = 1;
 let _searchTimer = null;
+let mappingPage = 1;
+let mappingPages = 1;
 
 function showToast(msg, type="") {
   const el = document.getElementById("toast");
@@ -889,7 +901,7 @@ function goPage(name, el) {
   document.getElementById("tb-bc-page").textContent = PAGE_META[name]||name;
   if (name==="dashboard") { loadStats(); loadRecent(); }
   if (name==="products")  loadProducts();
-  if (name==="mappings")  loadMappings();
+  if (name==="mappings")  loadMappings(1);
 }
 
 // DASHBOARD
@@ -939,7 +951,7 @@ async function loadProducts(page) {
   const tb = document.getElementById("prod-tbody");
   tb.innerHTML=`<tr><td colspan="10"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList`;
   try {
-    const r = await fetch(`${API}/dashboard/products?page=${prodPage}&page_size=15`);
+    const r = await fetch(`${API}/dashboard/products?page=${prodPage}&page_size=5`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     prodPages = d.pages;
@@ -1443,20 +1455,30 @@ async function delProduct(id){
 function escapeHtml(str) { if (!str) return ""; return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
 
 
-async function loadMappings() {
+async function loadMappings(page = 1) {
+    mappingPage = page;
     const tbody = document.getElementById("mappings-tbody");
     if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
+
     try {
-        const r = await fetch(`${API}/mappings/list`);
+        // 🔁 Pass page & page_size to the backend
+        const r = await fetch(`${API}/mappings/list?page=${mappingPage}&page_size=5`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const mappings = await r.json();
+        const data = await r.json();
+
+        // ✅ New response structure: { mappings, total, page, pages }
+        const mappings = data.mappings || [];
+        mappingPages = data.pages || 1;
+
         if (!mappings.length) {
             tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet. Add one above.</p></div></tr>`;
+            document.getElementById("mappings-pag").style.display = "none";
             return;
         }
+
+        // Render rows (same as before, but use 'mappings' variable)
         tbody.innerHTML = mappings.map(m => {
-            // ---- PRICE MODE BADGE ----
             let modeBadge = '';
             if (!m.track_price) {
                 modeBadge = `<span class="badge b-gray" title="Price tracking disabled"><i class="ti ti-pause"></i> Paused</span>`;
@@ -1469,7 +1491,6 @@ async function loadMappings() {
             } else {
                 modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
             }
-            // ---------------------------------
             return `
             <tr>
                 <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
@@ -1477,7 +1498,7 @@ async function loadMappings() {
                 <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
                 <td>${escapeHtml(m.title || "—")}</td>
                 <td>${m.track_price ? '<span class="badge b-green">Enabled</span>' : '<span class="badge b-gray">Disabled</span>'}</td>
-                <td style="white-space:nowrap;">${modeBadge}</td>   <!-- NEW COLUMN -->
+                <td style="white-space:nowrap;">${modeBadge}</td>
                 <td class="td-actions">
                     <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
                     <button class="btn btn-primary btn-sm" onclick="openPriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-edit"></i> Set Price</button>
@@ -1487,11 +1508,16 @@ async function loadMappings() {
                 </td>
             </tr>
         `}).join("");
+
         attachMappingCheckboxListeners();
+        buildMappingPag(data.total, mappingPage, mappingPages);
+
     } catch(e) {
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;
+        document.getElementById("mappings-pag").style.display = "none";
     }
 }
+
 
 
 function attachMappingCheckboxListeners() {
@@ -1524,12 +1550,12 @@ async function addMapping() {
     if (!r.ok) { const err = await r.json(); throw new Error(err.detail || "Failed"); }
     showToast("Mapping added", "ok");
     document.getElementById("map-aliexpress").value = ""; document.getElementById("map-shopify").value = ""; document.getElementById("map-title").value = "";
-    await loadMappings();
+    await loadMappings(mappingPage);
   } catch(e) { showToast("Error: " + e.message, "err"); }
 }
-async function deleteMapping(id) { if (!confirm("Delete mapping?")) return; try { const r = await fetch(`${API}/mappings/${id}`, { method: "DELETE" }); if (!r.ok) throw new Error(await r.text()); showToast("Deleted", "ok"); await loadMappings(); } catch(e) { showToast("Delete failed: "+e.message,"err"); } }
+async function deleteMapping(id) { if (!confirm("Delete mapping?")) return; try { const r = await fetch(`${API}/mappings/${id}`, { method: "DELETE" }); if (!r.ok) throw new Error(await r.text()); showToast("Deleted", "ok"); await loadMappings(mappingPage); } catch(e) { showToast("Delete failed: "+e.message,"err"); } }
 async function syncMappedPrice(aliexpressId) { try { showToast("Syncing...","info"); const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" }); if (!r.ok) throw new Error((await r.json()).detail); const data = await r.json(); showToast(data.message||"Prices updated","ok"); } catch(e) { showToast("Sync error: "+e.message,"err"); } }
-async function toggleTrackMapping(id) { try { const r = await fetch(`${API}/mappings/${id}/toggle-track`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); showToast("Tracking toggled","ok"); await loadMappings(); } catch(e) { showToast("Toggle failed: "+e.message,"err"); } }
+async function toggleTrackMapping(id) { try { const r = await fetch(`${API}/mappings/${id}/toggle-track`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); showToast("Tracking toggled","ok"); await loadMappings(mappingPage); } catch(e) { showToast("Toggle failed: "+e.message,"err"); } }
 async function syncAllMapped() { try { showToast("Starting background sync...","info"); const r = await fetch(`${API}/mappings/sync-all`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); const data = await r.json(); showToast(data.message,"ok"); } catch(e) { showToast("Sync all failed: "+e.message,"err"); } }
 function openPriceModal(mappingId, shopifyId) { document.getElementById("price-mapping-id").value = mappingId; document.getElementById("new-price").value = ""; document.getElementById("price-modal").classList.add("open"); }
 function closePriceModal() { document.getElementById("price-modal").classList.remove("open"); }
@@ -1543,7 +1569,8 @@ async function submitPriceUpdate() {
     const data = await r.json();
     showToast(data.message, "ok");
     closePriceModal();
-    await loadMappings();
+    //await loadMappingsmappingPage();
+    await loadMappings(mappingPage);   // ✅ correct
   } catch(e) { showToast("Error: " + e.message, "err"); }
 }
 
@@ -1572,7 +1599,7 @@ async function submitPriceIncrease() {
     const data = await r.json();
     showToast(data.message, "ok");
     closeIncreasePriceModal();
-    await loadMappings();
+    await loadMappings(mappingPage);
   } catch(e) {
     showToast("Error: " + e.message, "err");
   }
@@ -1689,7 +1716,7 @@ async function submitBulkIncreaseMappings() {
         const data = await res.json();
         showToast(data.message, "ok");
         closeBulkMappingModal();
-        loadMappings();    // refresh table
+        loadMappings(mappingPage);    // refresh table
     } catch(e) {
         showToast("Bulk increase failed: " + e.message, "err");
     }
@@ -1776,6 +1803,26 @@ function getEditedVariantPrices() {
     });
     return variants;
 }
+
+
+function buildMappingPag(total, page, pages) {
+    const el = document.getElementById("mappings-pag");
+    if (pages <= 1) { el.style.display = "none"; return; }
+    el.style.display = "flex";
+    document.getElementById("mappings-pag-info").textContent = `Showing page ${page} of ${pages} · ${total} mappings`;
+    const btns = document.getElementById("mappings-pag-btns");
+    let h = `<button class="pgb" onclick="loadMappings(${page-1})" ${page===1 ? "disabled" : ""}>‹</button>`;
+    for (let i = 1; i <= pages; i++) {
+        if (pages > 7 && Math.abs(i-page) > 2 && i !== 1 && i !== pages) {
+            if (i === 2 || i === pages-1) h += `<span style="padding:0 4px;line-height:32px;color:var(--t3)">…</span>`;
+            continue;
+        }
+        h += `<button class="pgb ${i===page ? "cur" : ""}" onclick="loadMappings(${i})">${i}</button>`;
+    }
+    h += `<button class="pgb" onclick="loadMappings(${page+1})" ${page===pages ? "disabled" : ""}>›</button>`;
+    btns.innerHTML = h;
+}
+
 
 </script>
 </body>
