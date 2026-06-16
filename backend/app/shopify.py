@@ -356,21 +356,90 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
         print(f"[Shopify] Price update failed: {e}")
         return False
 
+# def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+#     if not settings.SHOPIFY_STORE:
+#         return False
+#     print(f"\n[UPDATE] Starting variant price sync for product {shopify_product_id}")
+#     price_by_ae_sku = {}
+#     for sku in aliexpress_skus:
+#         ae_sku_id = str(sku.get("sku_id"))
+#         price = sku.get("sale_price") or sku.get("price")
+#         if ae_sku_id and price:
+#             price_by_ae_sku[ae_sku_id] = float(price)
+#     if not price_by_ae_sku:
+#         print("[UPDATE] No AE SKU IDs")
+#         return False
+#     try:
+#         res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+#         res.raise_for_status()
+#         shopify_variants = res.json().get("product", {}).get("variants", [])
+#         if not shopify_variants:
+#             return False
+#     except Exception as e:
+#         print(f"[UPDATE] Fetch error: {e}")
+#         return False
+#     variant_ae_map = {}
+#     for variant in shopify_variants:
+#         vid = variant["id"]
+#         try:
+#             mf_res = requests.get(f"{_base()}/variants/{vid}/metafields.json", params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(), timeout=10)
+#             if mf_res.status_code == 200:
+#                 mfs = mf_res.json().get("metafields", [])
+#                 if mfs:
+#                     variant_ae_map[vid] = mfs[0].get("value")
+#         except Exception as e:
+#             print(f"[UPDATE] Metafield error for variant {vid}: {e}")
+#     updated_variants = []
+#     changes = False
+#     for variant in shopify_variants:
+#         new_price = None
+#         ae_sku_id = variant_ae_map.get(variant["id"])
+#         if ae_sku_id and ae_sku_id in price_by_ae_sku:
+#             new_price = price_by_ae_sku[ae_sku_id]
+#         if new_price is not None and abs(float(variant["price"]) - new_price) > 0.01:
+#             var_copy = variant.copy()
+#             var_copy["price"] = str(new_price)
+#             updated_variants.append(var_copy)
+#             changes = True
+#             print(f"[UPDATE] {variant.get('option1', '?')}: {variant['price']} → {new_price}")
+#         else:
+#             updated_variants.append(variant.copy())
+#     if not changes:
+#         print("[UPDATE] No price changes")
+#         return True
+#     try:
+#         r2 = requests.put(f"{_base()}/products/{shopify_product_id}.json", json={"product": {"variants": updated_variants}}, headers=_h(), timeout=30)
+#         r2.raise_for_status()
+#         print(f"[UPDATE] Success, {len(updated_variants)} variants updated")
+#         return True
+#     except Exception as e:
+#         print(f"[UPDATE] Update failed: {e}")
+#         return False
+
+
+
 def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
     if not settings.SHOPIFY_STORE:
         return False
     print(f"\n[UPDATE] Starting variant price sync for product {shopify_product_id}")
+
     price_by_ae_sku = {}
     for sku in aliexpress_skus:
         ae_sku_id = str(sku.get("sku_id"))
         price = sku.get("sale_price") or sku.get("price")
         if ae_sku_id and price:
             price_by_ae_sku[ae_sku_id] = float(price)
+
     if not price_by_ae_sku:
         print("[UPDATE] No AE SKU IDs")
         return False
+
     try:
-        res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+        res = requests.get(
+            f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"},
+            headers=_h(), timeout=15,
+        )
         res.raise_for_status()
         shopify_variants = res.json().get("product", {}).get("variants", [])
         if not shopify_variants:
@@ -378,24 +447,61 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
     except Exception as e:
         print(f"[UPDATE] Fetch error: {e}")
         return False
+
+    # ── Try to match variants to AliExpress SKUs via stored metafield ──
     variant_ae_map = {}
     for variant in shopify_variants:
         vid = variant["id"]
         try:
-            mf_res = requests.get(f"{_base()}/variants/{vid}/metafields.json", params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(), timeout=10)
+            mf_res = requests.get(
+                f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "aliexpress", "key": "sku_id"},
+                headers=_h(), timeout=10,
+            )
             if mf_res.status_code == 200:
                 mfs = mf_res.json().get("metafields", [])
                 if mfs:
                     variant_ae_map[vid] = mfs[0].get("value")
         except Exception as e:
             print(f"[UPDATE] Metafield error for variant {vid}: {e}")
+
+    matched_via_metafield = any(v["id"] in variant_ae_map for v in shopify_variants)
+
+    # ── Fallbacks for variants/products never tagged with sku_id metafields ──
+    # (e.g. mapped products that already existed in Shopify before this tool touched them)
+    price_by_label = {}
+    for sku in aliexpress_skus:
+        label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
+        price = sku.get("sale_price") or sku.get("price")
+        if label and price:
+            price_by_label[label] = float(price)
+
+    def _variant_label(variant: dict) -> str:
+        parts = [
+            variant.get(f"option{i}")
+            for i in (1, 2, 3)
+            if variant.get(f"option{i}") and variant.get(f"option{i}") != "Default Title"
+        ]
+        return " / ".join(parts).strip().lower()
+
     updated_variants = []
     changes = False
     for variant in shopify_variants:
         new_price = None
         ae_sku_id = variant_ae_map.get(variant["id"])
+
         if ae_sku_id and ae_sku_id in price_by_ae_sku:
+            # Best case: matched via stored metafield
             new_price = price_by_ae_sku[ae_sku_id]
+        elif not matched_via_metafield:
+            # Fallback 1: match by variant option label (e.g. "Red / XL")
+            label = _variant_label(variant)
+            if label and label in price_by_label:
+                new_price = price_by_label[label]
+            # Fallback 2: single-SKU AliExpress product — apply the only price available
+            elif len(price_by_ae_sku) == 1:
+                new_price = next(iter(price_by_ae_sku.values()))
+
         if new_price is not None and abs(float(variant["price"]) - new_price) > 0.01:
             var_copy = variant.copy()
             var_copy["price"] = str(new_price)
@@ -404,17 +510,24 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
             print(f"[UPDATE] {variant.get('option1', '?')}: {variant['price']} → {new_price}")
         else:
             updated_variants.append(variant.copy())
+
     if not changes:
-        print("[UPDATE] No price changes")
-        return True
+        print("[UPDATE] No price changes (no metafield/label/single-SKU match found)")
+        return False
+
     try:
-        r2 = requests.put(f"{_base()}/products/{shopify_product_id}.json", json={"product": {"variants": updated_variants}}, headers=_h(), timeout=30)
+        r2 = requests.put(
+            f"{_base()}/products/{shopify_product_id}.json",
+            json={"product": {"variants": updated_variants}},
+            headers=_h(), timeout=30,
+        )
         r2.raise_for_status()
         print(f"[UPDATE] Success, {len(updated_variants)} variants updated")
         return True
     except Exception as e:
         print(f"[UPDATE] Update failed: {e}")
         return False
+
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
     res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h())
