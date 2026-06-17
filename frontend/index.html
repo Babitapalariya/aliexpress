@@ -1500,13 +1500,15 @@ async function loadMappings(page = 1) {
                 <td>${m.track_price ? '<span class="badge b-green">Enabled</span>' : '<span class="badge b-gray">Disabled</span>'}</td>
                 <td style="white-space:nowrap;">${modeBadge}</td>
                 <td class="td-actions">
-                    <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
-                    <button class="btn btn-primary btn-sm" onclick="openPriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-edit"></i> Set Price</button>
-                    <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
-                    <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
-                    <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
+                <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+                
+                
+                <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
+                ${m.price_mode === 'manual' ? `<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset Mode</button>` : ""}
+                <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
+                <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
                 </td>
-            </tr>
+                        </tr>
         `}).join("");
 
         attachMappingCheckboxListeners();
@@ -1554,7 +1556,29 @@ async function addMapping() {
   } catch(e) { showToast("Error: " + e.message, "err"); }
 }
 async function deleteMapping(id) { if (!confirm("Delete mapping?")) return; try { const r = await fetch(`${API}/mappings/${id}`, { method: "DELETE" }); if (!r.ok) throw new Error(await r.text()); showToast("Deleted", "ok"); await loadMappings(mappingPage); } catch(e) { showToast("Delete failed: "+e.message,"err"); } }
-async function syncMappedPrice(aliexpressId) { try { showToast("Syncing...","info"); const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" }); if (!r.ok) throw new Error((await r.json()).detail); const data = await r.json(); showToast(data.message||"Prices updated","ok"); } catch(e) { showToast("Sync error: "+e.message,"err"); } }
+
+//async function syncMappedPrice(aliexpressId) { try { showToast("Syncing...","info"); const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" }); if (!r.ok) throw new Error((await r.json()).detail); const data = await r.json(); showToast(data.message||"Prices updated","ok"); } catch(e) { showToast("Sync error: "+e.message,"err"); } }
+
+async function syncMappedPrice(aliexpressId) {
+  try {
+    showToast("Syncing...","info");
+    const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" });
+    if (!r.ok) {
+      const err = await r.json();
+      if (r.status === 400 && err.detail?.includes("manual mode")) {
+        showToast("This product is in Manual mode. Click 'Reset Mode' first to re-enable auto sync.", "err");
+        return;
+      }
+      throw new Error(err.detail);
+    }
+    const data = await r.json();
+    showToast(data.message || "Prices updated", "ok");
+    await loadMappings(mappingPage);
+  } catch(e) {
+    showToast("Sync error: " + e.message, "err");
+  }
+}
+
 async function toggleTrackMapping(id) { try { const r = await fetch(`${API}/mappings/${id}/toggle-track`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); showToast("Tracking toggled","ok"); await loadMappings(mappingPage); } catch(e) { showToast("Toggle failed: "+e.message,"err"); } }
 async function syncAllMapped() { try { showToast("Starting background sync...","info"); const r = await fetch(`${API}/mappings/sync-all`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); const data = await r.json(); showToast(data.message,"ok"); } catch(e) { showToast("Sync all failed: "+e.message,"err"); } }
 function openPriceModal(mappingId, shopifyId) { document.getElementById("price-mapping-id").value = mappingId; document.getElementById("new-price").value = ""; document.getElementById("price-modal").classList.add("open"); }
@@ -1823,6 +1847,21 @@ function buildMappingPag(total, page, pages) {
     btns.innerHTML = h;
 }
 
+async function resetMappingMode(id) {
+  if (!confirm("Reset this mapping to Auto mode? It will re-enable automatic price syncing from AliExpress.")) return;
+  try {
+    const r = await fetch(`${API}/mappings/${id}/reset-mode`, { method: "POST" });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || "Reset failed");
+    }
+    const data = await r.json();
+    showToast(data.message || "Mode reset to auto", "ok");
+    await loadMappings(mappingPage);
+  } catch(e) {
+    showToast("Reset failed: " + e.message, "err");
+  }
+}
 
 </script>
 </body>

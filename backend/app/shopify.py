@@ -418,9 +418,123 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
 
 
 
-def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+# def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+#     if not settings.SHOPIFY_STORE:
+#         return False
+#     print(f"\n[UPDATE] Starting variant price sync for product {shopify_product_id}")
+
+#     price_by_ae_sku = {}
+#     for sku in aliexpress_skus:
+#         ae_sku_id = str(sku.get("sku_id"))
+#         price = sku.get("sale_price") or sku.get("price")
+#         if ae_sku_id and price:
+#             price_by_ae_sku[ae_sku_id] = float(price)
+
+#     if not price_by_ae_sku:
+#         print("[UPDATE] No AE SKU IDs")
+#         return False
+
+#     try:
+#         res = requests.get(
+#             f"{_base()}/products/{shopify_product_id}.json",
+#             params={"fields": "id,variants"},
+#             headers=_h(), timeout=15,
+#         )
+#         res.raise_for_status()
+#         shopify_variants = res.json().get("product", {}).get("variants", [])
+#         if not shopify_variants:
+#             return False
+#     except Exception as e:
+#         print(f"[UPDATE] Fetch error: {e}")
+#         return False
+
+#     # ── Try to match variants to AliExpress SKUs via stored metafield ──
+#     variant_ae_map = {}
+#     for variant in shopify_variants:
+#         vid = variant["id"]
+#         try:
+#             mf_res = requests.get(
+#                 f"{_base()}/variants/{vid}/metafields.json",
+#                 params={"namespace": "aliexpress", "key": "sku_id"},
+#                 headers=_h(), timeout=10,
+#             )
+#             if mf_res.status_code == 200:
+#                 mfs = mf_res.json().get("metafields", [])
+#                 if mfs:
+#                     variant_ae_map[vid] = mfs[0].get("value")
+#         except Exception as e:
+#             print(f"[UPDATE] Metafield error for variant {vid}: {e}")
+
+#     matched_via_metafield = any(v["id"] in variant_ae_map for v in shopify_variants)
+
+#     # ── Fallbacks for variants/products never tagged with sku_id metafields ──
+#     # (e.g. mapped products that already existed in Shopify before this tool touched them)
+#     price_by_label = {}
+#     for sku in aliexpress_skus:
+#         label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
+#         price = sku.get("sale_price") or sku.get("price")
+#         if label and price:
+#             price_by_label[label] = float(price)
+
+#     def _variant_label(variant: dict) -> str:
+#         parts = [
+#             variant.get(f"option{i}")
+#             for i in (1, 2, 3)
+#             if variant.get(f"option{i}") and variant.get(f"option{i}") != "Default Title"
+#         ]
+#         return " / ".join(parts).strip().lower()
+
+#     updated_variants = []
+#     changes = False
+#     for variant in shopify_variants:
+#         new_price = None
+#         ae_sku_id = variant_ae_map.get(variant["id"])
+
+#         if ae_sku_id and ae_sku_id in price_by_ae_sku:
+#             # Best case: matched via stored metafield
+#             new_price = price_by_ae_sku[ae_sku_id]
+#         elif not matched_via_metafield:
+#             # Fallback 1: match by variant option label (e.g. "Red / XL")
+#             label = _variant_label(variant)
+#             if label and label in price_by_label:
+#                 new_price = price_by_label[label]
+#             # Fallback 2: single-SKU AliExpress product — apply the only price available
+#             elif len(price_by_ae_sku) == 1:
+#                 new_price = next(iter(price_by_ae_sku.values()))
+
+#         if new_price is not None and abs(float(variant["price"]) - new_price) > 0.01:
+#             var_copy = variant.copy()
+#             var_copy["price"] = str(new_price)
+#             updated_variants.append(var_copy)
+#             changes = True
+#             print(f"[UPDATE] {variant.get('option1', '?')}: {variant['price']} → {new_price}")
+#         else:
+#             updated_variants.append(variant.copy())
+
+#     if not changes:
+#         print("[UPDATE] No price changes (no metafield/label/single-SKU match found)")
+#         return False
+
+#     try:
+#         r2 = requests.put(
+#             f"{_base()}/products/{shopify_product_id}.json",
+#             json={"product": {"variants": updated_variants}},
+#             headers=_h(), timeout=30,
+#         )
+#         r2.raise_for_status()
+#         print(f"[UPDATE] Success, {len(updated_variants)} variants updated")
+#         return True
+#     except Exception as e:
+#         print(f"[UPDATE] Update failed: {e}")
+#         return False
+
+
+def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
+    """
+    Returns one of: "updated", "unchanged", "failed"
+    """
     if not settings.SHOPIFY_STORE:
-        return False
+        return "failed"
     print(f"\n[UPDATE] Starting variant price sync for product {shopify_product_id}")
 
     price_by_ae_sku = {}
@@ -432,7 +546,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
 
     if not price_by_ae_sku:
         print("[UPDATE] No AE SKU IDs")
-        return False
+        return "failed"
 
     try:
         res = requests.get(
@@ -443,12 +557,11 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         res.raise_for_status()
         shopify_variants = res.json().get("product", {}).get("variants", [])
         if not shopify_variants:
-            return False
+            return "failed"
     except Exception as e:
         print(f"[UPDATE] Fetch error: {e}")
-        return False
+        return "failed"
 
-    # ── Try to match variants to AliExpress SKUs via stored metafield ──
     variant_ae_map = {}
     for variant in shopify_variants:
         vid = variant["id"]
@@ -467,8 +580,6 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
 
     matched_via_metafield = any(v["id"] in variant_ae_map for v in shopify_variants)
 
-    # ── Fallbacks for variants/products never tagged with sku_id metafields ──
-    # (e.g. mapped products that already existed in Shopify before this tool touched them)
     price_by_label = {}
     for sku in aliexpress_skus:
         label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
@@ -484,23 +595,43 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         ]
         return " / ".join(parts).strip().lower()
 
+    def _fuzzy_label_match(variant_label: str):
+        if not variant_label:
+            return None
+        if variant_label in price_by_label:
+            return price_by_label[variant_label]
+        variant_tokens = set(t.strip() for t in variant_label.split("/"))
+        for label, price in price_by_label.items():
+            label_tokens = set(t.strip() for t in label.split("/"))
+            if variant_tokens and variant_tokens.issubset(label_tokens):
+                return price
+        return None
+
+    print(f"[UPDATE][DEBUG] price_by_ae_sku = {price_by_ae_sku}")
+    print(f"[UPDATE][DEBUG] price_by_label = {price_by_label}")
+    print(f"[UPDATE][DEBUG] matched_via_metafield = {matched_via_metafield}")
+    for v in shopify_variants:
+        print(f"[UPDATE][DEBUG] Shopify variant {v['id']}: price={v.get('price')}, "
+              f"option1={v.get('option1')}, option2={v.get('option2')}, "
+              f"label_lookup='{_variant_label(v)}'")
+
     updated_variants = []
     changes = False
+    any_match_found = False
     for variant in shopify_variants:
         new_price = None
         ae_sku_id = variant_ae_map.get(variant["id"])
 
         if ae_sku_id and ae_sku_id in price_by_ae_sku:
-            # Best case: matched via stored metafield
             new_price = price_by_ae_sku[ae_sku_id]
         elif not matched_via_metafield:
-            # Fallback 1: match by variant option label (e.g. "Red / XL")
             label = _variant_label(variant)
-            if label and label in price_by_label:
-                new_price = price_by_label[label]
-            # Fallback 2: single-SKU AliExpress product — apply the only price available
-            elif len(price_by_ae_sku) == 1:
+            new_price = _fuzzy_label_match(label)
+            if new_price is None and len(price_by_ae_sku) == 1:
                 new_price = next(iter(price_by_ae_sku.values()))
+
+        if new_price is not None:
+            any_match_found = True
 
         if new_price is not None and abs(float(variant["price"]) - new_price) > 0.01:
             var_copy = variant.copy()
@@ -511,9 +642,13 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         else:
             updated_variants.append(variant.copy())
 
-    if not changes:
+    if not any_match_found:
         print("[UPDATE] No price changes (no metafield/label/single-SKU match found)")
-        return False
+        return "failed"
+
+    if not changes:
+        print("[UPDATE] Price already up to date — no Shopify update needed")
+        return "unchanged"
 
     try:
         r2 = requests.put(
@@ -523,10 +658,12 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         )
         r2.raise_for_status()
         print(f"[UPDATE] Success, {len(updated_variants)} variants updated")
-        return True
+        return "updated"
     except Exception as e:
         print(f"[UPDATE] Update failed: {e}")
-        return False
+        return "failed"
+
+
 
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
@@ -594,3 +731,132 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
     except Exception as e:
         print(f"[Shopify] Price increase failed: {e}")
         return False
+
+def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+    """
+    Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
+    Uses the same metafield/label matching strategy as price sync.
+    Requires Shopify's inventory_management to be 'shopify' on the variant
+    (set this in normalize_aliexpress_product / create_shopify_product).
+    """
+    if not settings.SHOPIFY_STORE:
+        return False
+
+    stock_by_ae_sku = {}
+    for sku in aliexpress_skus:
+        ae_sku_id = str(sku.get("sku_id"))
+        stock = sku.get("stock")
+        if ae_sku_id and stock is not None:
+            try:
+                stock_by_ae_sku[ae_sku_id] = int(stock)
+            except (ValueError, TypeError):
+                continue
+
+    if not stock_by_ae_sku:
+        print("[Inventory] No AE stock data to sync")
+        return False
+
+    try:
+        res = requests.get(
+            f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"},
+            headers=_h(), timeout=15,
+        )
+        res.raise_for_status()
+        shopify_variants = res.json().get("product", {}).get("variants", [])
+        if not shopify_variants:
+            return False
+    except Exception as e:
+        print(f"[Inventory] Fetch error: {e}")
+        return False
+
+    # Match variants to AE SKUs via stored metafield (same approach as price sync)
+    variant_ae_map = {}
+    for variant in shopify_variants:
+        vid = variant["id"]
+        try:
+            mf_res = requests.get(
+                f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "aliexpress", "key": "sku_id"},
+                headers=_h(), timeout=10,
+            )
+            if mf_res.status_code == 200:
+                mfs = mf_res.json().get("metafields", [])
+                if mfs:
+                    variant_ae_map[vid] = mfs[0].get("value")
+        except Exception as e:
+            print(f"[Inventory] Metafield error for variant {vid}: {e}")
+
+    matched_via_metafield = any(v["id"] in variant_ae_map for v in shopify_variants)
+
+    # Fallback: label match for variants/products without metafields
+    stock_by_label = {}
+    for sku in aliexpress_skus:
+        label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
+        stock = sku.get("stock")
+        if label and stock is not None:
+            try:
+                stock_by_label[label] = int(stock)
+            except (ValueError, TypeError):
+                continue
+
+    def _variant_label(variant: dict) -> str:
+        parts = [
+            variant.get(f"option{i}")
+            for i in (1, 2, 3)
+            if variant.get(f"option{i}") and variant.get(f"option{i}") != "Default Title"
+        ]
+        return " / ".join(parts).strip().lower()
+
+    changes = False
+    for variant in shopify_variants:
+        new_stock = None
+        ae_sku_id = variant_ae_map.get(variant["id"])
+
+        if ae_sku_id and ae_sku_id in stock_by_ae_sku:
+            new_stock = stock_by_ae_sku[ae_sku_id]
+        elif not matched_via_metafield:
+            label = _variant_label(variant)
+            if label and label in stock_by_label:
+                new_stock = stock_by_label[label]
+            elif len(stock_by_ae_sku) == 1:
+                new_stock = next(iter(stock_by_ae_sku.values()))
+
+        if new_stock is None:
+            continue
+
+        current_stock = variant.get("inventory_quantity")
+        inventory_item_id = variant.get("inventory_item_id")
+
+        if current_stock == new_stock or not inventory_item_id:
+            continue
+
+        try:
+            # Shopify inventory levels require the inventory_item_id + a location_id.
+            # We use /inventory_levels/set.json which auto-targets the primary location
+            # when location_id is omitted is NOT supported — so fetch location first.
+            loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+            loc_res.raise_for_status()
+            locations = loc_res.json().get("locations", [])
+            if not locations:
+                print("[Inventory] No Shopify locations found")
+                continue
+            location_id = locations[0]["id"]
+
+            set_res = requests.post(
+                f"{_base()}/inventory_levels/set.json",
+                json={
+                    "location_id": location_id,
+                    "inventory_item_id": inventory_item_id,
+                    "available": new_stock,
+                },
+                headers=_h(), timeout=20,
+            )
+            set_res.raise_for_status()
+            changes = True
+            print(f"[Inventory] Variant {variant['id']}: {current_stock} → {new_stock}")
+        except Exception as e:
+            print(f"[Inventory] Update failed for variant {variant['id']}: {e}")
+
+    return changes
+    
