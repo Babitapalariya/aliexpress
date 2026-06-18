@@ -743,37 +743,46 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Mapping deleted"}
 
+ 
+
+
 # @app.post("/mappings/sync-price")
 # def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db)):
 #     mapping = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
 #     if not mapping or not mapping.track_price:
 #         raise HTTPException(404, "Mapping not found or price tracking disabled")
 
+#     # Allow sync regardless of current mode – we will reset to auto
 #     get_latest_token(db)
 
 #     try:
-#         from .aliexpress import get_product
 #         raw = get_product(aliexpress_id, db)
-#     except HTTPException as e:
-#         raise HTTPException(status_code=e.status_code, detail=f"AliExpress API error: {e.detail}")
 #     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to fetch from AliExpress: {str(e)}")
+#         raise HTTPException(500, f"Failed to fetch from AliExpress: {str(e)}")
 
-#     # Get SKUs from AliExpress response
 #     aliexpress_skus = raw.get("skus", [])
 #     if not aliexpress_skus:
 #         raise HTTPException(500, "No SKUs found in AliExpress product")
 
-#     # Update Shopify variant prices using SKU matching
+#     # Update Shopify with base prices – no increase applied
 #     from .shopify import update_shopify_product_prices_with_skus
-#     success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+#     result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
-#     if not success:
-#         raise HTTPException(502, "Failed to update Shopify variant prices (no matching variants or API error)")
+#     if result == "failed":
+#         raise HTTPException(502, "Failed to update Shopify variant prices")
 
-#     return {"message": "Variant prices updated successfully", "product_id": mapping.shopify_product_id}
+#     # Reset mode to auto and clear increase
+#     mapping.price_mode = "auto"
+#     mapping.price_increase = 0.0
+#     db.commit()
 
-
+#     message = "Price already up to date" if result == "unchanged" else "Variant prices updated to AliExpress base"
+#     return {
+#         "message": message,
+#         "product_id": mapping.shopify_product_id,
+#         "price_mode": "auto",
+#         "price_increase": 0.0,
+#     }
 
 
 @app.post("/mappings/sync-price")
@@ -782,7 +791,6 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
     if not mapping or not mapping.track_price:
         raise HTTPException(404, "Mapping not found or price tracking disabled")
 
-    # Allow sync regardless of current mode – we will reset to auto
     get_latest_token(db)
 
     try:
@@ -794,27 +802,30 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
     if not aliexpress_skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
 
-    # Update Shopify with base prices – no increase applied
-    from .shopify import update_shopify_product_prices_with_skus
-    result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+    from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
 
-    if result == "failed":
+    # 1. Update prices
+    price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+    if price_result == "failed":
         raise HTTPException(502, "Failed to update Shopify variant prices")
+
+    # 2. Update inventory
+    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
     # Reset mode to auto and clear increase
     mapping.price_mode = "auto"
     mapping.price_increase = 0.0
     db.commit()
 
-    message = "Price already up to date" if result == "unchanged" else "Variant prices updated to AliExpress base"
+    price_msg = "Price already up to date" if price_result == "unchanged" else "Variant prices updated to AliExpress base"
+    inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
     return {
-        "message": message,
+        "message": f"{price_msg} · {inv_msg}",
         "product_id": mapping.shopify_product_id,
         "price_mode": "auto",
         "price_increase": 0.0,
+        "inventory_updated": inventory_updated,
     }
-
-
 
 
 
