@@ -63,3 +63,20 @@ class ProductMapping(Base):
     price_increase = Column(Float, default=0.0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+# models.py (add after ImportedProduct)
+
+ 
+class PendingImport(Base):
+    __tablename__ = "pending_imports"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    aliexpress_id = Column(String(64), unique=True, nullable=False, index=True)
+    product_data  = Column(JSON, nullable=False)   # full product dict from get_product()
+    out_of_stock_skus = Column(JSON, nullable=True)  # NEW: list of {sku_id, label, stock}
+    in_stock_skus     = Column(JSON, nullable=True)  # NEW: skus that ARE in stock
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    last_checked  = Column(DateTime(timezone=True), nullable=True)
+    retry_count   = Column(Integer, default=0)
+    status        = Column(String(20), default='pending')  # pending / imported / failed
+    

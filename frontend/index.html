@@ -8,114 +8,53 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
 <style>
-/* ============================ RESET & VARS ============================ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --font:'Plus Jakarta Sans',sans-serif;
-  --mono:'JetBrains Mono',monospace;
-  --sidebar-w:260px;
-  --topbar-h:64px;
-  --brand:#6366f1;
-  --brand-2:#8b5cf6;
-  --brand-glow:rgba(99,102,241,.25);
-  --sb-bg:#0f1117;
-  --sb-border:rgba(255,255,255,.06);
-  --sb-text:#94a3b8;
-  --sb-text-hover:#e2e8f0;
-  --sb-active-bg:rgba(99,102,241,.15);
-  --sb-active-text:#818cf8;
-  --sb-section:#475569;
-  --bg:#f8fafc;
-  --card:#ffffff;
-  --border:#e2e8f0;
-  --border-2:#f1f5f9;
-  --t1:#0f172a;
-  --t2:#475569;
-  --t3:#94a3b8;
-  --green:#10b981; --green-bg:#ecfdf5; --green-border:#a7f3d0;
-  --orange:#f59e0b; --orange-bg:#fffbeb; --orange-border:#fde68a;
-  --blue:#3b82f6; --blue-bg:#eff6ff; --blue-border:#bfdbfe;
-  --red:#ef4444; --red-bg:#fef2f2; --red-border:#fecaca;
-  --purple:#8b5cf6; --purple-bg:#f5f3ff; --purple-border:#ddd6fe;
-  --indigo:#6366f1; --indigo-bg:#eef2ff; --indigo-border:#c7d2fe;
+  --font:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;
+  --sidebar-w:260px;--topbar-h:64px;
+  --brand:#6366f1;--brand-2:#8b5cf6;--brand-glow:rgba(99,102,241,.25);
+  --sb-bg:#0f1117;--sb-border:rgba(255,255,255,.06);--sb-text:#94a3b8;
+  --sb-text-hover:#e2e8f0;--sb-active-bg:rgba(99,102,241,.15);--sb-active-text:#818cf8;
+  --sb-section:#475569;--bg:#f8fafc;--card:#ffffff;--border:#e2e8f0;--border-2:#f1f5f9;
+  --t1:#0f172a;--t2:#475569;--t3:#94a3b8;
+  --green:#10b981;--green-bg:#ecfdf5;--green-border:#a7f3d0;
+  --orange:#f59e0b;--orange-bg:#fffbeb;--orange-border:#fde68a;
+  --blue:#3b82f6;--blue-bg:#eff6ff;--blue-border:#bfdbfe;
+  --red:#ef4444;--red-bg:#fef2f2;--red-border:#fecaca;
+  --purple:#8b5cf6;--purple-bg:#f5f3ff;--purple-border:#ddd6fe;
+  --indigo:#6366f1;--indigo-bg:#eef2ff;--indigo-border:#c7d2fe;
   --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
   --shadow:0 4px 12px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
   --shadow-lg:0 10px 40px rgba(0,0,0,.12),0 4px 12px rgba(0,0,0,.06);
 }
 html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t1)}
-#login-page{
-  position:fixed;inset:0;z-index:1000;
-  display:flex;align-items:center;justify-content:center;
-  background:#0f1117;overflow:hidden;
-}
-.login-bg{
-  position:absolute;inset:0;
-  background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(99,102,241,.3) 0%,transparent 70%),
-             radial-gradient(ellipse 60% 50% at 80% 80%,rgba(139,92,246,.2) 0%,transparent 60%);
-}
-.login-grid{
-  position:absolute;inset:0;
-  background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
-  background-size:48px 48px;
-}
-.login-card{
-  position:relative;z-index:1;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.09);
-  backdrop-filter:blur(24px);
-  border-radius:20px;
-  padding:40px;
-  width:100%;max-width:440px;
-  box-shadow:0 32px 80px rgba(0,0,0,.5);
-}
+#login-page{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:#0f1117;overflow:hidden;}
+.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(99,102,241,.3) 0%,transparent 70%),radial-gradient(ellipse 60% 50% at 80% 80%,rgba(139,92,246,.2) 0%,transparent 60%);}
+.login-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);background-size:48px 48px;}
+.login-card{position:relative;z-index:1;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(24px);border-radius:20px;padding:40px;width:100%;max-width:440px;box-shadow:0 32px 80px rgba(0,0,0,.5);}
 .login-brand{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:32px}
-.login-brand-icon{
-  width:44px;height:44px;border-radius:12px;
-  background:linear-gradient(135deg,var(--brand),var(--brand-2));
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 24px var(--brand-glow);
-}
+.login-brand-icon{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:flex;align-items:center;justify-content:center;box-shadow:0 0 24px var(--brand-glow);}
 .login-brand-icon i{font-size:22px;color:#fff}
 .login-brand-name{font-size:20px;font-weight:800;color:#fff;letter-spacing:-.5px}
 .login-brand-sub{font-size:11px;color:var(--sb-text);margin-top:1px}
 .login-heading{text-align:center;margin-bottom:28px}
 .login-heading h2{font-size:22px;font-weight:800;color:#fff;letter-spacing:-.5px}
 .login-heading p{font-size:13px;color:var(--sb-text);margin-top:5px}
-.lstep{
-  border:1px solid rgba(255,255,255,.07);
-  border-radius:14px;padding:16px 18px;
-  margin-bottom:12px;
-  transition:border-color .2s,background .2s;
-}
+.lstep{border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:16px 18px;margin-bottom:12px;transition:border-color .2s,background .2s;}
 .lstep.s-active{border-color:rgba(99,102,241,.5);background:rgba(99,102,241,.08)}
 .lstep.s-done{border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.05)}
 .lstep-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.lstep-num{
-  width:26px;height:26px;border-radius:50%;
-  background:rgba(255,255,255,.08);color:var(--sb-text);
-  font-size:11px;font-weight:700;
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-  transition:all .2s;
-}
+.lstep-num{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.08);color:var(--sb-text);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;}
 .lstep-num.n-active{background:var(--brand);color:#fff;box-shadow:0 0 12px var(--brand-glow)}
 .lstep-num.n-done{background:var(--green);color:#fff}
 .lstep-title{font-size:13px;font-weight:700;color:#e2e8f0}
 .lstep-desc{font-size:12px;color:var(--sb-text);line-height:1.6;margin-bottom:10px}
 .lstep-desc code{background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:11px;font-family:var(--mono);color:#a5b4fc}
-.url-display-row{
-  display:flex;align-items:center;gap:6px;
-  background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.07);
-  border-radius:9px;padding:8px 10px;margin-bottom:8px;
-}
+.url-display-row{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.07);border-radius:9px;padding:8px 10px;margin-bottom:8px;}
 .url-display-row span{flex:1;font-family:var(--mono);font-size:11px;color:#a5b4fc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .verify-ok{display:flex;align-items:center;gap:8px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:#6ee7b7;border-radius:9px;padding:9px 12px;font-size:12px;font-weight:600}
 .verify-fail{display:flex;align-items:center;gap:8px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:#fcd34d;border-radius:9px;padding:9px 12px;font-size:12px;font-weight:600}
-.lbtn{
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;
-  width:100%;padding:10px 18px;font-size:13px;font-weight:600;
-  border-radius:9px;border:none;cursor:pointer;
-  font-family:var(--font);transition:all .15s;
-}
+.lbtn{display:inline-flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:10px 18px;font-size:13px;font-weight:600;border-radius:9px;border:none;cursor:pointer;font-family:var(--font);transition:all .15s;}
 .lbtn-primary{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;box-shadow:0 4px 16px var(--brand-glow)}
 .lbtn-primary:hover{opacity:.9;transform:translateY(-1px)}
 .lbtn-ghost{background:rgba(255,255,255,.06);color:#e2e8f0;border:1px solid rgba(255,255,255,.1)}
@@ -124,119 +63,45 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .lbtn-sm{padding:6px 12px;font-size:11px;width:auto;border-radius:7px}
 #admin{display:none;height:100vh;overflow:hidden}
 #admin.show{display:flex}
-.sb{
-  width:var(--sidebar-w);flex-shrink:0;
-  background:var(--sb-bg);
-  display:flex;flex-direction:column;height:100vh;
-  border-right:1px solid var(--sb-border);
-  position:relative;overflow:hidden;
-}
-.sb::before{
-  content:'';position:absolute;top:-80px;left:-80px;
-  width:240px;height:240px;border-radius:50%;
-  background:radial-gradient(circle,rgba(99,102,241,.12),transparent 70%);
-  pointer-events:none;
-}
-.sb-brand{
-  height:var(--topbar-h);display:flex;align-items:center;gap:12px;
-  padding:0 20px;border-bottom:1px solid var(--sb-border);flex-shrink:0;
-}
-.sb-brand-icon{
-  width:34px;height:34px;border-radius:9px;
-  background:linear-gradient(135deg,var(--brand),var(--brand-2));
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-  box-shadow:0 0 16px var(--brand-glow);
-}
+.sb{width:var(--sidebar-w);flex-shrink:0;background:var(--sb-bg);display:flex;flex-direction:column;height:100vh;border-right:1px solid var(--sb-border);position:relative;overflow:hidden;}
+.sb::before{content:'';position:absolute;top:-80px;left:-80px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,.12),transparent 70%);pointer-events:none;}
+.sb-brand{height:var(--topbar-h);display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid var(--sb-border);flex-shrink:0;}
+.sb-brand-icon{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 16px var(--brand-glow);}
 .sb-brand-icon i{font-size:18px;color:#fff}
 .sb-brand-name{font-size:15px;font-weight:800;color:#fff;letter-spacing:-.4px}
 .sb-brand-sub{font-size:10px;color:var(--sb-section);margin-top:1px;font-weight:500}
 .sb-nav{flex:1;padding:14px 12px;overflow-y:auto;scrollbar-width:none}
 .sb-nav::-webkit-scrollbar{display:none}
-.sb-section{
-  font-size:10px;font-weight:700;letter-spacing:.1em;
-  color:var(--sb-section);text-transform:uppercase;
-  padding:10px 10px 6px;
-}
-.sb-item{
-  display:flex;align-items:center;gap:11px;
-  padding:9px 12px;border-radius:10px;
-  cursor:pointer;transition:all .15s;
-  color:var(--sb-text);font-size:13px;font-weight:500;
-  border:none;background:transparent;width:100%;text-align:left;
-  margin-bottom:2px;
-  position:relative;
-}
+.sb-section{font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--sb-section);text-transform:uppercase;padding:10px 10px 6px;}
+.sb-item{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:10px;cursor:pointer;transition:all .15s;color:var(--sb-text);font-size:13px;font-weight:500;border:none;background:transparent;width:100%;text-align:left;margin-bottom:2px;position:relative;}
 .sb-item:hover{background:rgba(255,255,255,.05);color:var(--sb-text-hover)}
-.sb-item.active{
-  background:var(--sb-active-bg);color:var(--sb-active-text);font-weight:600;
-}
-.sb-item.active::before{
-  content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
-  width:3px;height:60%;background:var(--brand);border-radius:0 3px 3px 0;
-}
+.sb-item.active{background:var(--sb-active-bg);color:var(--sb-active-text);font-weight:600;}
+.sb-item.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:60%;background:var(--brand);border-radius:0 3px 3px 0;}
 .sb-item i{font-size:17px;flex-shrink:0}
-.sb-badge{
-  margin-left:auto;background:var(--orange);color:#fff;
-  font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;
-  min-width:20px;text-align:center;
-}
+.sb-badge{margin-left:auto;background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;min-width:20px;text-align:center;}
 .sb-badge.green{background:var(--green)}
-.sb-footer{
-  padding:12px;border-top:1px solid var(--sb-border);flex-shrink:0;
-}
-.sb-user{
-  display:flex;align-items:center;gap:10px;
-  padding:10px 12px;border-radius:10px;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.06);
-}
-.sb-avatar{
-  width:32px;height:32px;border-radius:50%;
-  background:linear-gradient(135deg,var(--brand),var(--brand-2));
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-}
+.sb-footer{padding:12px;border-top:1px solid var(--sb-border);flex-shrink:0;}
+.sb-user{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);}
+.sb-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .sb-avatar i{font-size:15px;color:#fff}
 .sb-uname{font-size:12px;font-weight:700;color:#e2e8f0}
 .sb-urole{font-size:10px;color:var(--sb-section);margin-top:1px}
-.sb-logout{
-  margin-left:auto;width:26px;height:26px;border-radius:7px;
-  border:1px solid rgba(255,255,255,.08);background:transparent;
-  display:flex;align-items:center;justify-content:center;
-  cursor:pointer;color:var(--sb-text);transition:all .15s;flex-shrink:0;
-}
+.sb-logout{margin-left:auto;width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.08);background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--sb-text);transition:all .15s;flex-shrink:0;}
 .sb-logout:hover{background:rgba(239,68,68,.15);color:var(--red);border-color:rgba(239,68,68,.3)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
-.topbar{
-  height:var(--topbar-h);background:var(--card);
-  border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;
-  padding:0 28px;flex-shrink:0;
-  box-shadow:var(--shadow-sm);
-}
+.topbar{height:var(--topbar-h);background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;flex-shrink:0;box-shadow:var(--shadow-sm);}
 .tb-left h1{font-size:17px;font-weight:800;color:var(--t1);letter-spacing:-.4px}
 .tb-bc{font-size:11px;color:var(--t3);margin-top:2px;display:flex;align-items:center;gap:4px}
 .tb-bc i{font-size:10px}
 .tb-right{display:flex;align-items:center;gap:10px}
-.tb-chip{
-  display:flex;align-items:center;gap:6px;
-  background:var(--green-bg);border:1px solid var(--green-border);
-  color:var(--green);padding:5px 12px;border-radius:99px;
-  font-size:12px;font-weight:600;
-}
+.tb-chip{display:flex;align-items:center;gap:6px;background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);padding:5px 12px;border-radius:99px;font-size:12px;font-weight:600;}
 .tb-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 2s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .content-area{flex:1;overflow-y:auto;padding:28px}
 .page{display:none;animation:fadeIn .2s ease}
 .page.active{display:block}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.btn{
-  display:inline-flex;align-items:center;gap:7px;
-  padding:9px 18px;font-size:13px;font-weight:600;
-  border-radius:9px;border:1px solid var(--border);
-  background:var(--card);color:var(--t1);
-  cursor:pointer;transition:all .15s;
-  font-family:var(--font);white-space:nowrap;
-}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;font-size:13px;font-weight:600;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--t1);cursor:pointer;transition:all .15s;font-family:var(--font);white-space:nowrap;}
 .btn:hover{background:#f8fafc;border-color:#cbd5e1}
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;pointer-events:none}
@@ -256,50 +121,32 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .pg-header-left h2{font-size:20px;font-weight:800;color:var(--t1);letter-spacing:-.5px}
 .pg-header-left p{font-size:13px;color:var(--t2);margin-top:4px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm)}
-.card-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:18px 22px;border-bottom:1px solid var(--border-2);flex-wrap:wrap;gap:10px;
-}
+.card-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border-2);flex-wrap:wrap;gap:10px;}
 .card-header-left{display:flex;align-items:center;gap:10px}
-.card-icon{
-  width:36px;height:36px;border-radius:9px;
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-}
-.ci-indigo{background:var(--indigo-bg)} .ci-indigo i{color:var(--indigo);font-size:18px}
-.ci-green{background:var(--green-bg)} .ci-green i{color:var(--green);font-size:18px}
-.ci-orange{background:var(--orange-bg)} .ci-orange i{color:var(--orange);font-size:18px}
-.ci-blue{background:var(--blue-bg)} .ci-blue i{color:var(--blue);font-size:18px}
-.ci-purple{background:var(--purple-bg)} .ci-purple i{color:var(--purple);font-size:18px}
+.card-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.ci-indigo{background:var(--indigo-bg)}.ci-indigo i{color:var(--indigo);font-size:18px}
+.ci-green{background:var(--green-bg)}.ci-green i{color:var(--green);font-size:18px}
+.ci-orange{background:var(--orange-bg)}.ci-orange i{color:var(--orange);font-size:18px}
+.ci-blue{background:var(--blue-bg)}.ci-blue i{color:var(--blue);font-size:18px}
+.ci-purple{background:var(--purple-bg)}.ci-purple i{color:var(--purple);font-size:18px}
 .card-title{font-size:14px;font-weight:700;color:var(--t1)}
 .card-sub{font-size:12px;color:var(--t3);margin-top:1px}
 .card-body{padding:22px}
 .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.scard{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:14px;padding:20px 22px;
-  display:flex;flex-direction:column;gap:14px;
-  box-shadow:var(--shadow-sm);transition:box-shadow .2s;
-  position:relative;overflow:hidden;
-}
-.scard::after{
-  content:'';position:absolute;bottom:0;left:0;right:0;height:3px;
-  border-radius:0 0 14px 14px;
-}
+.scard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow-sm);transition:box-shadow .2s;position:relative;overflow:hidden;}
+.scard::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;border-radius:0 0 14px 14px;}
 .scard.s-indigo::after{background:linear-gradient(90deg,var(--brand),var(--brand-2))}
 .scard.s-green::after{background:var(--green)}
 .scard.s-orange::after{background:var(--orange)}
 .scard.s-purple::after{background:var(--purple)}
 .scard:hover{box-shadow:var(--shadow)}
 .scard-top{display:flex;align-items:center;justify-content:space-between}
-.scard-icon{
-  width:42px;height:42px;border-radius:11px;
-  display:flex;align-items:center;justify-content:center;
-}
+.scard-icon{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;}
 .scard-icon i{font-size:20px}
-.si-indigo{background:var(--indigo-bg)} .si-indigo i{color:var(--indigo)}
-.si-green{background:var(--green-bg)} .si-green i{color:var(--green)}
-.si-orange{background:var(--orange-bg)} .si-orange i{color:var(--orange)}
-.si-purple{background:var(--purple-bg)} .si-purple i{color:var(--purple)}
+.si-indigo{background:var(--indigo-bg)}.si-indigo i{color:var(--indigo)}
+.si-green{background:var(--green-bg)}.si-green i{color:var(--green)}
+.si-orange{background:var(--orange-bg)}.si-orange i{color:var(--orange)}
+.si-purple{background:var(--purple-bg)}.si-purple i{color:var(--purple)}
 .scard-trend{font-size:11px;font-weight:600;display:flex;align-items:center;gap:3px;padding:3px 8px;border-radius:99px}
 .trend-up{background:var(--green-bg);color:var(--green)}
 .trend-neu{background:var(--indigo-bg);color:var(--indigo)}
@@ -316,12 +163,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
 thead{background:#f8fafc}
-th{
-  padding:11px 16px;text-align:left;
-  font-size:10px;font-weight:700;letter-spacing:.08em;
-  color:var(--t3);text-transform:uppercase;
-  border-bottom:1px solid var(--border);white-space:nowrap;
-}
+th{padding:11px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--t3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;}
 td{padding:13px 16px;border-bottom:1px solid var(--border-2);vertical-align:middle}
 tbody tr{transition:background .1s}
 tbody tr:hover{background:#f8fafc}
@@ -336,31 +178,13 @@ tbody tr:last-child td{border-bottom:none}
 .td-actions{display:flex;align-items:center;gap:6px}
 .td-id{font-family:var(--mono);font-size:11px;color:var(--t3);background:#f8fafc;padding:3px 7px;border-radius:5px;border:1px solid var(--border)}
 .toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
-.search-box{
-  display:flex;align-items:center;gap:8px;
-  background:#f8fafc;border:1px solid var(--border);
-  border-radius:9px;padding:0 12px;min-width:240px;
-}
+.search-box{display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:0 12px;min-width:240px;}
 .search-box i{color:var(--t3);font-size:15px;flex-shrink:0}
-.search-box input{
-  border:none;background:transparent;padding:8px 4px;
-  font-size:13px;outline:none;color:var(--t1);width:100%;
-  font-family:var(--font);
-}
+.search-box input{border:none;background:transparent;padding:8px 4px;font-size:13px;outline:none;color:var(--t1);width:100%;font-family:var(--font);}
 .search-box input::placeholder{color:var(--t3)}
-.pag{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 22px;border-top:1px solid var(--border-2);
-  font-size:12px;color:var(--t3);flex-wrap:wrap;gap:8px;
-}
+.pag{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-top:1px solid var(--border-2);font-size:12px;color:var(--t3);flex-wrap:wrap;gap:8px;}
 .pag-btns{display:flex;gap:4px}
-.pgb{
-  min-width:32px;height:32px;border-radius:8px;
-  border:1px solid var(--border);background:var(--card);
-  font-size:12px;font-weight:500;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;padding:0 8px;
-  color:var(--t2);transition:all .1s;font-family:var(--font);
-}
+.pgb{min-width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--t2);transition:all .1s;font-family:var(--font);}
 .pgb:hover{background:#f1f5f9}
 .pgb.cur{background:var(--brand);color:#fff;border-color:var(--brand)}
 .pgb:disabled{opacity:.4;cursor:not-allowed}
@@ -368,63 +192,30 @@ tbody tr:last-child td{border-bottom:none}
 .fg{display:flex;flex-direction:column;gap:5px}
 .fg.full{grid-column:1/-1}
 .fg label{font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.04em;text-transform:uppercase}
-.fg input,.fg textarea,.fg select{
-  border:1px solid var(--border);border-radius:9px;padding:9px 12px;
-  font-size:13px;color:var(--t1);background:#fafbfc;outline:none;
-  transition:border-color .15s,box-shadow .15s;font-family:var(--font);width:100%;
-}
+.fg input,.fg textarea,.fg select{border:1px solid var(--border);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--t1);background:#fafbfc;outline:none;transition:border-color .15s,box-shadow .15s;font-family:var(--font);width:100%;}
 .fg input:focus,.fg textarea:focus{border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
 .fg textarea{resize:vertical;min-height:90px}
 .fg .mono-ta{font-family:var(--mono);font-size:12px;min-height:110px}
 .overlay{position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:500;display:none;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
-.modal{
-  background:var(--card);border-radius:18px;
-  width:100%;max-width:540px;
-  box-shadow:var(--shadow-lg);
-  display:flex;flex-direction:column;max-height:90vh;
-  border:1px solid var(--border);
-  animation:popIn .2s cubic-bezier(.34,1.56,.64,1);
-}
+.modal{background:var(--card);border-radius:18px;width:100%;max-width:540px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;max-height:90vh;border:1px solid var(--border);animation:popIn .2s cubic-bezier(.34,1.56,.64,1);}
 @keyframes popIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
-.modal-hd{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0;
-}
+.modal-hd{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .modal-hd h3{font-size:16px;font-weight:800;color:var(--t1);letter-spacing:-.4px}
-.modal-x{
-  width:30px;height:30px;border-radius:8px;
-  border:1px solid var(--border);background:var(--card);
-  cursor:pointer;display:flex;align-items:center;justify-content:center;
-  color:var(--t2);font-size:14px;transition:all .15s;
-}
+.modal-x{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--t2);font-size:14px;transition:all .15s;}
 .modal-x:hover{background:#f1f5f9;color:var(--t1)}
 .modal-bd{padding:24px;overflow-y:auto;flex:1}
 .modal-ft{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
-.modal-preview{
-  display:flex;gap:14px;background:#f8fafc;
-  border:1px solid var(--border);border-radius:12px;
-  padding:14px;margin-bottom:20px;align-items:center;
-}
+.modal-preview{display:flex;gap:14px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px;align-items:center;}
 .mp-img{width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)}
 .mp-ph{width:56px;height:56px;border-radius:10px;background:var(--border-2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .mp-ph i{font-size:22px;color:var(--t3)}
 .mp-title{font-size:13px;font-weight:700;color:var(--t1);line-height:1.4}
 .mp-sub{font-size:11px;color:var(--t3);margin-top:3px}
-.info-banner{
-  display:flex;align-items:flex-start;gap:9px;
-  background:var(--orange-bg);border:1px solid var(--orange-border);
-  border-radius:10px;padding:11px 13px;font-size:12px;color:#92400e;
-  margin-top:16px;
-}
+.info-banner{display:flex;align-items:flex-start;gap:9px;background:var(--orange-bg);border:1px solid var(--orange-border);border-radius:10px;padding:11px 13px;font-size:12px;color:#92400e;margin-top:16px;}
 .info-banner i{font-size:16px;flex-shrink:0;margin-top:1px;color:var(--orange)}
 .pcard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}
-.pcard{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:14px;overflow:hidden;
-  display:flex;flex-direction:column;
-  transition:box-shadow .15s,transform .15s;box-shadow:var(--shadow-sm);
-}
+.pcard{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s;box-shadow:var(--shadow-sm);}
 .pcard:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
 .pc-img{width:100%;height:168px;background:var(--border-2);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;position:relative}
 .pc-img img{width:100%;height:100%;object-fit:cover;display:block}
@@ -442,21 +233,11 @@ tbody tr:last-child td{border-bottom:none}
 .pcs-err{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
 .skel{background:var(--border-2);border-radius:6px;animation:pulse 1.3s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
-.pc-tag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px}
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;color:var(--t3);text-align:center}
 .empty i{font-size:44px;margin-bottom:12px;opacity:.5}
 .empty p{font-size:14px;font-weight:600;color:var(--t2)}
 .empty small{font-size:12px;margin-top:4px;display:block}
-.toast{
-  position:fixed;bottom:24px;right:24px;
-  background:#0f172a;color:#fff;
-  padding:12px 18px;border-radius:12px;
-  font-size:13px;font-weight:500;
-  display:none;align-items:center;gap:10px;
-  z-index:9999;box-shadow:var(--shadow-lg);max-width:360px;
-  border:1px solid rgba(255,255,255,.08);
-  animation:slideUp .2s ease;
-}
+.toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 18px;border-radius:12px;font-size:13px;font-weight:500;display:none;align-items:center;gap:10px;z-index:9999;box-shadow:var(--shadow-lg);max-width:360px;border:1px solid rgba(255,255,255,.08);animation:slideUp .2s ease;}
 .toast.show{display:flex}
 @keyframes slideUp{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -464,11 +245,26 @@ tbody tr:last-child td{border-bottom:none}
 .content-area::-webkit-scrollbar{width:5px}
 .content-area::-webkit-scrollbar-track{background:transparent}
 .content-area::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
-@media(max-width:768px){
-  .stats-row{grid-template-columns:repeat(2,1fr)}
-  .sb{display:none}
-  .form-grid{grid-template-columns:1fr}
-}
+/* Pending extras */
+.sku-accordion{margin-top:0}
+.sku-accordion summary{cursor:pointer;font-size:11px;font-weight:600;color:var(--t2);list-style:none;display:flex;align-items:center;gap:5px;padding:4px 0;user-select:none;}
+.sku-accordion summary::-webkit-details-marker{display:none}
+.sku-accordion summary i.chevron{transition:transform .2s;font-size:12px;color:var(--t3)}
+.sku-accordion[open] summary i.chevron{transform:rotate(90deg)}
+.sku-table{width:100%;border-collapse:collapse;margin-top:6px;font-size:11px}
+.sku-table th{text-align:left;padding:4px 8px;color:var(--t3);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);background:var(--bg);}
+.sku-table td{padding:5px 8px;border-bottom:1px solid var(--border-2)}
+.sku-table tr:last-child td{border-bottom:none}
+.stock-oos{color:var(--red);font-weight:700;font-family:var(--mono)}
+.stock-in{color:var(--green);font-weight:700;font-family:var(--mono)}
+.stock-unkn{color:var(--t3);font-style:italic}
+.pending-img{width:38px;height:38px;border-radius:8px;object-fit:cover;border:1px solid var(--border);flex-shrink:0}
+.pending-img-ph{width:38px;height:38px;border-radius:8px;background:var(--border-2);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid var(--border)}
+.status-badge-pending{background:var(--orange-bg);color:var(--orange);border:1px solid var(--orange-border)}
+.status-badge-partial{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)}
+.status-badge-imported{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.status-badge-failed{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+@media(max-width:768px){.stats-row{grid-template-columns:repeat(2,1fr)}.sb{display:none}.form-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -482,10 +278,7 @@ tbody tr:last-child td{border-bottom:none}
       <div class="login-brand-icon"><i class="ti ti-package-import"></i></div>
       <div><div class="login-brand-name">AliShopify</div><div class="login-brand-sub">Admin Dashboard</div></div>
     </div>
-    <div class="login-heading">
-      <h2>Connect AliExpress</h2>
-      <p>Complete 3 quick steps to access your dashboard</p>
-    </div>
+    <div class="login-heading"><h2>Connect AliExpress</h2><p>Complete 3 quick steps to access your dashboard</p></div>
     <div id="login-steps">
       <div class="lstep s-active" id="ls1">
         <div class="lstep-head"><div class="lstep-num n-active" id="ln1">1</div><span class="lstep-title">Get OAuth Login URL</span></div>
@@ -494,8 +287,8 @@ tbody tr:last-child td{border-bottom:none}
       </div>
       <div class="lstep" id="ls2" style="opacity:.4;pointer-events:none">
         <div class="lstep-head"><div class="lstep-num" id="ln2">2</div><span class="lstep-title">Authorize on AliExpress</span></div>
-        <p class="lstep-desc">Open the link, sign in with AliExpress and click <strong style="color:#e2e8f0">Authorize</strong>. Your backend at <code>/callback</code> will save the token automatically.</p>
-        <div class="url-display-row" id="url-row"><span id="url-text">—</span><button class="lbtn lbtn-ghost lbtn-sm" onclick="copyAuthUrl()"><i class="ti ti-copy" style="font-size:12px"></i></button><button class="lbtn lbtn-primary lbtn-sm" onclick="openAuthUrl()"><i class="ti ti-external-link" style="font-size:12px"></i> Open</button></div>
+        <p class="lstep-desc">Open the link, sign in and click <strong style="color:#e2e8f0">Authorize</strong>. Your backend at <code>/callback</code> will save the token automatically.</p>
+        <div class="url-display-row"><span id="url-text">—</span><button class="lbtn lbtn-ghost lbtn-sm" onclick="copyAuthUrl()"><i class="ti ti-copy" style="font-size:12px"></i></button><button class="lbtn lbtn-primary lbtn-sm" onclick="openAuthUrl()"><i class="ti ti-external-link" style="font-size:12px"></i> Open</button></div>
       </div>
       <div class="lstep" id="ls3" style="opacity:.4;pointer-events:none">
         <div class="lstep-head"><div class="lstep-num" id="ln3">3</div><span class="lstep-title">Verify & Enter Dashboard</span></div>
@@ -516,16 +309,17 @@ tbody tr:last-child td{border-bottom:none}
       <div class="sb-section">Products</div>
       <button class="sb-item" data-page="import" onclick="goPage('import',this)"><i class="ti ti-cloud-download"></i> Fetch & Import</button>
       <button class="sb-item" data-page="products" onclick="goPage('products',this)"><i class="ti ti-packages"></i> Imported Products<span class="sb-badge" id="sb-count">0</span></button>
+      <div class="sb-section">Queue</div>
+      <button class="sb-item" data-page="pending" onclick="goPage('pending',this)"><i class="ti ti-hourglass"></i> Pending Imports<span class="sb-badge" id="pending-count">0</span></button>
       <div class="sb-section">System</div>
       <button class="sb-item" data-page="mappings" onclick="goPage('mappings',this)"><i class="ti ti-link"></i> Sync Mappings</button>
       <button class="sb-item" data-page="settings" onclick="goPage('settings',this)"><i class="ti ti-adjustments-horizontal"></i> Settings</button>
     </nav>
     <div class="sb-footer"><div class="sb-user"><div class="sb-avatar"><i class="ti ti-user"></i></div><div><div class="sb-uname">Admin</div><div class="sb-urole">Super Admin</div></div><button class="sb-logout" onclick="logout()" title="Logout"><i class="ti ti-logout" style="font-size:14px"></i></button></div></div>
   </aside>
-
   <div class="main">
     <div class="topbar">
-      <div class="tb-left"><h1 id="tb-title">Dashboard</h1><div class="tb-bc" id="tb-bc"><i class="ti ti-home"></i> Home <i class="ti ti-chevron-right"></i> <span id="tb-bc-page">Dashboard</span></div></div>
+      <div class="tb-left"><h1 id="tb-title">Dashboard</h1><div class="tb-bc"><i class="ti ti-home"></i> Home <i class="ti ti-chevron-right"></i> <span id="tb-bc-page">Dashboard</span></div></div>
       <div class="tb-right"><div class="tb-chip"><div class="dot"></div> AliExpress Connected</div><button class="btn btn-primary btn-sm" onclick="goPage('import',null)"><i class="ti ti-plus"></i> Import</button></div>
     </div>
     <div class="content-area">
@@ -541,7 +335,7 @@ tbody tr:last-child td{border-bottom:none}
         </div>
         <div class="card">
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-clock"></i></div><div><div class="card-title">Recent Imports</div><div class="card-sub">Last 5 imported products</div></div></div><button class="btn btn-sm" onclick="goPage('products',null)"><i class="ti ti-arrow-right"></i> View All</button></div>
-          <div class="tbl-wrap"><table><thead><tr><th></th><th>Product</th><th>Price</th><th>Shopify Status</th><th>Imported</th><th></th></tr></thead><tbody id="dash-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList</tbody></table></div>
+          <div class="tbl-wrap"><table><thead><tr><th></th><th>Product</th><th>Price</th><th>Status</th><th>Imported</th><th></th></tr></thead><tbody id="dash-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr></tbody></table></div>
         </div>
       </div>
 
@@ -551,84 +345,97 @@ tbody tr:last-child td{border-bottom:none}
         <div class="card" style="margin-bottom:20px">
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-search"></i></div><div><div class="card-title">Product IDs</div><div class="card-sub">Enter one or more AliExpress IDs</div></div></div></div>
           <div class="card-body">
-            <div class="fg" style="margin-bottom:14px"><label>AliExpress Product IDs <span style="text-transform:none;font-weight:400;color:var(--t3)">(one per line or comma-separated)</span></label><textarea class="mono-ta" id="ids-input" placeholder="1005006789123456&#10;1005006789654321&#10;1005001234567890" oninput="syncFetchBtn()"></textarea></div>
+            <div class="fg" style="margin-bottom:14px"><label>AliExpress Product IDs <span style="text-transform:none;font-weight:400;color:var(--t3)">(one per line or comma-separated)</span></label><textarea class="mono-ta" id="ids-input" placeholder="1005006789123456" oninput="syncFetchBtn()"></textarea></div>
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><button class="btn btn-warn" id="btn-fetch" onclick="doFetch()" disabled><i class="ti ti-search"></i> Fetch Products</button><span style="font-size:12px;color:var(--t3)" id="ids-det"></span></div>
           </div>
         </div>
         <div id="fetch-section" style="display:none">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px"><div><span style="font-size:16px;font-weight:800;color:var(--t1)" id="fetch-count-lbl">Products</span><span style="font-size:12px;color:var(--t3);margin-left:8px" id="fetch-status-lbl"></span></div><div style="display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="btn-import-all" onclick="importAll()"><i class="ti ti-upload"></i> Import All to Shopify</button><button class="btn btn-sm" onclick="clearFetch()"><i class="ti ti-x"></i> Clear</button></div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+            <div><span style="font-size:16px;font-weight:800;color:var(--t1)" id="fetch-count-lbl">Products</span><span style="font-size:12px;color:var(--t3);margin-left:8px" id="fetch-status-lbl"></span></div>
+            <div style="display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="btn-import-all" onclick="importAll()"><i class="ti ti-upload"></i> Import All to Shopify</button><button class="btn btn-sm" onclick="clearFetch()"><i class="ti ti-x"></i> Clear</button></div>
+          </div>
           <div class="pcard-grid" id="pcard-grid"></div>
         </div>
       </div>
 
       <!-- PRODUCTS -->
       <div class="page" id="pg-products">
-        <div class="pg-header"><div class="pg-header-left"><h2>Imported Products</h2><p>All products imported to Shopify. Click edit to modify any product.</p></div><button class="btn btn-primary btn-sm" onclick="goPage('import',null)"><i class="ti ti-plus"></i> Import More</button></div>
+        <div class="pg-header"><div class="pg-header-left"><h2>Imported Products</h2><p>All products imported to Shopify.</p></div><button class="btn btn-primary btn-sm" onclick="goPage('import',null)"><i class="ti ti-plus"></i> Import More</button></div>
         <div class="card">
-          <div class="card-header"><div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-packages"></i></div><div><div class="card-title">All Products</div><div class="card-sub" id="prod-count-sub">Loading…</div></div></div><div class="toolbar"><div class="search-box"><i class="ti ti-search"></i><input type="text" id="prod-search" placeholder="Search by title or ID…" oninput="searchDebounce()"/></div><button class="btn btn-sm" onclick="loadProducts()"><i class="ti ti-refresh"></i></button></div></div>
-         <div class="toolbar" style="margin-bottom:12px;">
-    <button class="btn btn-primary btn-sm" id="bulk-increase-btn" onclick="openBulkIncreaseModal()">
-        <i class="ti ti-plus"></i> Bulk Increase Price
-    </button>
-    <span id="selected-count" style="font-size:12px; color:var(--t3); margin-left:8px;">0 selected</span>
-</div>
+          <div class="card-header"><div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-packages"></i></div><div><div class="card-title">All Products</div><div class="card-sub" id="prod-count-sub">Loading…</div></div></div>
+            <div class="toolbar"><div class="search-box"><i class="ti ti-search"></i><input type="text" id="prod-search" placeholder="Search by title or ID…" oninput="searchDebounce()"/></div><button class="btn btn-sm" onclick="loadProducts()"><i class="ti ti-refresh"></i></button></div>
+          </div>
+          <div class="toolbar" style="padding:12px 22px">
+            <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
+            <span id="selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
+          </div>
           <div class="tbl-wrap"><table>
-            <thead>
-  <tr><th style="width:28px"></th><th style="width:52px"></th><th>Product</th><th>AliExpress ID</th><th>Price</th><th>Mode</th> <th>Rating</th><th>SKUs</th><th>Status</th><th>Imported</th><th>Actions</th></tr>
-</thead>
-
-            <tbody id="prod-tbody"><tr><td colspan="10"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList</tbody></table></div>
+            <thead><tr><th style="width:28px"></th><th style="width:52px"></th><th>Product</th><th>AliExpress ID</th><th>Price</th><th>Mode</th><th>Rating</th><th>SKUs</th><th>Status</th><th>Imported</th><th>Actions</th></tr></thead>
+            <tbody id="prod-tbody"><tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr></tbody>
+          </table></div>
           <div class="pag" id="prod-pag" style="display:none"><span id="pag-info"></span><div class="pag-btns" id="pag-btns"></div></div>
+        </div>
+      </div>
+
+      <!-- PENDING IMPORTS -->
+      <div class="page" id="pg-pending">
+        <div class="pg-header">
+          <div class="pg-header-left"><h2>Pending Imports</h2><p>Products with out-of-stock variants — imported automatically when stock returns.</p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="processPendingImports()"><i class="ti ti-bolt"></i> Process Now</button>
+            <button class="btn btn-sm" onclick="loadPendingImports()"><i class="ti ti-refresh"></i> Refresh</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+          <div class="scard s-orange"><div class="scard-top"><div class="scard-icon si-orange"><i class="ti ti-hourglass"></i></div></div><div><div class="scard-val" id="ps-pending-count">—</div><div class="scard-lbl">Fully OOS</div></div></div>
+          <div class="scard s-indigo"><div class="scard-top"><div class="scard-icon si-indigo"><i class="ti ti-alert-triangle"></i></div></div><div><div class="scard-val" id="ps-partial-count">—</div><div class="scard-lbl">Partially OOS</div></div></div>
+          <div class="scard s-green"><div class="scard-top"><div class="scard-icon si-green"><i class="ti ti-circle-check"></i></div></div><div><div class="scard-val" id="ps-imported-count">—</div><div class="scard-lbl">Auto-Imported</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-hourglass"></i></div><div><div class="card-title">Pending Queue</div><div class="card-sub" id="pending-sub">Loading…</div></div></div>
+            <div style="display:flex;gap:4px">
+              <button class="btn btn-sm" id="pf-all"      onclick="setPendingFilter('all')">All</button>
+              <button class="btn btn-sm" id="pf-pending"  onclick="setPendingFilter('pending')">Fully OOS</button>
+              <button class="btn btn-sm" id="pf-partial"  onclick="setPendingFilter('partial')">Partial OOS</button>
+              <button class="btn btn-sm" id="pf-imported" onclick="setPendingFilter('imported')">Imported</button>
+            </div>
+          </div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th style="width:46px"></th><th>Product</th><th>Status</th><th>Variants</th><th>Created</th><th>Last Check</th><th>Retries</th><th>Actions</th></tr></thead>
+            <tbody id="pending-tbody"><tr><td colspan="8"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr></tbody>
+          </table></div>
         </div>
       </div>
 
       <!-- MAPPINGS -->
       <div class="page" id="pg-mappings">
-        <div class="pg-header"><div class="pg-header-left"><h2>Product Mappings</h2><p>Link AliExpress products with existing Shopify products to sync only prices (SEO-safe).</p></div></div>
+        <div class="pg-header"><div class="pg-header-left"><h2>Product Mappings</h2><p>Link AliExpress products with existing Shopify products to sync only prices.</p></div></div>
         <div class="card" style="margin-bottom:20px">
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-blue"><i class="ti ti-link"></i></div><div><div class="card-title">Add New Mapping</div><div class="card-sub">Enter AliExpress and Shopify IDs/URLs</div></div></div></div>
           <div class="card-body">
             <div class="form-grid">
-              <div class="fg"><label>AliExpress Product ID or URL</label><input type="text" id="map-aliexpress" placeholder="e.g., 1005001234567890 or https://www.aliexpress.com/item/1005001234567890.html"/></div>
-              <div class="fg"><label>Shopify Product ID or Admin URL</label><input type="text" id="map-shopify" placeholder="e.g., 1234567890 or https://admin.shopify.com/products/1234567890"/></div>
-              <div class="fg full"><label>Product Title (optional, for reference)</label><input type="text" id="map-title" placeholder="e.g., Blue Widget"/></div>
+              <div class="fg"><label>AliExpress Product ID or URL</label><input type="text" id="map-aliexpress" placeholder="e.g., 1005001234567890"/></div>
+              <div class="fg"><label>Shopify Product ID or Admin URL</label><input type="text" id="map-shopify" placeholder="e.g., 1234567890"/></div>
+              <div class="fg full"><label>Product Title (optional)</label><input type="text" id="map-title" placeholder="e.g., Blue Widget"/></div>
             </div>
-            <div style="display:flex; gap:10px; margin-top:16px"><button class="btn btn-primary" onclick="addMapping()"><i class="ti ti-plus"></i> Add Mapping</button></div>
+            <div style="margin-top:16px"><button class="btn btn-primary" onclick="addMapping()"><i class="ti ti-plus"></i> Add Mapping</button></div>
           </div>
         </div>
         <div class="card">
           <div class="card-header">
-            <div class="card-header-left">
-                <div class="card-icon ci-indigo"><i class="ti ti-list"></i></div>
-                <div>
-                    <div class="card-title">Existing Mappings</div>
-                    <div class="card-sub">Manage links for price sync</div>
-                </div>
-            </div>
+            <div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-list"></i></div><div><div class="card-title">Existing Mappings</div><div class="card-sub">Manage links for price sync</div></div></div>
             <div class="toolbar">
-                <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseMappingModal()">
-                    <i class="ti ti-plus"></i> Bulk Increase Price
-                </button>
-                <span id="mapping-selected-count" style="font-size:12px; color:var(--t3); margin-left:8px;">0 selected</span>
-                <button class="btn btn-sm" onclick="syncAllMapped()"><i class="ti ti-refresh"></i> Sync All Prices Now</button>
+              <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseMappingModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
+              <span id="mapping-selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
+              <button class="btn btn-sm" onclick="syncAllMapped()"><i class="ti ti-refresh"></i> Sync All Now</button>
             </div>
-        </div>
-          
-          <div class="tbl-wrap">
-            <table>
-            <thead>
-              <tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify Product ID</th><th>Product Title</th><th>Track Price</th><th>Price Mode</th><th>Actions</th></tr>
-            </thead>
-
-            <tbody id="mappings-tbody"><tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div>NonNullList</tbody>
-
-              <div class="pag" id="mappings-pag" style="display:none">
-    <span id="mappings-pag-info"></span>
-    <div class="pag-btns" id="mappings-pag-btns"></div>
-</div>
-            </table>
           </div>
-
+          <div class="tbl-wrap"><table>
+            <thead><tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify ID</th><th>Title</th><th>Track Price</th><th>Mode</th><th>Actions</th></tr></thead>
+            <tbody id="mappings-tbody"><tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr></tbody>
+          </table></div>
+          <div class="pag" id="mappings-pag" style="display:none"><span id="mappings-pag-info"></span><div class="pag-btns" id="mappings-pag-btns"></div></div>
         </div>
       </div>
 
@@ -636,368 +443,220 @@ tbody tr:last-child td{border-bottom:none}
       <div class="page" id="pg-settings">
         <div class="pg-header"><div class="pg-header-left"><h2>Settings</h2><p>Manage your integrations and configuration.</p></div></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-brand-aliexpress"></i></div><div><div class="card-title">AliExpress OAuth</div><div class="card-sub">Token-based authentication</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3);margin-top:1px">Access token saved in database</div></div></div></div></div>
-          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-green"><i class="ti ti-brand-shopify"></i></div><div><div class="card-title">Shopify API</div><div class="card-sub">Client credentials grant</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3);margin-top:1px">Auto-refreshing token active</div></div></div></div></div>
+          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-brand-aliexpress"></i></div><div><div class="card-title">AliExpress OAuth</div><div class="card-sub">Token-based authentication</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Access token saved in database</div></div></div></div></div>
+          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-green"><i class="ti ti-brand-shopify"></i></div><div><div class="card-title">Shopify API</div><div class="card-sub">Client credentials grant</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Auto-refreshing token active</div></div></div></div></div>
         </div>
-        <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-blue"><i class="ti ti-file-code"></i></div><div><div class="card-title">Environment Config</div><div class="card-sub">Backend .env file settings</div></div></div></div><div class="card-body"><div style="background:#0f1117;border-radius:10px;padding:18px;font-family:var(--mono);font-size:12px;color:#94a3b8;line-height:1.9;border:1px solid rgba(255,255,255,.06)"><div><span style="color:#6366f1">ALIEXPRESS_APP_KEY</span>=<span style="color:#34d399">your_key</span></div><div><span style="color:#6366f1">ALIEXPRESS_APP_SECRET</span>=<span style="color:#34d399">your_secret</span></div><div><span style="color:#6366f1">SHOPIFY_STORE</span>=<span style="color:#34d399">your-store</span></div><div><span style="color:#6366f1">SHOPIFY_CLIENT_ID</span>=<span style="color:#34d399">your_client_id</span></div><div><span style="color:#6366f1">SHOPIFY_CLIENT_SECRET</span>=<span style="color:#34d399">your_client_secret</span></div></div><p style="font-size:12px;color:var(--t3);margin-top:12px"><i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px"></i> Edit your <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px">.env</code> file and restart FastAPI to update credentials.</p></div></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- EDIT MODAL -->
+<!-- MODALS -->
 <div class="overlay" id="edit-overlay">
   <div class="modal">
     <div class="modal-hd"><h3>Modify Product</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-bd">
       <div class="modal-preview" id="mp"></div>
-      <input type="hidden" id="m-dbid"/>
-      <input type="hidden" id="m-aeid"/>
+      <input type="hidden" id="m-dbid"/><input type="hidden" id="m-aeid"/>
       <div class="form-grid">
-        <div class="fg full"><label>Custom Title <span style="text-transform:none;font-weight:400;color:var(--t3)">(blank = keep original)</span></label><input type="text" id="m-title" placeholder="Override product title…"/></div>
-        
+        <div class="fg full"><label>Custom Title</label><input type="text" id="m-title" placeholder="Override product title…"/></div>
         <div class="fg full">
-  <label>Variant Prices (USD)</label>
-  <div id="m-variants-wrap" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-top:2px">
-    <div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
-      <i class="ti ti-loader-2 spin"></i> Loading variants…
-    </div>
-  </div>
-  <div style="font-size:11px;color:var(--t3);margin-top:4px">
-    Editing prices here switches this product to <strong>Manual</strong> pricing mode (no auto-sync).
-  </div>
-</div>
-        
-        
-        
-        <div class="fg"><label>Rating Override <span style="text-transform:none;font-weight:400;color:var(--t3)">(0–5)</span></label><input type="text" id="m-rating" placeholder="e.g. 4.5"/></div>
-        <div class="fg full"><label>Description <span style="text-transform:none;font-weight:400;color:var(--t3)">(HTML supported)</span></label><textarea id="m-desc" placeholder="Custom description…"></textarea></div>
-      </div>
-      <div style="margin: 16px 0; padding: 12px; background: #f8fafc; border-radius: 12px; border: 1px solid var(--border);">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-          <span style="font-weight: 700; font-size: 12px;"><i class="ti ti-truck"></i> Shipping & Inventory</span>
-          <button class="btn btn-xs" onclick="refreshProductDetails()"><i class="ti ti-refresh"></i> Refresh</button>
+          <label>Variant Prices (USD)</label>
+          <div id="m-variants-wrap" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-top:2px"><div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div></div>
+          <div style="font-size:11px;color:var(--t3);margin-top:4px">Editing prices switches to <strong>Manual</strong> mode (no auto-sync).</div>
         </div>
-        <div id="modal-shipping-info" style="font-size: 12px; color: var(--t2);">Loading...</div>
-        <div id="modal-inventory-info" style="font-size: 12px; color: var(--t2); margin-top: 8px;"></div>
+        <div class="fg"><label>Rating Override (0–5)</label><input type="text" id="m-rating" placeholder="e.g. 4.5"/></div>
+        <div class="fg full"><label>Description (HTML supported)</label><textarea id="m-desc" placeholder="Custom description…"></textarea></div>
+      </div>
+      <div style="margin:16px 0;padding:12px;background:#f8fafc;border-radius:12px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-weight:700;font-size:12px"><i class="ti ti-truck"></i> Shipping & Inventory</span><button class="btn btn-xs" onclick="refreshProductDetails()"><i class="ti ti-refresh"></i> Refresh</button></div>
+        <div id="modal-shipping-info" style="font-size:12px;color:var(--t2)">Loading...</div>
+        <div id="modal-inventory-info" style="font-size:12px;color:var(--t2);margin-top:8px"></div>
       </div>
       <div class="info-banner"><i class="ti ti-info-circle"></i><span>Changes are saved to the <strong>database</strong> and pushed to <strong>Shopify</strong> automatically.</span></div>
     </div>
     <div class="modal-ft"><button class="btn btn-sm" onclick="closeModal()">Cancel</button><button class="btn btn-primary btn-sm" id="btn-save-modal" onclick="saveModal()"><i class="ti ti-device-floppy"></i> Save Changes</button></div>
   </div>
 </div>
-
-<!-- PRICE EDIT MODAL (for mappings) -->
 <div class="overlay" id="price-modal">
-  <div class="modal" style="max-width: 400px;">
+  <div class="modal" style="max-width:400px">
     <div class="modal-hd"><h3>Update Shopify Price</h3><button class="modal-x" onclick="closePriceModal()">✕</button></div>
-    <div class="modal-bd">
-      <input type="hidden" id="price-mapping-id">
-      <div class="fg"><label>New Price (USD)</label><input type="number" step="0.01" id="new-price" placeholder="e.g., 29.99"></div>
-      <div class="info-banner" style="margin-top: 16px;"><i class="ti ti-info-circle"></i><span>This will update all variants of the Shopify product to this price.</span></div>
-    </div>
+    <div class="modal-bd"><input type="hidden" id="price-mapping-id"><div class="fg"><label>New Price (USD)</label><input type="number" step="0.01" id="new-price" placeholder="e.g., 29.99"></div><div class="info-banner" style="margin-top:16px"><i class="ti ti-info-circle"></i><span>Updates all variants of the Shopify product.</span></div></div>
     <div class="modal-ft"><button class="btn btn-sm" onclick="closePriceModal()">Cancel</button><button class="btn btn-primary btn-sm" onclick="submitPriceUpdate()">Update Price</button></div>
   </div>
 </div>
-
-
-<!-- NEW: INCREASE PRICE MODAL (for adding amount) -->
 <div class="overlay" id="increase-price-modal">
-  <div class="modal" style="max-width: 400px;">
-    <div class="modal-hd">
-      <h3>Increase Shopify Price</h3>
-      <button class="modal-x" onclick="closeIncreasePriceModal()">✕</button>
-    </div>
-    <div class="modal-bd">
-      <input type="hidden" id="increase-mapping-id">
-      <div class="fg">
-        <label>Increase by (USD)</label>
-        <input type="number" step="0.01" id="increase-amount" placeholder="e.g., 5.00">
-      </div>
-      <div class="info-banner" style="margin-top: 16px;">
-        <i class="ti ti-info-circle"></i>
-        <span>This will add the amount to <strong>each variant's current price</strong> (e.g., $10 → $15, $20 → $25).</span>
-      </div>
-    </div>
-    <div class="modal-ft">
-      <button class="btn btn-sm" onclick="closeIncreasePriceModal()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="submitPriceIncrease()">Increase Price</button>
-    </div>
+  <div class="modal" style="max-width:400px">
+    <div class="modal-hd"><h3>Increase Shopify Price</h3><button class="modal-x" onclick="closeIncreasePriceModal()">✕</button></div>
+    <div class="modal-bd"><input type="hidden" id="increase-mapping-id"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="increase-amount" placeholder="e.g., 5.00"></div><div class="info-banner" style="margin-top:16px"><i class="ti ti-info-circle"></i><span>Adds to each variant's current price.</span></div></div>
+    <div class="modal-ft"><button class="btn btn-sm" onclick="closeIncreasePriceModal()">Cancel</button><button class="btn btn-primary btn-sm" onclick="submitPriceIncrease()">Increase Price</button></div>
   </div>
 </div>
-
+<div class="overlay" id="increase-price-modal-imported">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-hd"><h3>Increase Product Price</h3><button class="modal-x" onclick="closeIncreasePriceModalImported()">✕</button></div>
+    <div class="modal-bd"><input type="hidden" id="increase-product-id"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="increase-amount-imported" placeholder="e.g., 5.00"></div><div class="info-banner"><i class="ti ti-info-circle"></i><span>Added to every SKU price. Reapplied automatically on sync.</span></div></div>
+    <div class="modal-ft"><button class="btn btn-sm" onclick="closeIncreasePriceModalImported()">Cancel</button><button class="btn btn-primary btn-sm" onclick="submitPriceIncreaseImported()">Apply Increase</button></div>
+  </div>
+</div>
+<div class="overlay" id="bulk-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-hd"><h3>Bulk Increase Price</h3><button class="modal-x" onclick="closeBulkModal()">✕</button></div>
+    <div class="modal-bd"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="bulk-amount" placeholder="e.g., 5.00"></div><div class="info-banner">Added to <strong>all variants</strong> of selected products.</div></div>
+    <div class="modal-ft"><button class="btn btn-sm" onclick="closeBulkModal()">Cancel</button><button class="btn btn-primary btn-sm" onclick="submitBulkIncrease()">Apply Increase</button></div>
+  </div>
+</div>
+<div class="overlay" id="bulk-mapping-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-hd"><h3>Bulk Increase Price (Mappings)</h3><button class="modal-x" onclick="closeBulkMappingModal()">✕</button></div>
+    <div class="modal-bd"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="bulk-mapping-amount" placeholder="e.g., 5.00"></div><div class="info-banner">Added to <strong>all variants</strong> of selected Shopify products.</div></div>
+    <div class="modal-ft"><button class="btn btn-sm" onclick="closeBulkMappingModal()">Cancel</button><button class="btn btn-primary btn-sm" onclick="submitBulkIncreaseMappings()">Apply Increase</button></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
-<!-- Increase Price Modal (Imported Products) -->
-<div class="overlay" id="increase-price-modal-imported">
-  <div class="modal" style="max-width: 400px;">
-    <div class="modal-hd">
-      <h3>Increase Product Price (Imported)</h3>
-      <button class="modal-x" onclick="closeIncreasePriceModalImported()">✕</button>
-    </div>
-    <div class="modal-bd">
-      <input type="hidden" id="increase-product-id">
-      <div class="fg">
-        <label>Increase by (USD)</label>
-        <input type="number" step="0.01" id="increase-amount-imported" placeholder="e.g., 5.00">
-      </div>
-      <div class="info-banner">
-        <i class="ti ti-info-circle"></i>
-        <span>This amount will be added to every SKU price. If AliExpress changes its price later, the increase will be reapplied automatically.</span>
-      </div>
-    </div>
-    <div class="modal-ft">
-      <button class="btn btn-sm" onclick="closeIncreasePriceModalImported()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="submitPriceIncreaseImported()">Apply Increase</button>
-    </div>
-  </div>
-</div>
-
-<div class="overlay" id="bulk-modal">
-  <div class="modal" style="max-width:400px;">
-    <div class="modal-hd"><h3>Bulk Increase Price</h3><button class="modal-x" onclick="closeBulkModal()">✕</button></div>
-    <div class="modal-bd">
-      <div class="fg">
-        <label>Increase by (USD)</label>
-        <input type="number" step="0.01" id="bulk-amount" placeholder="e.g., 5.00">
-      </div>
-      <div class="info-banner">The amount will be added to <strong>all variants</strong> of selected products.</div>
-    </div>
-    <div class="modal-ft">
-      <button class="btn btn-sm" onclick="closeBulkModal()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="submitBulkIncrease()">Apply Increase</button>
-    </div>
-  </div>
-</div>
-
-<!-- Bulk increase modal for mappings -->
-<div class="overlay" id="bulk-mapping-modal">
-    <div class="modal" style="max-width:400px;">
-        <div class="modal-hd"><h3>Bulk Increase Price (Mappings)</h3><button class="modal-x" onclick="closeBulkMappingModal()">✕</button></div>
-        <div class="modal-bd">
-            <div class="fg">
-                <label>Increase by (USD)</label>
-                <input type="number" step="0.01" id="bulk-mapping-amount" placeholder="e.g., 5.00">
-            </div>
-            <div class="info-banner">The amount will be added to <strong>all variants</strong> of the selected Shopify products.</div>
-        </div>
-        <div class="modal-ft">
-            <button class="btn btn-sm" onclick="closeBulkMappingModal()">Cancel</button>
-            <button class="btn btn-primary btn-sm" onclick="submitBulkIncreaseMappings()">Apply Increase</button>
-        </div>
-    </div>
-</div>
-
 <script>
-//const API = "http://127.0.0.1:8001";
 //const API = "http://127.0.0.1:8001/api";
-const API = "https://aliexpress.retradviews.com/api";
+const API = "http://aliexpress.retradviews.com:8080/docs";
+let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
+let _pendingFilter='all', _allPendingData=[], currentVariants=[];
 
-let authUrl = "";
-let fp = {};
-let prodPage = 1;
-let prodPages = 1;
-let _searchTimer = null;
-let mappingPage = 1;
-let mappingPages = 1;
-
-function showToast(msg, type="") {
-  const el = document.getElementById("toast");
-  const icons = {ok:"ti-circle-check",err:"ti-alert-circle",info:"ti-info-circle"};
-  const colors = {ok:"#10b981",err:"#ef4444",info:"#6366f1"};
-  el.style.borderLeftColor = colors[type]||"transparent";
-  el.style.borderLeft = type ? `3px solid ${colors[type]}` : "none";
-  el.innerHTML = `<i class="ti ${icons[type]||'ti-info-circle'}" style="font-size:16px;color:${colors[type]||'#94a3b8'};flex-shrink:0"></i><span>${msg}</span>`;
-  el.classList.add("show");
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove("show"), 4000);
+// ── TOAST ──────────────────────────────────────────────────────────────
+function showToast(msg,type=""){
+  const el=document.getElementById("toast");
+  const icons={ok:"ti-circle-check",err:"ti-alert-circle",info:"ti-info-circle"};
+  const colors={ok:"#10b981",err:"#ef4444",info:"#6366f1"};
+  el.style.borderLeft=type?`3px solid ${colors[type]}`:"none";
+  el.innerHTML=`<i class="ti ${icons[type]||'ti-info-circle'}" style="font-size:16px;color:${colors[type]||'#94a3b8'};flex-shrink:0"></i><span>${msg}</span>`;
+  el.classList.add("show"); clearTimeout(el._t);
+  el._t=setTimeout(()=>el.classList.remove("show"),4000);
 }
 
-// LOGIN
-function setStep(n) {
-  for (let i=1;i<=3;i++) {
-    const ls=document.getElementById("ls"+i);
-    const ln=document.getElementById("ln"+i);
-    if (i < n) {
-      ls.style.opacity="1"; ls.style.pointerEvents="";
-      ls.className="lstep s-done";
-      ln.className="lstep-num n-done";
-      ln.innerHTML=`<i class="ti ti-check" style="font-size:11px"></i>`;
-    } else if (i===n) {
-      ls.style.opacity="1"; ls.style.pointerEvents="";
-      ls.className="lstep s-active";
-      ln.className="lstep-num n-active";
-      ln.textContent=i;
-    } else {
-      ls.style.opacity=".4"; ls.style.pointerEvents="none";
-      ls.className="lstep";
-      ln.className="lstep-num";
-      ln.textContent=i;
-    }
+// ── LOGIN ──────────────────────────────────────────────────────────────
+function setStep(n){
+  for(let i=1;i<=3;i++){
+    const ls=document.getElementById("ls"+i), ln=document.getElementById("ln"+i);
+    if(i<n){ls.style.opacity="1";ls.style.pointerEvents="";ls.className="lstep s-done";ln.className="lstep-num n-done";ln.innerHTML=`<i class="ti ti-check" style="font-size:11px"></i>`;}
+    else if(i===n){ls.style.opacity="1";ls.style.pointerEvents="";ls.className="lstep s-active";ln.className="lstep-num n-active";ln.textContent=i;}
+    else{ls.style.opacity=".4";ls.style.pointerEvents="none";ls.className="lstep";ln.className="lstep-num";ln.textContent=i;}
   }
 }
-async function getLoginUrl() {
-  const btn = document.getElementById("btn-get-url");
+async function getLoginUrl(){
+  const btn=document.getElementById("btn-get-url");
   btn.disabled=true; btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Getting URL…`;
-  try {
-    const r = await fetch(`${API}/login`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    if (!d.auth_url) throw new Error("No auth_url in response");
-    authUrl = d.auth_url;
-    document.getElementById("url-text").textContent = authUrl;
-    setStep(2);
-    btn.innerHTML=`<i class="ti ti-check"></i> URL Ready`;
-    btn.style.background="var(--green)";
+  try{
+    const r=await fetch(`${API}/login`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d=await r.json();
+    if(!d.auth_url) throw new Error("No auth_url in response");
+    authUrl=d.auth_url;
+    document.getElementById("url-text").textContent=authUrl;
+    setStep(2); btn.innerHTML=`<i class="ti ti-check"></i> URL Ready`; btn.style.background="var(--green)";
     showToast("Login URL ready — click Open to authorize","ok");
-  } catch(e) {
-    btn.disabled=false;
-    btn.innerHTML=`<i class="ti ti-login"></i> Get Login URL`;
+  }catch(e){
+    btn.disabled=false; btn.innerHTML=`<i class="ti ti-login"></i> Get Login URL`;
     showToast("Error: "+e.message,"err");
   }
 }
-function copyAuthUrl() { navigator.clipboard.writeText(authUrl).then(()=>showToast("URL copied!","ok")).catch(()=>showToast("Copy failed","err")); }
-function openAuthUrl() { if (authUrl) { window.open(authUrl,"_blank"); setStep(3); } }
-async function verifyAndEnter() {
-  const btn = document.getElementById("btn-verify");
+function copyAuthUrl(){navigator.clipboard.writeText(authUrl).then(()=>showToast("URL copied!","ok")).catch(()=>showToast("Copy failed","err"));}
+function openAuthUrl(){if(authUrl){window.open(authUrl,"_blank");setStep(3);}}
+async function verifyAndEnter(){
+  const btn=document.getElementById("btn-verify");
   btn.disabled=true; btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Verifying…`;
-  try {
-    const r = await fetch(`${API}/product/000000000001`);
-    if (r.status===401) {
-      document.getElementById("verify-wrap").innerHTML=
-        `<div class="verify-fail"><i class="ti ti-alert-circle"></i> No token yet — complete Step 2 first</div>
-         <button class="lbtn lbtn-ghost" onclick="verifyAndEnter()" style="margin-top:8px"><i class="ti ti-refresh"></i> Try Again</button>`;
-      return;
-    }
-    document.getElementById("verify-wrap").innerHTML=
-      `<div class="verify-ok"><i class="ti ti-circle-check"></i> Verified! Entering dashboard…</div>`;
-    setStep(4);
-    setTimeout(enterAdmin, 600);
-  } catch(e) {
-    document.getElementById("verify-wrap").innerHTML=
-      `<div class="verify-fail"><i class="ti ti-wifi-off"></i> Cannot reach backend at ${API}</div>
-       <button class="lbtn lbtn-ghost" onclick="verifyAndEnter()" style="margin-top:8px"><i class="ti ti-refresh"></i> Retry</button>`;
-  }
+  try{
+    const r=await fetch(`${API}/product/000000000001`);
+    if(r.status===401){document.getElementById("verify-wrap").innerHTML=`<div class="verify-fail"><i class="ti ti-alert-circle"></i> No token yet — complete Step 2 first</div><button class="lbtn lbtn-ghost" onclick="verifyAndEnter()" style="margin-top:8px"><i class="ti ti-refresh"></i> Try Again</button>`;return;}
+    document.getElementById("verify-wrap").innerHTML=`<div class="verify-ok"><i class="ti ti-circle-check"></i> Verified! Entering dashboard…</div>`;
+    setStep(4); setTimeout(enterAdmin,600);
+  }catch(e){document.getElementById("verify-wrap").innerHTML=`<div class="verify-fail"><i class="ti ti-wifi-off"></i> Cannot reach backend at ${API}</div><button class="lbtn lbtn-ghost" onclick="verifyAndEnter()" style="margin-top:8px"><i class="ti ti-refresh"></i> Retry</button>`;}
 }
-function enterAdmin() {
-  document.getElementById("login-page").style.display="none";
-  document.getElementById("admin").classList.add("show");
-  loadStats(); loadRecent();
-}
-function logout() {
-  document.getElementById("admin").classList.remove("show");
-  document.getElementById("login-page").style.display="flex";
-}
+function enterAdmin(){document.getElementById("login-page").style.display="none";document.getElementById("admin").classList.add("show");loadStats();loadRecent();}
+function logout(){document.getElementById("admin").classList.remove("show");document.getElementById("login-page").style.display="flex";}
 
-// NAVIGATION
-const PAGE_META = { dashboard: "Dashboard", import: "Fetch & Import", products: "Imported Products", mappings: "Product Mappings", settings: "Settings" };
-function goPage(name, el) {
+// ── NAVIGATION ─────────────────────────────────────────────────────────
+const PAGE_META={dashboard:"Dashboard",import:"Fetch & Import",products:"Imported Products",pending:"Pending Imports",mappings:"Product Mappings",settings:"Settings"};
+function goPage(name,el){
   document.querySelectorAll(".sb-item").forEach(b=>b.classList.remove("active"));
-  if (el) el.classList.add("active");
+  if(el) el.classList.add("active");
   else document.querySelector(`[data-page="${name}"]`)?.classList.add("active");
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.getElementById("pg-"+name).classList.add("active");
-  document.getElementById("tb-title").textContent = PAGE_META[name]||name;
-  document.getElementById("tb-bc-page").textContent = PAGE_META[name]||name;
-  if (name==="dashboard") { loadStats(); loadRecent(); }
-  if (name==="products")  loadProducts();
-  if (name==="mappings")  loadMappings(1);
+  document.getElementById("tb-title").textContent=PAGE_META[name]||name;
+  document.getElementById("tb-bc-page").textContent=PAGE_META[name]||name;
+  if(name==="dashboard"){loadStats();loadRecent();}
+  if(name==="products") loadProducts();
+  if(name==="mappings") loadMappings(1);
+  if(name==="pending")  loadPendingImports();
 }
 
-// DASHBOARD
-async function loadStats() {
-  try {
-    const r = await fetch(`${API}/dashboard/stats`);
-    const d = await r.json();
-    document.getElementById("st-total").textContent = d.total_imported ?? "—";
-    document.getElementById("st-draft").textContent = d.draft ?? "—";
-    document.getElementById("st-active").textContent = d.active ?? "—";
-    document.getElementById("st-modified").textContent = d.modified ?? "—";
-    document.getElementById("sb-count").textContent = d.total_imported ?? "0";
-  } catch(e) {}
+// ── DASHBOARD ──────────────────────────────────────────────────────────
+async function loadStats(){
+  try{const r=await fetch(`${API}/dashboard/stats`),d=await r.json();
+    document.getElementById("st-total").textContent=d.total_imported??"—";
+    document.getElementById("st-draft").textContent=d.draft??"—";
+    document.getElementById("st-active").textContent=d.active??"—";
+    document.getElementById("st-modified").textContent=d.modified??"—";
+    document.getElementById("sb-count").textContent=d.total_imported??"0";
+  }catch(e){}
 }
-async function loadRecent() {
-  const tb = document.getElementById("dash-tbody");
-  tb.innerHTML=`<tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList`;
-  try {
-    const r = await fetch(`${API}/dashboard/products?page=1&page_size=5`);
-    const d = await r.json();
-    if (!d.products?.length) { tb.innerHTML=`<tr><td colspan="6"><div class="empty"><i class="ti ti-inbox"></i><p>No imports yet</p><small>Go to Fetch & Import to add products</small></div>NonNullList`; return; }
-    tb.innerHTML = d.products.map(p => miniRow(p)).join("");
-  } catch(e) { tb.innerHTML=`<tr><td colspan="6" style="text-align:center;color:var(--red);padding:28px">${e.message}NonNullList`; }
+async function loadRecent(){
+  const tb=document.getElementById("dash-tbody");
+  tb.innerHTML=`<tr><td colspan="6"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
+  try{
+    const r=await fetch(`${API}/dashboard/products?page=1&page_size=5`),d=await r.json();
+    if(!d.products?.length){tb.innerHTML=`<tr><td colspan="6"><div class="empty"><i class="ti ti-inbox"></i><p>No imports yet</p></div></td></tr>`;return;}
+    tb.innerHTML=d.products.map(p=>miniRow(p)).join("");
+  }catch(e){tb.innerHTML=`<tr><td colspan="6" style="text-align:center;color:var(--red);padding:28px">${e.message}</td></tr>`;}
 }
-function miniRow(p) {
-  const title = p.title||p.original_title||"—";
-  const price = p.price||p.sale_price||"—";
-  const cur   = p.currency||"USD";
-  const date  = p.imported_at ? new Date(p.imported_at).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "—";
-  const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
-  const sb = p.shopify_status==="active" ? `<span class="badge b-green"><i class="ti ti-circle-check" style="font-size:10px"></i> Active</span>` : `<span class="badge b-gray"><i class="ti ti-file" style="font-size:10px"></i> Draft</span>`;
-  const pj = escJson(p);
+function miniRow(p){
+  const title=p.title||p.original_title||"—", price=p.price||"—", cur=p.currency||"USD";
+  const date=p.imported_at?new Date(p.imported_at).toLocaleDateString("en-US",{month:"short",day:"numeric"}):"—";
+  const imgEl=p.main_image?`<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>`:`<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
+  const sb=p.shopify_status==="active"?`<span class="badge b-green">Active</span>`:`<span class="badge b-gray">Draft</span>`;
+  const pj=escJson(p);
+  return `<tr><td>${imgEl}</td><td><div class="td-title" title="${title}">${title}</div><div class="td-sub">${p.store_name||""}</div></td><td><span class="td-price">${cur} ${price}</span></td><td>${sb}</td><td style="font-size:12px;color:var(--t3)">${date}</td><td><button class="btn btn-xs" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:12px"></i> Edit</button></td></tr>`;
+}
+
+// ── PRODUCTS TABLE ─────────────────────────────────────────────────────
+async function loadProducts(page){
+  prodPage=page||1;
+  const q=document.getElementById("prod-search")?.value||"";
+  const tb=document.getElementById("prod-tbody");
+  tb.innerHTML=`<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
+  try{
+    const r=await fetch(`${API}/dashboard/products?page=${prodPage}&page_size=5`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d=await r.json(); prodPages=d.pages;
+    document.getElementById("prod-count-sub").textContent=`${d.total} products total`;
+    document.getElementById("sb-count").textContent=d.total;
+    let rows=d.products;
+    if(q){const ql=q.toLowerCase();rows=rows.filter(p=>(p.title||"").toLowerCase().includes(ql)||(p.aliexpress_id||"").includes(ql));}
+    if(!rows.length){tb.innerHTML=`<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;document.getElementById("prod-pag").style.display="none";return;}
+    tb.innerHTML=rows.map(p=>fullRow(p)).join("");
+    document.querySelectorAll(".product-checkbox").forEach(cb=>cb.addEventListener("change",updateSelectedCount));
+    buildPag(d.total,d.page,d.pages);
+  }catch(e){tb.innerHTML=`<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;}
+}
+function fullRow(p){
+  const title=p.title||"—", price=p.price||"—", cur=p.currency||"USD";
+  const rating=p.rating||p.avg_rating;
+  const date=p.imported_at?new Date(p.imported_at).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
+  const imgEl=p.main_image?`<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>`:`<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
+  const sb=p.shopify_status==="active"?`<span class="badge b-green">Active</span>`:`<span class="badge b-gray">Draft</span>`;
+  const edited=(p.custom_title||p.custom_price||p.custom_rating||p.custom_description)?`<span class="badge b-indigo" style="margin-left:4px">Edited</span>`:"";
+  let modeBadge='';
+  if(!p.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+  else if(p.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+  else if(p.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+  else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+  const pj=escJson(p);
   return `<tr>
-    <td><div class="td-product-wrap">${imgEl}</div></td>
-    <td><div class="td-title" title="${title}">${title}</div><div class="td-sub">${p.store_name||""}</div></td>
-    <td><span class="td-price">${cur} ${price}</span></td>
-    <td>${sb}</td>
-    <td style="font-size:12px;color:var(--t3)">${date}</td>
-    <td><button class="btn btn-xs" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:12px"></i> Edit</button></td>
-  </tr>`;
-}
-
-// PRODUCTS TABLE
-async function loadProducts(page) {
-  prodPage = page||1;
-  const q = document.getElementById("prod-search")?.value||"";
-  const tb = document.getElementById("prod-tbody");
-  tb.innerHTML=`<tr><td colspan="10"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div>NonNullList`;
-  try {
-    const r = await fetch(`${API}/dashboard/products?page=${prodPage}&page_size=5`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    prodPages = d.pages;
-    document.getElementById("prod-count-sub").textContent = `${d.total} products total`;
-    document.getElementById("sb-count").textContent = d.total;
-    let rows = d.products;
-    if (q) { const ql=q.toLowerCase(); rows=rows.filter(p=>(p.title||"").toLowerCase().includes(ql)||(p.aliexpress_id||"").includes(ql)); }
-    if (!rows.length) { tb.innerHTML=`<tr><td colspan="9"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div>NonNullList`; document.getElementById("prod-pag").style.display="none"; return; }
-    tb.innerHTML = rows.map(p => fullRow(p)).join("");
-    buildPag(d.total, d.page, d.pages);
-  } catch(e) { tb.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--red);padding:40px">${e.message}NonNullList`; }
-}
-
-function fullRow(p) {
-  const title = p.title||p.original_title||"—";
-  const price = p.price||p.sale_price||"—";
-  const cur   = p.currency||"USD";
-  const rating= p.rating||p.avg_rating;
-  const date  = p.imported_at ? new Date(p.imported_at).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
-  const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
-  const sb = p.shopify_status==="active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
-  const edited = (p.custom_title||p.custom_price||p.custom_rating||p.custom_description) ? `<span class="badge b-indigo" style="margin-left:4px">Edited</span>` : "";
-
-  // ---- PRICE MODE BADGE ----
-  let modeBadge = '';
-  if (!p.track_price) {
-    modeBadge = `<span class="badge b-gray" title="Price tracking is disabled"><i class="ti ti-pause"></i> Paused</span>`;
-  } else if (p.price_mode === 'auto') {
-    modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
-  } else if (p.price_mode === 'increase') {
-    modeBadge = `<span class="badge b-orange" title="Increase $${p.price_increase} added on each sync"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
-  } else if (p.price_mode === 'manual') {
-    modeBadge = `<span class="badge b-purple" title="Manual price – will not sync"><i class="ti ti-pencil"></i> Manual</span>`;
-  } else {
-    modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
-  }
-  // ---------------------------------
-
-  const pj = escJson(p);
-  return `<tr>
-    <td style="width: 28px"><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
+    <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
     <td>${imgEl}</td>
     <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name||""}</div></td>
     <td><span class="td-id">${p.aliexpress_id}</span></td>
     <td><span class="td-price">${cur} ${price}</span></td>
-    <td style="text-align:center; white-space:nowrap;">${modeBadge}</td>   <!-- NEW COLUMN -->
+    <td>${modeBadge}</td>
     <td style="font-size:12px;color:var(--t2)">${rating?`<span style="color:var(--orange)">★</span> ${parseFloat(rating).toFixed(1)}`:"—"}</td>
     <td style="font-size:12px;color:var(--t2);text-align:center">${p.sku_count||"—"}</td>
     <td>${sb}${edited}</td>
@@ -1007,862 +666,374 @@ function fullRow(p) {
       <button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>
       <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
       ${p.shopify_product_id?`<a href="https://admin.shopify.com/products/${p.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
-      <button class="btn btn-icon sm" title="Delete" style="color:var(--red);border-color:var(--red-border)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
+      <button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
     </div></td>
   </tr>`;
 }
-
-function buildPag(total, page, pages) {
-  const el = document.getElementById("prod-pag");
-  if (pages<=1){el.style.display="none";return;}
-  el.style.display="flex";
-  document.getElementById("pag-info").textContent = `Showing page ${page} of ${pages} · ${total} products`;
-  const btns = document.getElementById("pag-btns");
+function updateSelectedCount(){const c=document.querySelectorAll('.product-checkbox:checked').length;document.getElementById('selected-count').innerText=`${c} selected`;}
+function buildPag(total,page,pages){
+  const el=document.getElementById("prod-pag");
+  if(pages<=1){el.style.display="none";return;} el.style.display="flex";
+  document.getElementById("pag-info").textContent=`Page ${page} of ${pages} · ${total} products`;
+  const btns=document.getElementById("pag-btns");
   let h=`<button class="pgb" onclick="loadProducts(${page-1})" ${page===1?"disabled":""}>‹</button>`;
-  for(let i=1;i<=pages;i++){
-    if(pages>7&&Math.abs(i-page)>2&&i!==1&&i!==pages){if(i===2||i===pages-1)h+=`<span style="padding:0 4px;line-height:32px;color:var(--t3)">…</span>`;continue;}
-    h+=`<button class="pgb ${i===page?"cur":""}" onclick="loadProducts(${i})">${i}</button>`;
-  }
+  for(let i=1;i<=pages;i++){if(pages>7&&Math.abs(i-page)>2&&i!==1&&i!==pages){if(i===2||i===pages-1)h+=`<span style="padding:0 4px;line-height:32px;color:var(--t3)">…</span>`;continue;}h+=`<button class="pgb ${i===page?"cur":""}" onclick="loadProducts(${i})">${i}</button>`;}
   h+=`<button class="pgb" onclick="loadProducts(${page+1})" ${page===pages?"disabled":""}>›</button>`;
   btns.innerHTML=h;
 }
 function searchDebounce(){clearTimeout(_searchTimer);_searchTimer=setTimeout(()=>loadProducts(1),300);}
-async function syncProductPrice(productId) {
-  showToast("Syncing price from AliExpress...", "info");
-  try {
-    const r = await fetch(`${API}/dashboard/products/${productId}/sync-price`, { method: "POST" });
-    if (!r.ok) { const err = await r.json(); throw new Error(err.detail || "Sync failed"); }
-    const data = await r.json();
-    showToast(data.message, "ok");
-    loadProducts(prodPage);
-    loadStats();
-  } catch (e) { showToast("Sync error: " + e.message, "err"); }
+async function syncProductPrice(productId){
+  showToast("Syncing price from AliExpress...","info");
+  try{const r=await fetch(`${API}/dashboard/products/${productId}/sync-price`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Sync failed");}const d=await r.json();showToast(d.message,"ok");loadProducts(prodPage);loadStats();}
+  catch(e){showToast("Sync error: "+e.message,"err");}
+}
+async function delProduct(id){
+  if(!confirm("Remove from database?\n(Product stays in Shopify)"))return;
+  try{const r=await fetch(`${API}/dashboard/products/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(`HTTP ${r.status}`);showToast("Removed from database","ok");loadProducts(prodPage);loadStats();}
+  catch(e){showToast("Delete failed: "+e.message,"err");}
 }
 
-// FETCH & IMPORT
-function parseIds(raw){ return [...new Set(raw.split(/[\s,\n]+/).map(s=>s.trim()).filter(Boolean))]; }
-function syncFetchBtn(){
-  const ids=parseIds(document.getElementById("ids-input").value);
-  document.getElementById("btn-fetch").disabled=ids.length===0;
-  document.getElementById("ids-det").textContent=ids.length>0?`${ids.length} product${ids.length!==1?"s":""} detected`:"";
-}
+// ── FETCH & IMPORT ─────────────────────────────────────────────────────
+function parseIds(raw){return[...new Set(raw.split(/[\s,\n]+/).map(s=>s.trim()).filter(Boolean))];}
+function syncFetchBtn(){const ids=parseIds(document.getElementById("ids-input").value);document.getElementById("btn-fetch").disabled=ids.length===0;document.getElementById("ids-det").textContent=ids.length>0?`${ids.length} product${ids.length!==1?"s":""} detected`:"";}
 async function doFetch(){
-  const ids=parseIds(document.getElementById("ids-input").value);
-  if(!ids.length)return;
-  const btn=document.getElementById("btn-fetch");
-  btn.disabled=true; btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Fetching…`;
-  fp={}; ids.forEach(id=>{fp[id]={id,data:null,status:"idle",sid:null,err:null};});
+  const ids=parseIds(document.getElementById("ids-input").value);if(!ids.length)return;
+  const btn=document.getElementById("btn-fetch");btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Fetching…`;
+  fp={};ids.forEach(id=>{fp[id]={id,data:null,status:"idle",sid:null,oosSkus:[],err:null};});
   document.getElementById("fetch-section").style.display="";
   document.getElementById("fetch-count-lbl").textContent=`${ids.length} Product${ids.length!==1?"s":""}`;
   document.getElementById("fetch-status-lbl").textContent="fetching…";
   document.getElementById("pcard-grid").innerHTML=ids.map(id=>skelCard(id)).join("");
   let ok=0,fail=0;
   await Promise.all(ids.map(async id=>{
-    try{
-      const r=await fetch(`${API}/product/${id}`);
-      if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
-      fp[id].data=await r.json(); fp[id].status="ready"; ok++;
-    }catch(e){fp[id].status="ferr";fp[id].err=e.message;fail++;}
+    try{const r=await fetch(`${API}/product/${id}`);if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}fp[id].data=await r.json();fp[id].status="ready";ok++;}
+    catch(e){fp[id].status="ferr";fp[id].err=e.message;fail++;}
     drawCard(id);
   }));
-  btn.disabled=false; btn.innerHTML=`<i class="ti ti-search"></i> Fetch Products`;
+  btn.disabled=false;btn.innerHTML=`<i class="ti ti-search"></i> Fetch Products`;
   document.getElementById("fetch-status-lbl").textContent=`${ok} ready${fail>0?` · ${fail} failed`:""}`;
   showToast(`Fetched ${ok} product${ok!==1?"s":""}${fail>0?` · ${fail} failed`:""}`,fail>0?"err":"ok");
 }
 function skelCard(id){return`<div class="pcard" id="fc-${id}"><div class="pc-img"><div class="skel" style="width:100%;height:100%"></div></div><div class="pc-body"><div class="skel" style="height:14px;width:90%;margin-bottom:8px"></div><div class="skel" style="height:14px;width:55%"></div></div><div class="pc-foot"><div class="skel" style="height:36px;border-radius:9px"></div></div></div>`;}
+
+// ── drawCard — ONE definition only ────────────────────────────────────
 function drawCard(id){
-  const p=fp[id];
-  const el=document.getElementById("fc-"+id);
-  if(!el)return;
+  const p=fp[id], el=document.getElementById("fc-"+id);
+  if(!el) return;
   if(p.status==="ferr"){el.innerHTML=`<div class="pc-body" style="padding:16px"><div class="badge b-red" style="margin-bottom:8px"><i class="ti ti-alert-circle"></i> Fetch failed</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${p.id}</div><div style="font-size:11px;color:var(--red);margin-top:6px">${p.err||""}</div></div>`;return;}
   const d=p.data;
   const img=d.main_image?`<img src="${d.main_image}" onerror="this.parentNode.innerHTML='<i class=\\'ti ti-photo\\'></i>'" style="width:100%;height:100%;object-fit:cover;display:block">`:`<i class="ti ti-photo"></i>`;
-  const cur=d.currency||"USD"; const price=d.sale_price||d.original_price||"—";
-  const orig=d.original_price&&d.sale_price&&d.original_price!==d.sale_price?d.original_price:null;
+  const cur=d.currency||"USD", price=d.sale_price||d.original_price||"—";
+  const orig=(d.original_price&&d.sale_price&&d.original_price!==d.sale_price)?d.original_price:null;
   let foot="";
-  if(p.status==="ready")foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;
-  else if(p.status==="importing")foot=`<div class="pc-status pcs-loading"><i class="ti ti-loader-2 spin"></i> Importing…</div>`;
-  else if(p.status==="ok")foot=`<div class="pc-status pcs-ok"><i class="ti ti-circle-check"></i> Imported!</div>${p.sid?`<a href="https://admin.shopify.com/products/${p.sid}" target="_blank" style="font-size:11px;color:var(--blue);display:flex;align-items:center;justify-content:center;gap:4px;text-decoration:none;margin-top:6px">View in Shopify <i class="ti ti-external-link" style="font-size:10px"></i></a>`:""}`;
-  else if(p.status==="skip")foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Already in Shopify</div>`;
-  else if(p.status==="ierr")foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${p.err||""}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;
+  switch(p.status){
+    case "ready": foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;break;
+    case "importing": foot=`<div class="pc-status pcs-loading"><i class="ti ti-loader-2 spin"></i> Importing…</div>`;break;
+    case "ok": foot=`<div class="pc-status pcs-ok"><i class="ti ti-circle-check"></i> Imported!</div>${p.sid?`<a href="https://admin.shopify.com/products/${p.sid}" target="_blank" style="font-size:11px;color:var(--blue);display:flex;align-items:center;justify-content:center;gap:4px;text-decoration:none;margin-top:6px">View in Shopify <i class="ti ti-external-link" style="font-size:10px"></i></a>`:""}`;break;
+    case "pending":{
+      const oos=p.oosSkus||[], oosCount=oos.length;
+      const nameList=oos.slice(0,3).map(s=>s.label||s.sku_id||"—");
+      const extra=oosCount>3?` +${oosCount-3} more`:"";
+      foot=`<div class="pc-status pcs-skip" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 12px"><div style="display:flex;align-items:center;gap:6px;font-weight:700"><i class="ti ti-clock"></i>${oosCount} variant${oosCount!==1?"s":""} out of stock — queued</div>${nameList.length?`<div style="font-size:10px;opacity:.75">${nameList.join(", ")}${extra}</div>`:""}<div style="font-size:10px;opacity:.6">Will auto-import when all variants are in stock</div></div>`;
+      break;}
+    case "skip": foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Already in Shopify</div>`;break;
+    case "ierr": foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${p.err||""}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;break;
+    default: foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;
+  }
   el.innerHTML=`<div class="pc-img">${img}</div><div class="pc-body"><div class="pc-title">${d.title||id}</div><div style="display:flex;align-items:baseline;gap:6px;margin-top:4px"><span class="pc-price">${cur} ${price}</span>${orig?`<span class="pc-orig">${orig}</span>`:""}</div><div class="pc-meta">${d.sku_count?`<span class="badge b-indigo" style="font-size:10px">${d.sku_count} variants</span>`:""} ${d.avg_rating?`<span style="color:var(--orange);font-size:12px">★ ${parseFloat(d.avg_rating).toFixed(1)}</span>`:""}</div></div><div class="pc-foot">${foot}</div>`;
 }
-async function importOne(id) {
-  const p = fp[id];
-  if (!p) return;
-  p.status = "importing";
-  drawCard(id);
-  try {
-    const r = await fetch(`${API}/import/${id}`, { method: "POST" });
-    if (r.status === 409) {
-      const errData = await r.json().catch(() => ({}));
-      p.status = "skip";
-      p.err = errData.detail || "Product already mapped for price sync – use Sync Mappings page";
-      drawCard(id);
-      showToast(p.err, "info");
-      return;
-    }
-    if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      throw new Error(b?.detail || `HTTP ${r.status}`);
-    }
-    const res = await r.json();
-    p.sid = res?.shopify_product?.id || null;
-    p.status = "ok";
-    drawCard(id);
-    showToast("Imported to Shopify successfully!", "ok");
-    loadStats();
-  } catch (e) {
-    p.status = "ierr";
-    p.err = e.message;
-    drawCard(id);
-    showToast("Import failed: " + e.message, "err");
-  }
+
+// ── importOne — ONE definition only ───────────────────────────────────
+async function importOne(id){
+  const p=fp[id]; if(!p) return;
+  p.status="importing"; drawCard(id);
+  try{
+    const r=await fetch(`${API}/import/${id}`,{method:"POST"});
+    let res; try{res=await r.json();}catch(_){res={};}
+    if(r.status===409){p.status="skip";p.err=res.detail||"Already in Shopify";drawCard(id);showToast(p.err,"info");return;}
+    if(!r.ok){throw new Error(res.detail||`HTTP ${r.status}`);}
+    if(res.status==="pending"){p.status="pending";p.oosSkus=res.out_of_stock_skus||[];p.err=res.message;drawCard(id);showToast(`${p.oosSkus.length} variant(s) OOS — added to pending queue.`,"info");updatePendingBadge();return;}
+    if(res.status==="imported"){p.sid=res?.shopify_product?.id||null;p.status="ok";drawCard(id);showToast("Imported to Shopify successfully!","ok");loadStats();return;}
+    throw new Error(res.message||"Unexpected response from server");
+  }catch(e){p.status="ierr";p.err=e.message;drawCard(id);showToast("Import failed: "+e.message,"err");}
 }
 async function importAll(){
   const btn=document.getElementById("btn-import-all");
   btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Importing All…`;
   const todo=Object.keys(fp).filter(id=>["ready","ierr"].includes(fp[id].status));
-  for(const id of todo)await importOne(id);
+  for(const id of todo) await importOne(id);
   btn.disabled=false;btn.innerHTML=`<i class="ti ti-upload"></i> Import All to Shopify`;
 }
 function clearFetch(){fp={};document.getElementById("ids-input").value="";document.getElementById("ids-det").textContent="";document.getElementById("btn-fetch").disabled=true;document.getElementById("fetch-section").style.display="none";}
 
-// MODAL + SHIPPING/INVENTORY
-function escJson(p) { return JSON.stringify(p).replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
-
-
-
-// ─────────────────────────────────────────────
-// REPLACE your existing openModal() with this — adds variant loading.
-// The only addition is the loadVariantsForModal() call and removal
-// of the single m-price field population (since variants handle price now).
-// ─────────────────────────────────────────────
-
-function openModal(p) {
-  document.getElementById("m-dbid").value = p.id;
-  document.getElementById("m-aeid").value = p.aliexpress_id;
-  const hasImg = !!p.main_image;
-  const displayPrice = p.price || p.sale_price || p.original_price || "—";
-  document.getElementById("mp").innerHTML = `
-    ${hasImg ? `<img src="${p.main_image}" class="mp-img" onerror="this.outerHTML='<div class=\\'mp-ph\\'><i class=\\'ti ti-photo\\'></i></div>'">` : `<div class="mp-ph"><i class="ti ti-photo"></i></div>`}
-    <div><div class="mp-title">${p.original_title || p.title || "—"}</div><div class="mp-sub">ID: ${p.aliexpress_id} · ${p.currency || "USD"} ${displayPrice}</div></div>
-  `;
-  document.getElementById("m-title").value = p.custom_title || "";
-  document.getElementById("m-rating").value = p.custom_rating || p.avg_rating || "";
-  document.getElementById("m-desc").value = p.custom_description || "";
+// ── MODAL ──────────────────────────────────────────────────────────────
+function escJson(p){return JSON.stringify(p).replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function escapeHtml(str){if(!str)return"";return str.replace(/[&<>]/g,m=>m==="&"?"&amp;":m==="<"?"&lt;":"&gt;");}
+function closeModal(){document.getElementById("edit-overlay").classList.remove("open");}
+document.getElementById("edit-overlay").addEventListener("click",function(e){if(e.target===this)closeModal();});
+function openModal(p){
+  document.getElementById("m-dbid").value=p.id;
+  document.getElementById("m-aeid").value=p.aliexpress_id;
+  const displayPrice=p.price||p.sale_price||p.original_price||"—";
+  document.getElementById("mp").innerHTML=`${p.main_image?`<img src="${p.main_image}" class="mp-img" onerror="this.outerHTML='<div class=\\'mp-ph\\'><i class=\\'ti ti-photo\\'></i></div>'">`:`<div class="mp-ph"><i class="ti ti-photo"></i></div>`}<div><div class="mp-title">${p.original_title||p.title||"—"}</div><div class="mp-sub">ID: ${p.aliexpress_id} · ${p.currency||"USD"} ${displayPrice}</div></div>`;
+  document.getElementById("m-title").value=p.custom_title||"";
+  document.getElementById("m-rating").value=p.custom_rating||p.avg_rating||"";
+  document.getElementById("m-desc").value=p.custom_description||"";
   document.getElementById("edit-overlay").classList.add("open");
-
-  // NEW: load all variant prices
   loadVariantsForModal(p.id);
-
   refreshProductDetails();
 }
-
-
-// ─────────────────────────────────────────────
-// REPLACE your existing saveModal() with this — sends variant prices
-// to the new /update-variant-prices endpoint alongside the normal
-// title/rating/description update.
-// ─────────────────────────────────────────────
-
-
-
-
-
-function closeModal() { document.getElementById("edit-overlay").classList.remove("open"); }
-document.getElementById("edit-overlay").addEventListener("click", function(e){ if(e.target === this) closeModal(); });
-
-
-
-
-// async function refreshProductDetails() {
-//     const productId = document.getElementById("m-dbid").value;   // numeric database ID
-//     if (!productId) {
-//         console.warn("No product ID found in modal");
-//         return;
-//     }
-//     try {
-//         const response = await fetch(`${API}/dashboard/products/${productId}/details`);
-//         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-//         const data = await response.json();
-
-//         // Shipping info
-//         const shippingCost = data.shipping_cost || "Calculated at checkout";
-//         const shippingMethod = data.shipping_method || "Standard Shipping";
-//         document.getElementById("modal-shipping-info").innerHTML = 
-//             `<i class="ti ti-truck-delivery"></i> ${shippingCost} · ${shippingMethod}`;
-
-//         // Inventory info
-//         if (data.total_stock && data.total_stock > 0) {
-//             document.getElementById("modal-inventory-info").innerHTML = 
-//                 `<i class="ti ti-package"></i> Total stock: ${data.total_stock} units`;
-//         } else {
-//             document.getElementById("modal-inventory-info").innerHTML = 
-//                 `<i class="ti ti-package"></i> Stock information not available from AliExpress.<span style="display:block; font-size:11px; color:var(--t3); margin-top:4px;">The API does not expose real‑time stock for dropshipping products.</span>`;
-//         }
-
-//         // Last fetch timestamp
-//         if (data.last_shipment_fetch) {
-//             const lastFetch = new Date(data.last_shipment_fetch).toLocaleString();
-//             document.getElementById("modal-inventory-info").innerHTML += 
-//                 `<div style="margin-top:6px; font-size:10px; color:var(--t3)">Last updated: ${lastFetch}</div>`;
-//         }
-//     } catch (error) {
-//         console.error("Error loading details:", error);
-//         document.getElementById("modal-shipping-info").innerHTML = "Shipping info temporarily unavailable";
-//         document.getElementById("modal-inventory-info").innerHTML = "Could not load inventory details.";
-//     }
-// }
-
-
-
-
-// ─────────────────────────────────────────────
-// REPLACEMENT for the refreshProductDetails() function in your HTML frontend
-// ─────────────────────────────────────────────
-
-// Replace refreshProductDetails() in your HTML with this version.
-// Now correctly handles:
-// - "7 days to US" shipping display (from logistics_info_dto.delivery_time)
-// - sku_available_stock for real inventory numbers
-// - sales_count for order count proxy
-// - Human-readable SKU labels (Red / XL instead of 5:100014065;14:200002987)
-
-async function refreshProductDetails() {
-    const productId    = document.getElementById("m-dbid").value;
-    const aliexpressId = document.getElementById("m-aeid").value;
-    if (!productId) return;
-
-    document.getElementById("modal-shipping-info").innerHTML =
-        `<i class="ti ti-loader-2 spin"></i> Loading…`;
-    document.getElementById("modal-inventory-info").innerHTML = "";
-
-    try {
-        const response = await fetch(`${API}/dashboard/products/${productId}/details`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-
-        // ── Shipping ──────────────────────────────────────────
-        const cost   = data.shipping_cost   || "Calculated at checkout";
-        const method = data.shipping_method || "Standard Shipping";
-        const days   = data.shipping_days;
-        const isFree = cost.toLowerCase() === "free" || cost === "0" || cost === "0.00";
-
-        let shippingHtml = `<i class="ti ti-truck-delivery"></i> `;
-        shippingHtml += `<strong style="color:${isFree ? 'var(--green)' : 'var(--t1)'}">${cost}</strong>`;
-        shippingHtml += ` via ${method}`;
-        if (days) {
-            shippingHtml += ` <span class="badge b-blue" style="margin-left:4px">
-                <i class="ti ti-clock" style="font-size:10px"></i> ${days}
-            </span>`;
-        }
-        document.getElementById("modal-shipping-info").innerHTML = shippingHtml;
-
-        // ── Inventory ─────────────────────────────────────────
-        let invHtml = "";
-        const skus        = data.sku_inventory || [];
-        const salesCount  = data.sales_count;
-        const stockAvail  = data.stock_available;
-        const totalStock  = data.total_stock;
-
-        if (stockAvail === true && totalStock > 0) {
-            // ✅ Real stock numbers from sku_available_stock
-            invHtml += `
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-                <span class="badge b-green"><i class="ti ti-package"></i> In stock</span>
-                <span style="font-weight:700;font-size:14px">${totalStock.toLocaleString()} units total</span>
-            </div>`;
-
-            // SKU breakdown table with human-readable labels
-            const stockedSkus = skus.filter(s => s.stock !== null && s.stock !== undefined);
-            if (stockedSkus.length > 0) {
-                invHtml += `
-                <details ${stockedSkus.length <= 4 ? "open" : ""}>
-                    <summary style="cursor:pointer;font-size:12px;color:var(--t2);font-weight:600;margin-bottom:6px">
-                        ${stockedSkus.length} SKU variant${stockedSkus.length !== 1 ? 's' : ''}
-                    </summary>
-                    <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
-                    <table style="font-size:12px;width:100%;border-collapse:collapse">
-                        <thead style="background:var(--bg)"><tr>
-                            <th style="text-align:left;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Variant</th>
-                            <th style="text-align:right;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Stock</th>
-                        </tr></thead>
-                        <tbody>
-                        ${stockedSkus.map((s, i) => `
-                        <tr style="background:${i % 2 === 0 ? 'transparent' : 'var(--bg)'}">
-                            <td style="padding:5px 10px;color:var(--t2)">${s.attr || s.sku_id || "—"}</td>
-                            <td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-weight:600;color:${s.stock > 0 ? 'var(--green)' : 'var(--red)'}">${s.stock ?? "—"}</td>
-                        </tr>`).join("")}
-                        </tbody>
-                    </table>
-                    </div>
-                </details>`;
-            }
-
-        } else {
-            // ⚠️ Stock hidden — show all available signals
-            invHtml += `
-            <div style="background:var(--orange-bg);border:1px solid var(--orange-border);border-radius:10px;padding:12px 14px">
-                <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px">
-                    <i class="ti ti-info-circle" style="color:var(--orange);font-size:16px;flex-shrink:0;margin-top:1px"></i>
-                    <div>
-                        <div style="font-weight:700;color:var(--orange);font-size:13px;margin-bottom:3px">
-                            Stock not reported by AliExpress
-                        </div>
-                        <div style="font-size:12px;color:#92400e;line-height:1.5">
-                            The DS API doesn't expose inventory for this product — 
-                            this does <strong>not</strong> mean it's out of stock. 
-                            Suppliers fulfil on demand.
-                        </div>
-                    </div>
-                </div>
-
-                <div style="display:flex;flex-wrap:wrap;gap:8px">
-                    ${salesCount ? `
-                    <div style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px">
-                        <i class="ti ti-shopping-cart" style="color:var(--orange)"></i>
-                        <strong>${Number(salesCount).toLocaleString()}+</strong>
-                        <span style="color:#92400e">orders</span>
-                    </div>` : ""}
-
-                    ${skus.length > 0 ? `
-                    <div style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px">
-                        <i class="ti ti-layers-subtract" style="color:var(--orange)"></i>
-                        <strong>${skus.length}</strong>
-                        <span style="color:#92400e">variant${skus.length !== 1 ? 's' : ''}</span>
-                    </div>` : ""}
-
-                    ${aliexpressId ? `
-                    <a href="https://www.aliexpress.com/item/${aliexpressId}.html" target="_blank"
-                       style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;
-                              text-decoration:none;display:inline-flex;align-items:center;gap:5px;color:#92400e">
-                        <i class="ti ti-external-link" style="color:var(--orange)"></i>
-                        Check on AliExpress
-                    </a>` : ""}
-                </div>
-
-                ${skus.length > 0 ? `
-                <details style="margin-top:10px">
-                    <summary style="cursor:pointer;font-size:11px;color:#92400e">Show ${skus.length} SKU variant${skus.length !== 1 ? 's' : ''}</summary>
-                    <div style="margin-top:6px;max-height:120px;overflow-y:auto">
-                    ${skus.map(s => `<div style="font-size:11px;color:#92400e;padding:2px 0">${s.attr || s.sku_id}</div>`).join("")}
-                    </div>
-                </details>` : ""}
-            </div>`;
-        }
-
-        if (data.last_shipment_fetch) {
-            invHtml += `
-            <div style="margin-top:8px;font-size:10px;color:var(--t3);display:flex;align-items:center;gap:4px">
-                <i class="ti ti-clock" style="font-size:11px"></i>
-                Last updated: ${new Date(data.last_shipment_fetch).toLocaleString()}
-            </div>`;
-        }
-
-        if (data.fetch_error) {
-            invHtml += `
-            <div style="margin-top:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px">
-                <i class="ti ti-alert-circle" style="font-size:11px"></i> Live fetch failed — showing cached data.
-            </div>`;
-        }
-
-        document.getElementById("modal-inventory-info").innerHTML = invHtml;
-
-    } catch (error) {
-        document.getElementById("modal-shipping-info").innerHTML =
-            `<i class="ti ti-alert-circle" style="color:var(--red)"></i> Could not load shipping info`;
-        document.getElementById("modal-inventory-info").innerHTML =
-            `<span style="color:var(--red);font-size:12px">${error.message}</span>`;
-    }
-}
-
-
- // ═══════════════════════════════════════════════════════════
-// FINAL CLEAN saveModal() — use this as your ONLY saveModal()
-// definition. Delete BOTH versions currently in your file and
-// paste this ONE in their place (right after openModal()).
-// ═══════════════════════════════════════════════════════════
-
-async function saveModal() {
-  const id = document.getElementById("m-dbid").value;
-  const btn = document.getElementById("btn-save-modal");
-  btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving…`;
-
-  const body = {
-    custom_title: document.getElementById("m-title").value.trim() || null,
-    custom_rating: document.getElementById("m-rating").value.trim() || null,
-    custom_description: document.getElementById("m-desc").value.trim() || null,
-  };
-
-  try {
-    const r = await fetch(`${API}/dashboard/products/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      throw new Error(b?.detail || `HTTP ${r.status}`);
-    }
-    const d = await r.json();
-
-    // Save variant prices (if any)
-    const variantPrices = getEditedVariantPrices();
-    let priceMsg = "";
-    if (variantPrices.length > 0) {
-      const pr = await fetch(`${API}/dashboard/products/${id}/update-variant-prices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variants: variantPrices })
-      });
-      if (!pr.ok) {
-        const pb = await pr.json().catch(() => ({}));
-        throw new Error(pb?.detail || "Variant price update failed");
-      }
-      const pd = await pr.json();
-      priceMsg = " · " + pd.message;
-    }
-
-    closeModal();
-    showToast(
-      (d.shopify_synced ? "Saved & synced to Shopify!" : "Saved to database") + priceMsg,
-      d.shopify_synced ? "ok" : "info"
-    );
-    loadProducts(prodPage);
-    loadStats();
-
-  } catch (e) {
-    showToast("Save failed: " + e.message, "err");
-  }
-
-  btn.disabled = false;
-  btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
-}
-
-
-async function delProduct(id){
-  if(!confirm("Remove from database?\n(Product stays in Shopify)"))return;
+async function saveModal(){
+  const id=document.getElementById("m-dbid").value;
+  const btn=document.getElementById("btn-save-modal");
+  btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Saving…`;
+  const body={custom_title:document.getElementById("m-title").value.trim()||null,custom_rating:document.getElementById("m-rating").value.trim()||null,custom_description:document.getElementById("m-desc").value.trim()||null};
   try{
-    const r=await fetch(`${API}/dashboard/products/${id}`,{method:"DELETE"});
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
-    showToast("Removed from database","ok");
+    const r=await fetch(`${API}/dashboard/products/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
+    const d=await r.json();
+    const variantPrices=getEditedVariantPrices();
+    let priceMsg="";
+    if(variantPrices.length>0){
+      const pr=await fetch(`${API}/dashboard/products/${id}/update-variant-prices`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({variants:variantPrices})});
+      if(!pr.ok){const pb=await pr.json().catch(()=>({}));throw new Error(pb?.detail||"Variant price update failed");}
+      const pd=await pr.json();priceMsg=" · "+pd.message;
+    }
+    closeModal();showToast((d.shopify_synced?"Saved & synced to Shopify!":"Saved to database")+priceMsg,d.shopify_synced?"ok":"info");
     loadProducts(prodPage);loadStats();
-  }catch(e){showToast("Delete failed: "+e.message,"err");}
+  }catch(e){showToast("Save failed: "+e.message,"err");}
+  btn.disabled=false;btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
 }
-
-// MAPPINGS
-function escapeHtml(str) { if (!str) return ""; return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
-
-
-async function loadMappings(page = 1) {
-    mappingPage = page;
-    const tbody = document.getElementById("mappings-tbody");
-    if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
-
-    try {
-        // 🔁 Pass page & page_size to the backend
-        const r = await fetch(`${API}/mappings/list?page=${mappingPage}&page_size=5`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-
-        // ✅ New response structure: { mappings, total, page, pages }
-        const mappings = data.mappings || [];
-        mappingPages = data.pages || 1;
-
-        if (!mappings.length) {
-            tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet. Add one above.</p></div></tr>`;
-            document.getElementById("mappings-pag").style.display = "none";
-            return;
-        }
-
-        // Render rows (same as before, but use 'mappings' variable)
-        tbody.innerHTML = mappings.map(m => {
-            let modeBadge = '';
-            if (!m.track_price) {
-                modeBadge = `<span class="badge b-gray" title="Price tracking disabled"><i class="ti ti-pause"></i> Paused</span>`;
-            } else if (m.price_mode === 'auto') {
-                modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
-            } else if (m.price_mode === 'increase') {
-                modeBadge = `<span class="badge b-orange" title="Increase $${m.price_increase} added on each sync"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
-            } else if (m.price_mode === 'manual') {
-                modeBadge = `<span class="badge b-purple" title="Manual price – will not sync"><i class="ti ti-pencil"></i> Manual</span>`;
-            } else {
-                modeBadge = `<span class="badge b-blue" title="Auto‑synced from AliExpress"><i class="ti ti-refresh"></i> Auto</span>`;
-            }
-            return `
-            <tr>
-                <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
-                <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
-                <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
-                <td>${escapeHtml(m.title || "—")}</td>
-                <td>${m.track_price ? '<span class="badge b-green">Enabled</span>' : '<span class="badge b-gray">Disabled</span>'}</td>
-                <td style="white-space:nowrap;">${modeBadge}</td>
-                <td class="td-actions">
-                <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
-                
-                
-                <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id}, '${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
-                ${m.price_mode === 'manual' ? `<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset Mode</button>` : ""}
-                <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
-                <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
-                </td>
-                        </tr>
-        `}).join("");
-
-        attachMappingCheckboxListeners();
-        buildMappingPag(data.total, mappingPage, mappingPages);
-
-    } catch(e) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;
-        document.getElementById("mappings-pag").style.display = "none";
+async function loadVariantsForModal(productId){
+  const wrap=document.getElementById("m-variants-wrap");
+  wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
+  currentVariants=[];
+  try{
+    const r=await fetch(`${API}/dashboard/products/${productId}/variants`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();currentVariants=data.variants||[];
+    if(!currentVariants.length){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;return;}
+    wrap.innerHTML=`<table style="width:100%;font-size:13px;border-collapse:collapse"><thead style="background:var(--bg)"><tr><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th><th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:130px">Price (USD)</th></tr></thead><tbody>${currentVariants.map((v,i)=>`<tr style="background:${i%2===0?"transparent":"var(--bg)"}"><td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td><td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku||"—"}</td><td style="padding:6px 8px;text-align:right"><input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}" style="width:100px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)"></td></tr>`).join("")}</tbody></table><div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border)"><button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button></div>`;
+  }catch(e){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;}
+}
+function applyPriceToAllVariants(){const inputs=document.querySelectorAll(".variant-price-input");if(!inputs.length)return;const v=inputs[0].value;inputs.forEach(i=>i.value=v);}
+function getEditedVariantPrices(){return Array.from(document.querySelectorAll(".variant-price-input")).map(i=>({variant_id:i.dataset.variantId,price:i.value}));}
+async function refreshProductDetails(){
+  const productId=document.getElementById("m-dbid").value, aliexpressId=document.getElementById("m-aeid").value;
+  if(!productId) return;
+  document.getElementById("modal-shipping-info").innerHTML=`<i class="ti ti-loader-2 spin"></i> Loading…`;
+  document.getElementById("modal-inventory-info").innerHTML="";
+  try{
+    const response=await fetch(`${API}/dashboard/products/${productId}/details`);
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();
+    const cost=data.shipping_cost||"Calculated at checkout", method=data.shipping_method||"Standard Shipping", days=data.shipping_days;
+    const isFree=cost.toLowerCase()==="free"||cost==="0"||cost==="0.00";
+    let sh=`<i class="ti ti-truck-delivery"></i> <strong style="color:${isFree?"var(--green)":"var(--t1)"}">${cost}</strong> via ${method}`;
+    if(days) sh+=` <span class="badge b-blue" style="margin-left:4px"><i class="ti ti-clock" style="font-size:10px"></i> ${days}</span>`;
+    document.getElementById("modal-shipping-info").innerHTML=sh;
+    const skus=data.sku_inventory||[], salesCount=data.sales_count, stockAvail=data.stock_available, totalStock=data.total_stock;
+    let inv="";
+    if(stockAvail===true&&totalStock>0){
+      inv=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="badge b-green"><i class="ti ti-package"></i> In stock</span><span style="font-weight:700;font-size:14px">${totalStock.toLocaleString()} units total</span></div>`;
+      const stocked=skus.filter(s=>s.stock!==null&&s.stock!==undefined);
+      if(stocked.length) inv+=`<details ${stocked.length<=4?"open":""}><summary style="cursor:pointer;font-size:12px;color:var(--t2);font-weight:600">${stocked.length} SKU variant${stocked.length!==1?"s":""}</summary><div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead style="background:var(--bg)"><tr><th style="text-align:left;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Variant</th><th style="text-align:right;padding:6px 10px;color:var(--t3);font-weight:600;border-bottom:1px solid var(--border)">Stock</th></tr></thead><tbody>${stocked.map((s,i)=>`<tr style="background:${i%2===0?"transparent":"var(--bg)"}"><td style="padding:5px 10px;color:var(--t2)">${s.attr||s.sku_id||"—"}</td><td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-weight:600;color:${s.stock>0?"var(--green)":"var(--red)"}">${s.stock??"—"}</td></tr>`).join("")}</tbody></table></div></details>`;
+    }else{
+      inv=`<div style="background:var(--orange-bg);border:1px solid var(--orange-border);border-radius:10px;padding:12px 14px"><div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px"><i class="ti ti-info-circle" style="color:var(--orange);font-size:16px;flex-shrink:0;margin-top:1px"></i><div><div style="font-weight:700;color:var(--orange);font-size:13px;margin-bottom:3px">Stock not reported by AliExpress</div><div style="font-size:12px;color:#92400e">DS API doesn't expose inventory — this does NOT mean it's out of stock.</div></div></div><div style="display:flex;flex-wrap:wrap;gap:8px">${salesCount?`<div style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px"><i class="ti ti-shopping-cart" style="color:var(--orange)"></i><strong>${Number(salesCount).toLocaleString()}+</strong><span style="color:#92400e">orders</span></div>`:""}<a href="https://www.aliexpress.com/item/${aliexpressId}.html" target="_blank" style="background:rgba(245,158,11,.15);border-radius:7px;padding:5px 10px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;color:#92400e"><i class="ti ti-external-link" style="color:var(--orange)"></i>Check on AliExpress</a></div></div>`;
     }
+    if(data.last_shipment_fetch) inv+=`<div style="margin-top:8px;font-size:10px;color:var(--t3)"><i class="ti ti-clock" style="font-size:11px"></i> Last updated: ${new Date(data.last_shipment_fetch).toLocaleString()}</div>`;
+    document.getElementById("modal-inventory-info").innerHTML=inv;
+  }catch(error){
+    document.getElementById("modal-shipping-info").innerHTML=`<i class="ti ti-alert-circle" style="color:var(--red)"></i> Could not load shipping info`;
+    document.getElementById("modal-inventory-info").innerHTML=`<span style="color:var(--red);font-size:12px">${error.message}</span>`;
+  }
 }
 
+// ── PENDING IMPORTS — ONE set of functions only ────────────────────────
+function setPendingFilter(f){
+  _pendingFilter=f;
+  ['all','pending','partial','imported'].forEach(id=>{const btn=document.getElementById('pf-'+id);if(btn)btn.classList.toggle('active',id===f);});
+  renderPendingTable(_allPendingData);
+}
+async function loadPendingImports(){
+  const tbody=document.getElementById("pending-tbody");
+  if(!tbody) return;
+  tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
+  try{
+    const r=await fetch(`${API}/pending/list`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();
+    console.log("[Pending] API response:",data);
+    _allPendingData=data.pendings||[];
+    const cnt={pending:0,partial:0,imported:0,failed:0};
+    _allPendingData.forEach(p=>{if(cnt[p.status]!==undefined)cnt[p.status]++;});
+    const psP=document.getElementById("ps-pending-count"),psPa=document.getElementById("ps-partial-count"),psI=document.getElementById("ps-imported-count");
+    if(psP) psP.textContent=cnt.pending; if(psPa) psPa.textContent=cnt.partial; if(psI) psI.textContent=cnt.imported;
+    const waiting=cnt.pending+cnt.partial;
+    const badge=document.getElementById("pending-count"); if(badge) badge.textContent=waiting||"0";
+    const sub=document.getElementById("pending-sub"); if(sub) sub.textContent=`${_allPendingData.length} total · ${waiting} awaiting stock`;
+    renderPendingTable(_allPendingData);
+  }catch(e){console.error("[Pending] load error:",e);if(tbody) tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--red);padding:32px">Error: ${e.message}</td></tr>`;}
+}
+function renderPendingTable(allRows){
+  const tbody=document.getElementById("pending-tbody"); if(!tbody) return;
+  const rows=_pendingFilter==='all'?allRows:allRows.filter(p=>p.status===_pendingFilter);
+  if(!rows.length){tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-inbox"></i><p>No ${_pendingFilter==='all'?'':_pendingFilter+' '}records</p>${_pendingFilter!=='all'?'<small>Try switching to "All"</small>':'<small>Products added to queue will appear here</small>'}</div></td></tr>`;return;}
+  tbody.innerHTML=rows.map(p=>buildPendingRow(p)).join("");
+}
+function buildPendingRow(p){
+  const imgEl=p.main_image?`<img src="${p.main_image}" class="pending-img" onerror="this.outerHTML='<div class=\\'pending-img-ph\\'><i class=\\'ti ti-photo\\'></i></div>'">`:`<div class="pending-img-ph"><i class="ti ti-photo"></i></div>`;
+  const sc={pending:{label:"Fully OOS",icon:"hourglass",cls:"status-badge-pending"},partial:{label:"Partial OOS",icon:"alert-triangle",cls:"status-badge-partial"},imported:{label:"Imported",icon:"circle-check",cls:"status-badge-imported"},failed:{label:"Failed",icon:"circle-x",cls:"status-badge-failed"}}[p.status]||{label:p.status,icon:"point",cls:"b-gray"};
+  const statusBadge=`<span class="badge ${sc.cls}"><i class="ti ti-${sc.icon}"></i> ${sc.label}</span>`;
+  const oos=Array.isArray(p.out_of_stock_skus)?p.out_of_stock_skus:[], ins=Array.isArray(p.in_stock_skus)?p.in_stock_skus:[], total=p.total_skus||(oos.length+ins.length);
+  const variantSummary=buildVariantAccordion(p.aliexpress_id,oos,ins,total);
+  const createdAt=p.created_at?new Date(p.created_at).toLocaleString():"—";
+  const lastChecked=p.last_checked?new Date(p.last_checked).toLocaleString():"Never";
+  const canRetry=["pending","partial","failed"].includes(p.status);
+  const actions=`<div class="td-actions">${canRetry?`<button class="btn btn-primary btn-sm" onclick="retryPendingImport('${p.aliexpress_id}')"><i class="ti ti-refresh"></i> Retry</button>`:""}<a href="https://www.aliexpress.com/item/${p.aliexpress_id}.html" target="_blank"><button class="btn btn-icon sm" title="View on AliExpress"><i class="ti ti-external-link"></i></button></a><button class="btn btn-icon sm" style="color:var(--red)" onclick="deletePendingImport(${p.id})"><i class="ti ti-trash"></i></button></div>`;
+  return `<tr><td>${imgEl}</td><td><div class="td-title" style="max-width:180px" title="${escapeHtml(p.title||'')}">${escapeHtml(p.title||p.aliexpress_id)}</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">${p.aliexpress_id}</div></td><td>${statusBadge}</td><td style="min-width:200px">${variantSummary}</td><td style="font-size:11px;color:var(--t3);white-space:nowrap">${createdAt}</td><td style="font-size:11px;color:var(--t3);white-space:nowrap">${lastChecked}</td><td style="text-align:center;font-size:12px">${p.retry_count||0}</td><td>${actions}</td></tr>`;
+}
+function buildVariantAccordion(aliexpressId,oos,ins,total){
+  if(!total) return`<span style="font-size:11px;color:var(--t3)">No variant data</span>`;
+  const pillIns=ins.length?`<span class="badge b-green" style="font-size:10px"><i class="ti ti-circle-check" style="font-size:9px"></i> ${ins.length} in stock</span>`:'';
+  const pillOos=oos.length?`<span class="badge b-red" style="font-size:10px"><i class="ti ti-circle-x" style="font-size:9px"></i> ${oos.length} out of stock</span>`:'';
+  if(!oos.length&&!ins.length) return`<span class="badge b-gray" style="font-size:10px"><i class="ti ti-package"></i> ${total} variant(s) — stock hidden</span>`;
+  const allSkus=[...oos.map(s=>({...s,_oos:true})),...ins.map(s=>({...s,_oos:false}))];
+  const rows=allSkus.map((s,i)=>{
+    const stockDisplay=s.stock===null||s.stock===undefined?`<span class="stock-unkn">—</span>`:s._oos?`<span class="stock-oos">0</span>`:`<span class="stock-in">${s.stock}</span>`;
+    const price=s.sale_price||s.price||'—';
+    return`<tr style="background:${i%2?"var(--bg)":"transparent"}"><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</td><td>${stockDisplay}</td><td style="font-family:var(--mono);color:var(--orange)">$${price}</td><td>${s._oos?'<span class="badge b-red" style="font-size:9px">OOS</span>':'<span class="badge b-green" style="font-size:9px">In Stock</span>'}</td></tr>`;
+  }).join('');
+  return`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">${pillIns}${pillOos}</div><details class="sku-accordion"><summary><i class="ti ti-chevron-right chevron"></i>Show ${allSkus.length} variant${allSkus.length!==1?"s":""}</summary><div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:4px;max-height:200px;overflow-y:auto"><table class="sku-table"><thead><tr><th>Variant</th><th>Stock</th><th>Price</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+async function retryPendingImport(aliexpressId){
+  showToast("Checking stock & retrying…","info");
+  try{
+    const r=await fetch(`${API}/pending/retry?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
+    const data=await r.json(); if(!r.ok) throw new Error(data.detail||"Retry failed");
+    const oos=data.out_of_stock_skus||[];
+    showToast(data.message+(oos.length?` (${oos.length} SKU(s) still OOS)`:""),"ok");
+    loadPendingImports(); loadStats();
+  }catch(e){showToast("Retry failed: "+e.message,"err");}
+}
+async function deletePendingImport(id){
+  if(!confirm("Delete this pending record?"))return;
+  try{const r=await fetch(`${API}/pending/${id}`,{method:"DELETE"});if(!r.ok)throw new Error((await r.json()).detail);showToast("Deleted","ok");loadPendingImports();}
+  catch(e){showToast("Delete failed: "+e.message,"err");}
+}
+async function processPendingImports(){
+  showToast("Processing pending imports…","info");
+  try{const r=await fetch(`${API}/admin/process-pending`,{method:"POST"});if(!r.ok)throw new Error((await r.json()).detail);const d=await r.json();showToast(d.message||"Pending imports processed","ok");loadPendingImports();loadStats();}
+  catch(e){showToast("Process failed: "+e.message,"err");}
+}
+async function updatePendingBadge(){
+  try{const r=await fetch(`${API}/pending/list`),data=await r.json();const w=(data.pendings||[]).filter(p=>['pending','partial'].includes(p.status)).length;document.getElementById("pending-count").textContent=w||"0";}catch(e){}
+}
 
-
-function attachMappingCheckboxListeners() {
-    const checkboxes = document.querySelectorAll('.mapping-checkbox');
-    checkboxes.forEach(cb => {
-        cb.removeEventListener('change', updateMappingSelectedCount);
-        cb.addEventListener('change', updateMappingSelectedCount);
-    });
+// ── MAPPINGS ───────────────────────────────────────────────────────────
+async function loadMappings(page=1){
+  mappingPage=page;
+  const tbody=document.getElementById("mappings-tbody"); if(!tbody) return;
+  tbody.innerHTML=`<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
+  try{
+    const r=await fetch(`${API}/mappings/list?page=${mappingPage}&page_size=5`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data=await r.json(); const mappings=data.mappings||[]; mappingPages=data.pages||1;
+    if(!mappings.length){tbody.innerHTML=`<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet.</p></div></tr>`;document.getElementById("mappings-pag").style.display="none";return;}
+    tbody.innerHTML=mappings.map(m=>{
+      let modeBadge='';
+      if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+      else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
+      else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+      else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+      return`<tr><td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td><td class="td-id">${escapeHtml(m.aliexpress_id)}</td><td class="td-id">${escapeHtml(m.shopify_product_id)}</td><td>${escapeHtml(m.title||"—")}</td><td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}</td><td>${modeBadge}</td><td class="td-actions"><button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button><button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}<button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button><button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button></td></tr>`;
+    }).join("");
+    document.querySelectorAll('.mapping-checkbox').forEach(cb=>{cb.removeEventListener('change',updateMappingSelectedCount);cb.addEventListener('change',updateMappingSelectedCount);});
     updateMappingSelectedCount();
+    buildMappingPag(data.total,mappingPage,mappingPages);
+  }catch(e){tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;document.getElementById("mappings-pag").style.display="none";}
 }
-
-function updateMappingSelectedCount() {
-    const checked = document.querySelectorAll('.mapping-checkbox:checked').length;
-    const span = document.getElementById('mapping-selected-count');
-    if (span) span.innerText = `${checked} selected`;
+function updateMappingSelectedCount(){const c=document.querySelectorAll('.mapping-checkbox:checked').length;const s=document.getElementById('mapping-selected-count');if(s)s.innerText=`${c} selected`;}
+function extractIdFromUrl(url,type){if(!url)return"";if(type==="aliexpress"){const m=url.match(/\/item\/(\d+)\.html/);return m?m[1]:url.trim();}if(type==="shopify"){const m=url.match(/\/products\/(\d+)/);return m?m[1]:url.trim();}return url.trim();}
+async function addMapping(){
+  let aliexpress=document.getElementById("map-aliexpress").value.trim();
+  let shopify=document.getElementById("map-shopify").value.trim();
+  const title=document.getElementById("map-title").value.trim();
+  aliexpress=extractIdFromUrl(aliexpress,"aliexpress"); shopify=extractIdFromUrl(shopify,"shopify");
+  if(!aliexpress||!shopify){showToast("Both IDs are required","err");return;}
+  try{const r=await fetch(`${API}/mappings/add?aliexpress_id=${encodeURIComponent(aliexpress)}&shopify_product_id=${encodeURIComponent(shopify)}&shopify_product_title=${encodeURIComponent(title)}`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Failed");}showToast("Mapping added","ok");document.getElementById("map-aliexpress").value="";document.getElementById("map-shopify").value="";document.getElementById("map-title").value="";await loadMappings(mappingPage);}
+  catch(e){showToast("Error: "+e.message,"err");}
 }
-
-
-
-function extractIdFromUrl(url, type) { if (!url) return ""; if (type === "aliexpress") { const match = url.match(/\/item\/(\d+)\.html/); return match ? match[1] : url.trim(); } else if (type === "shopify") { const match = url.match(/\/products\/(\d+)/); return match ? match[1] : url.trim(); } return url.trim(); }
-async function addMapping() {
-  let aliexpress = document.getElementById("map-aliexpress").value.trim();
-  let shopify = document.getElementById("map-shopify").value.trim();
-  const title = document.getElementById("map-title").value.trim();
-  aliexpress = extractIdFromUrl(aliexpress, "aliexpress");
-  shopify = extractIdFromUrl(shopify, "shopify");
-  if (!aliexpress || !shopify) { showToast("Both AliExpress ID and Shopify ID are required", "err"); return; }
-  try {
-    const r = await fetch(`${API}/mappings/add?aliexpress_id=${encodeURIComponent(aliexpress)}&shopify_product_id=${encodeURIComponent(shopify)}&shopify_product_title=${encodeURIComponent(title)}`, { method: "POST" });
-    if (!r.ok) { const err = await r.json(); throw new Error(err.detail || "Failed"); }
-    showToast("Mapping added", "ok");
-    document.getElementById("map-aliexpress").value = ""; document.getElementById("map-shopify").value = ""; document.getElementById("map-title").value = "";
-    await loadMappings(mappingPage);
-  } catch(e) { showToast("Error: " + e.message, "err"); }
+async function deleteMapping(id){if(!confirm("Delete mapping?"))return;try{const r=await fetch(`${API}/mappings/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(await r.text());showToast("Deleted","ok");await loadMappings(mappingPage);}catch(e){showToast("Delete failed: "+e.message,"err");}}
+async function syncMappedPrice(aliexpressId){
+  try{showToast("Syncing...","info");const r=await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail);}const d=await r.json();showToast(d.message||"Prices updated","ok");await loadMappings(mappingPage);}
+  catch(e){showToast("Sync error: "+e.message,"err");}
 }
-async function deleteMapping(id) { if (!confirm("Delete mapping?")) return; try { const r = await fetch(`${API}/mappings/${id}`, { method: "DELETE" }); if (!r.ok) throw new Error(await r.text()); showToast("Deleted", "ok"); await loadMappings(mappingPage); } catch(e) { showToast("Delete failed: "+e.message,"err"); } }
-
-//async function syncMappedPrice(aliexpressId) { try { showToast("Syncing...","info"); const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" }); if (!r.ok) throw new Error((await r.json()).detail); const data = await r.json(); showToast(data.message||"Prices updated","ok"); } catch(e) { showToast("Sync error: "+e.message,"err"); } }
-
-async function syncMappedPrice(aliexpressId) {
-  try {
-    showToast("Syncing...","info");
-    const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`, { method: "POST" });
-    if (!r.ok) {
-      const err = await r.json();
-      if (r.status === 400 && err.detail?.includes("manual mode")) {
-        showToast("This product is in Manual mode. Click 'Reset Mode' first to re-enable auto sync.", "err");
-        return;
-      }
-      throw new Error(err.detail);
-    }
-    const data = await r.json();
-    showToast(data.message || "Prices updated", "ok");
-    await loadMappings(mappingPage);
-  } catch(e) {
-    showToast("Sync error: " + e.message, "err");
-  }
+async function toggleTrackMapping(id){try{const r=await fetch(`${API}/mappings/${id}/toggle-track`,{method:"POST"});if(!r.ok)throw new Error(await r.text());showToast("Tracking toggled","ok");await loadMappings(mappingPage);}catch(e){showToast("Toggle failed: "+e.message,"err");}}
+async function syncAllMapped(){try{showToast("Starting background sync...","info");const r=await fetch(`${API}/mappings/sync-all`,{method:"POST"});if(!r.ok)throw new Error(await r.text());const d=await r.json();showToast(d.message,"ok");}catch(e){showToast("Sync all failed: "+e.message,"err");}}
+function closePriceModal(){document.getElementById("price-modal").classList.remove("open");}
+async function submitPriceUpdate(){
+  const mappingId=document.getElementById("price-mapping-id").value, price=document.getElementById("new-price").value.trim();
+  if(!price){showToast("Please enter a price","err");return;}
+  try{const r=await fetch(`${API}/mappings/${mappingId}/update-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({price:parseFloat(price)})});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Update failed");}const d=await r.json();showToast(d.message,"ok");closePriceModal();await loadMappings(mappingPage);}
+  catch(e){showToast("Error: "+e.message,"err");}
 }
-
-async function toggleTrackMapping(id) { try { const r = await fetch(`${API}/mappings/${id}/toggle-track`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); showToast("Tracking toggled","ok"); await loadMappings(mappingPage); } catch(e) { showToast("Toggle failed: "+e.message,"err"); } }
-async function syncAllMapped() { try { showToast("Starting background sync...","info"); const r = await fetch(`${API}/mappings/sync-all`, { method: "POST" }); if (!r.ok) throw new Error(await r.text()); const data = await r.json(); showToast(data.message,"ok"); } catch(e) { showToast("Sync all failed: "+e.message,"err"); } }
-function openPriceModal(mappingId, shopifyId) { document.getElementById("price-mapping-id").value = mappingId; document.getElementById("new-price").value = ""; document.getElementById("price-modal").classList.add("open"); }
-function closePriceModal() { document.getElementById("price-modal").classList.remove("open"); }
-async function submitPriceUpdate() {
-  const mappingId = document.getElementById("price-mapping-id").value;
-  const price = document.getElementById("new-price").value.trim();
-  if (!price) { showToast("Please enter a price", "err"); return; }
-  try {
-    const r = await fetch(`${API}/mappings/${mappingId}/update-price`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ price: parseFloat(price) }) });
-    if (!r.ok) { const err = await r.json(); throw new Error(err.detail || "Update failed"); }
-    const data = await r.json();
-    showToast(data.message, "ok");
-    closePriceModal();
-    //await loadMappingsmappingPage();
-    await loadMappings(mappingPage);   // ✅ correct
-  } catch(e) { showToast("Error: " + e.message, "err"); }
+function openIncreasePriceModal(mappingId,shopifyId){document.getElementById("increase-mapping-id").value=mappingId;document.getElementById("increase-amount").value="";document.getElementById("increase-price-modal").classList.add("open");}
+function closeIncreasePriceModal(){document.getElementById("increase-price-modal").classList.remove("open");}
+async function submitPriceIncrease(){
+  const mappingId=document.getElementById("increase-mapping-id").value, amount=document.getElementById("increase-amount").value.trim();
+  if(!amount){showToast("Please enter an amount","err");return;}
+  try{const r=await fetch(`${API}/mappings/${mappingId}/increase-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({increase_by:parseFloat(amount)})});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Increase failed");}const d=await r.json();showToast(d.message,"ok");closeIncreasePriceModal();await loadMappings(mappingPage);}
+  catch(e){showToast("Error: "+e.message,"err");}
 }
-
-function openIncreasePriceModal(mappingId, shopifyId) {
-  document.getElementById("increase-mapping-id").value = mappingId;
-  document.getElementById("increase-amount").value = "";
-  document.getElementById("increase-price-modal").classList.add("open");
+async function resetMappingMode(id){
+  if(!confirm("Reset to Auto mode?"))return;
+  try{const r=await fetch(`${API}/mappings/${id}/reset-mode`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Reset failed");}const d=await r.json();showToast(d.message||"Mode reset to auto","ok");await loadMappings(mappingPage);}
+  catch(e){showToast("Reset failed: "+e.message,"err");}
 }
-function closeIncreasePriceModal() {
-  document.getElementById("increase-price-modal").classList.remove("open");
+function buildMappingPag(total,page,pages){
+  const el=document.getElementById("mappings-pag"); if(pages<=1){el.style.display="none";return;} el.style.display="flex";
+  document.getElementById("mappings-pag-info").textContent=`Page ${page} of ${pages} · ${total} mappings`;
+  const btns=document.getElementById("mappings-pag-btns");
+  let h=`<button class="pgb" onclick="loadMappings(${page-1})" ${page===1?"disabled":""}>‹</button>`;
+  for(let i=1;i<=pages;i++){if(pages>7&&Math.abs(i-page)>2&&i!==1&&i!==pages){if(i===2||i===pages-1)h+=`<span style="padding:0 4px;line-height:32px;color:var(--t3)">…</span>`;continue;}h+=`<button class="pgb ${i===page?"cur":""}" onclick="loadMappings(${i})">${i}</button>`;}
+  h+=`<button class="pgb" onclick="loadMappings(${page+1})" ${page===pages?"disabled":""}>›</button>`;
+  btns.innerHTML=h;
 }
-async function submitPriceIncrease() {
-  const mappingId = document.getElementById("increase-mapping-id").value;
-  const amount = document.getElementById("increase-amount").value.trim();
-  if (!amount) { showToast("Please enter an amount", "err"); return; }
-  try {
-    const r = await fetch(`${API}/mappings/${mappingId}/increase-price`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ increase_by: parseFloat(amount) })
-    });
-    if (!r.ok) {
-      const err = await r.json();
-      throw new Error(err.detail || "Increase failed");
-    }
-    const data = await r.json();
-    showToast(data.message, "ok");
-    closeIncreasePriceModal();
-    await loadMappings(mappingPage);
-  } catch(e) {
-    showToast("Error: " + e.message, "err");
-  }
+function openIncreasePriceModalImported(productId){document.getElementById("increase-product-id").value=productId;document.getElementById("increase-amount-imported").value="";document.getElementById("increase-price-modal-imported").classList.add("open");}
+function closeIncreasePriceModalImported(){document.getElementById("increase-price-modal-imported").classList.remove("open");}
+async function submitPriceIncreaseImported(){
+  const productId=document.getElementById("increase-product-id").value, amount=document.getElementById("increase-amount-imported").value.trim();
+  if(!amount){showToast("Enter an amount","err");return;}
+  try{const r=await fetch(`${API}/dashboard/products/${productId}/increase-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({increase_by:parseFloat(amount)})});if(!r.ok)throw new Error((await r.json()).detail);const d=await r.json();showToast(d.message,"ok");closeIncreasePriceModalImported();loadProducts(prodPage);}
+  catch(e){showToast("Error: "+e.message,"err");}
 }
-
-function openIncreasePriceModalImported(productId) {
-    document.getElementById("increase-product-id").value = productId;
-    document.getElementById("increase-amount-imported").value = "";
-    document.getElementById("increase-price-modal-imported").classList.add("open");
+function openBulkIncreaseModal(){
+  const checked=Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb=>cb.dataset.id);
+  if(!checked.length){showToast("Select at least one product first","err");return;}
+  window.bulkProductIds=checked; document.getElementById("bulk-modal").classList.add("open");
 }
-function closeIncreasePriceModalImported() {
-    document.getElementById("increase-price-modal-imported").classList.remove("open");
+function closeBulkModal(){document.getElementById("bulk-modal").classList.remove("open");}
+async function submitBulkIncrease(){
+  const amount=document.getElementById("bulk-amount").value.trim();
+  if(!amount){showToast("Enter an amount","err");return;}
+  const increase_by=parseFloat(amount); if(isNaN(increase_by)){showToast("Invalid number","err");return;}
+  try{const res=await fetch(`${API}/dashboard/products/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_ids:window.bulkProductIds,increase_by})});if(!res.ok)throw new Error((await res.json()).detail);const d=await res.json();showToast(d.message,"ok");closeBulkModal();loadProducts(prodPage);}
+  catch(e){showToast("Bulk increase failed: "+e.message,"err");}
 }
-async function submitPriceIncreaseImported() {
-    const productId = document.getElementById("increase-product-id").value;
-    const amount = document.getElementById("increase-amount-imported").value.trim();
-    if (!amount) { showToast("Enter an amount", "err"); return; }
-    try {
-        const r = await fetch(`${API}/dashboard/products/${productId}/increase-price`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ increase_by: parseFloat(amount) })
-        });
-        if (!r.ok) throw new Error((await r.json()).detail);
-        const data = await r.json();
-        showToast(data.message, "ok");
-        closeIncreasePriceModalImported();
-        loadProducts(prodPage);   // refresh table
-    } catch(e) {
-        showToast("Error: " + e.message, "err");
-    }
+function openBulkIncreaseMappingModal(){
+  const checked=Array.from(document.querySelectorAll('.mapping-checkbox:checked')).map(cb=>parseInt(cb.dataset.id));
+  if(!checked.length){showToast("Select at least one mapping first","err");return;}
+  window.bulkMappingIds=checked; document.getElementById("bulk-mapping-modal").classList.add("open");
 }
-
-function updateSelectedCount() {
-    const checked = document.querySelectorAll('.product-checkbox:checked').length;
-    document.getElementById('selected-count').innerText = `${checked} selected`;
+function closeBulkMappingModal(){document.getElementById("bulk-mapping-modal").classList.remove("open");}
+async function submitBulkIncreaseMappings(){
+  const amount=document.getElementById("bulk-mapping-amount").value.trim();
+  if(!amount){showToast("Enter an amount","err");return;}
+  const increase_by=parseFloat(amount); if(isNaN(increase_by)){showToast("Invalid number","err");return;}
+  try{const res=await fetch(`${API}/mappings/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mapping_ids:window.bulkMappingIds,increase_by})});if(!res.ok){const e=await res.json();throw new Error(e.detail||"Bulk increase failed");}const d=await res.json();showToast(d.message,"ok");closeBulkMappingModal();loadMappings(mappingPage);}
+  catch(e){showToast("Bulk increase failed: "+e.message,"err");}
 }
-// Attach event listener after table load
-
-function openBulkIncreaseModal() {
-    const checked = Array.from(document.querySelectorAll('.product-checkbox:checked')).map(cb => cb.dataset.id);
-    if (checked.length === 0) {
-        showToast("Select at least one product first", "err");
-        return;
-    }
-    window.bulkProductIds = checked;
-    document.getElementById("bulk-modal").classList.add("open");
-}
-
-function closeBulkModal() {
-    document.getElementById("bulk-modal").classList.remove("open");
-}
-
-async function submitBulkIncrease() {
-    const amount = document.getElementById("bulk-amount").value.trim();
-    if (!amount) { showToast("Enter an amount", "err"); return; }
-    const increase_by = parseFloat(amount);
-    if (isNaN(increase_by)) { showToast("Invalid number", "err"); return; }
-
-    const payload = {
-        product_ids: window.bulkProductIds,
-        increase_by: increase_by
-    };
-    try {
-        const res = await fetch(`${API}/dashboard/products/bulk-increase`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error((await res.json()).detail);
-        const data = await res.json();
-        showToast(data.message, "ok");
-        closeBulkModal();
-        loadProducts(prodPage);  // refresh table
-    } catch(e) {
-        showToast("Bulk increase failed: " + e.message, "err");
-    }
-}
-
-function openBulkIncreaseMappingModal() {
-    const checked = Array.from(document.querySelectorAll('.mapping-checkbox:checked')).map(cb => parseInt(cb.dataset.id));
-    if (checked.length === 0) {
-        showToast("Select at least one mapping first", "err");
-        return;
-    }
-    window.bulkMappingIds = checked;
-    document.getElementById("bulk-mapping-modal").classList.add("open");
-}
-
-function closeBulkMappingModal() {
-    document.getElementById("bulk-mapping-modal").classList.remove("open");
-}
-
-async function submitBulkIncreaseMappings() {
-    const amount = document.getElementById("bulk-mapping-amount").value.trim();
-    if (!amount) { showToast("Enter an amount", "err"); return; }
-    const increase_by = parseFloat(amount);
-    if (isNaN(increase_by)) { showToast("Invalid number", "err"); return; }
-
-    const payload = {
-        mapping_ids: window.bulkMappingIds,
-        increase_by: increase_by
-    };
-    try {
-        const res = await fetch(`${API}/mappings/bulk-increase`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || "Bulk increase failed");
-        }
-        const data = await res.json();
-        showToast(data.message, "ok");
-        closeBulkMappingModal();
-        loadMappings(mappingPage);    // refresh table
-    } catch(e) {
-        showToast("Bulk increase failed: " + e.message, "err");
-    }
-}
-
-
-let currentVariants = [];
-
-// ── Call this from openModal() after setting m-dbid ──
-async function loadVariantsForModal(productId) {
-    const wrap = document.getElementById("m-variants-wrap");
-    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
-        <i class="ti ti-loader-2 spin"></i> Loading variants…
-    </div>`;
-    currentVariants = [];
-
-    try {
-        const r = await fetch(`${API}/dashboard/products/${productId}/variants`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        currentVariants = data.variants || [];
-
-        if (!currentVariants.length) {
-            wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
-                <i class="ti ti-package-off"></i> No variants found (product not linked to Shopify yet)
-            </div>`;
-            return;
-        }
-
-        wrap.innerHTML = `
-        <table style="width:100%;font-size:13px;border-collapse:collapse">
-            <thead style="background:var(--bg)">
-                <tr>
-                    <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
-                    <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
-                    <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:130px">Price (USD)</th>
-                </tr>
-            </thead>
-            <tbody>
-            ${currentVariants.map((v, i) => `
-                <tr style="background:${i % 2 === 0 ? 'transparent' : 'var(--bg)'}">
-                    <td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td>
-                    <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
-                    <td style="padding:6px 8px;text-align:right">
-                        <input type="number" step="0.01" min="0"
-                               class="variant-price-input"
-                               data-variant-id="${v.variant_id}"
-                               value="${v.price}"
-                               style="width:100px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
-                    </td>
-                </tr>
-            `).join("")}
-            </tbody>
-        </table>
-        <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px">
-            <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()">
-                <i class="ti ti-copy"></i> Apply first price to all
-            </button>
-        </div>`;
-    } catch (e) {
-        wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px">
-            <i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}
-        </div>`;
-    }
-}
-
-// Helper: copy the first variant's price into all other variant inputs
-function applyPriceToAllVariants() {
-    const inputs = document.querySelectorAll(".variant-price-input");
-    if (!inputs.length) return;
-    const firstVal = inputs[0].value;
-    inputs.forEach(inp => inp.value = firstVal);
-}
-
-// ── Collect edited variant prices for saving ──
-function getEditedVariantPrices() {
-    const inputs = document.querySelectorAll(".variant-price-input");
-    const variants = [];
-    inputs.forEach(inp => {
-        variants.push({
-            variant_id: inp.dataset.variantId,
-            price: inp.value,
-        });
-    });
-    return variants;
-}
-
-
-function buildMappingPag(total, page, pages) {
-    const el = document.getElementById("mappings-pag");
-    if (pages <= 1) { el.style.display = "none"; return; }
-    el.style.display = "flex";
-    document.getElementById("mappings-pag-info").textContent = `Showing page ${page} of ${pages} · ${total} mappings`;
-    const btns = document.getElementById("mappings-pag-btns");
-    let h = `<button class="pgb" onclick="loadMappings(${page-1})" ${page===1 ? "disabled" : ""}>‹</button>`;
-    for (let i = 1; i <= pages; i++) {
-        if (pages > 7 && Math.abs(i-page) > 2 && i !== 1 && i !== pages) {
-            if (i === 2 || i === pages-1) h += `<span style="padding:0 4px;line-height:32px;color:var(--t3)">…</span>`;
-            continue;
-        }
-        h += `<button class="pgb ${i===page ? "cur" : ""}" onclick="loadMappings(${i})">${i}</button>`;
-    }
-    h += `<button class="pgb" onclick="loadMappings(${page+1})" ${page===pages ? "disabled" : ""}>›</button>`;
-    btns.innerHTML = h;
-}
-
-async function resetMappingMode(id) {
-  if (!confirm("Reset this mapping to Auto mode? It will re-enable automatic price syncing from AliExpress.")) return;
-  try {
-    const r = await fetch(`${API}/mappings/${id}/reset-mode`, { method: "POST" });
-    if (!r.ok) {
-      const err = await r.json();
-      throw new Error(err.detail || "Reset failed");
-    }
-    const data = await r.json();
-    showToast(data.message || "Mode reset to auto", "ok");
-    await loadMappings(mappingPage);
-  } catch(e) {
-    showToast("Reset failed: " + e.message, "err");
-  }
-}
-
 </script>
 </body>
 </html>

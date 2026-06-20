@@ -12,7 +12,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .models import ProductMapping
 
 from .database import get_db, engine
-from .models import ImportedProduct, Base
+from .models import ImportedProduct, Base, PendingImport
 from .auth import router as auth_router, get_latest_token
 from .aliexpress import get_product
 from .shopify import (
@@ -30,6 +30,7 @@ from .config import get_settings
 from .aliexpress import get_product, get_shipping_info
 
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+from sqlalchemy.sql import func as sqlfunc
 
 
 
@@ -37,6 +38,8 @@ settings = get_settings()
 Base.metadata.create_all(bind=engine)
 
 scheduler = None
+
+IMPORT_MODE = "all" 
 
 # ─────────────────────────────────────────────
 # PRICE SYNC HELPERS
@@ -244,25 +247,61 @@ def sync_all_tracked_products():
 #     scheduler.start()
 #     print("[Scheduler] Started – will sync prices every hour")
 
+# def start_scheduler():
+#     global scheduler
+#     scheduler = BackgroundScheduler()
+#     # Existing job for imported products
+#     scheduler.add_job(
+#         sync_all_tracked_products,
+#         trigger=IntervalTrigger(hours=1),
+#         id="price_sync_job",
+#         replace_existing=True,
+#     )
+#     # NEW job for mapped products
+#     scheduler.add_job(
+#         sync_all_mapped_products_background,
+#         trigger=IntervalTrigger(hours=1),
+#         id="mapped_price_sync_job",
+#         replace_existing=True,
+#     )
+#     scheduler.start()
+#     print("[Scheduler] Started – will sync prices every hour for both imported and mapped products")        
+
+
+# main.py
+
 def start_scheduler():
     global scheduler
     scheduler = BackgroundScheduler()
-    # Existing job for imported products
+    scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+
     scheduler.add_job(
         sync_all_tracked_products,
         trigger=IntervalTrigger(hours=1),
         id="price_sync_job",
         replace_existing=True,
     )
-    # NEW job for mapped products
     scheduler.add_job(
         sync_all_mapped_products_background,
         trigger=IntervalTrigger(hours=1),
         id="mapped_price_sync_job",
         replace_existing=True,
     )
+    # NEW: process pending imports every 30 minutes (or hourly)
+    scheduler.add_job(
+        process_pending_imports,
+        trigger=IntervalTrigger(minutes=30),
+        id="pending_import_job",
+        replace_existing=True,
+    )
     scheduler.start()
-    print("[Scheduler] Started – will sync prices every hour for both imported and mapped products")        
+
+    jobs = scheduler.get_jobs()
+    print(f"[Scheduler] Started with {len(jobs)} job(s):")
+    for j in jobs:
+        print(f"  - {j.id} → next run at {j.next_run_time}")
+
+
 
 def shutdown_scheduler():
     if scheduler:
@@ -513,147 +552,231 @@ def fetch_aliexpress_product(aliexpress_id: str, db: Session = Depends(get_db)):
 
 
 
+# @app.post("/import/{aliexpress_id}")
+# def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
+#     # 1. Check if this ID is already in product_mappings table
+#     mapping_exists = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
+#     if mapping_exists:
+#         raise HTTPException(
+#             status_code=409,
+#             detail=f"AliExpress ID {aliexpress_id} is already mapped to Shopify product {mapping_exists.shopify_product_id}. "
+#                    f"Use the 'Sync Mappings' page to update its price – do not import again."
+#         )
+
+#     # 2. Check local DB
+#     existing = db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == aliexpress_id).first()
+#     if existing and existing.shopify_product_id:
+#         raise HTTPException(409, "Product already imported to Shopify")
+
+#     # 3. Fetch fresh data from AliExpress
+#     raw_product = get_product(aliexpress_id, db)
+
+#     # 4. If not in local DB, check if product already exists in Shopify (by title)
+#     title = raw_product.get("title")
+#     if title and check_product_exists_in_shopify(title):
+#         # Find existing Shopify product ID
+#         shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
+#         token = get_shopify_token()
+#         try:
+#             res = requests.get(
+#                 f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/products.json",
+#                 params={"title": title, "limit": 1, "fields": "id,title,status"},
+#                 headers={"X-Shopify-Access-Token": token},
+#                 timeout=15
+#             )
+#             res.raise_for_status()
+#             products = res.json().get("products", [])
+#             if products:
+#                 shopify_id = str(products[0]["id"])
+#                 shopify_status = products[0].get("status", "draft")
+#                 # Create local record only (no new Shopify product)
+#                 if existing:
+#                     existing.shopify_product_id = shopify_id
+#                     existing.shopify_status = shopify_status
+#                     existing.original_title = raw_product.get("title")
+#                     existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
+#                     existing.currency = raw_product.get("currency")
+#                     existing.main_image = raw_product.get("main_image")
+#                     existing.store_name = raw_product.get("store_name")
+#                     existing.avg_rating = raw_product.get("avg_rating")
+#                     existing.sku_count = raw_product.get("sku_count")
+#                     existing.skus = raw_product.get("skus")
+#                     existing.all_images = raw_product.get("all_images")
+#                     existing.track_price = True
+#                     db.commit()
+#                     db.refresh(existing)
+#                     product_id = existing.id
+#                 else:
+#                     new_product = ImportedProduct(
+#                         aliexpress_id=aliexpress_id,
+#                         original_title=raw_product.get("title"),
+#                         original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
+#                         currency=raw_product.get("currency"),
+#                         main_image=raw_product.get("main_image"),
+#                         all_images=raw_product.get("all_images"),
+#                         store_name=raw_product.get("store_name"),
+#                         avg_rating=raw_product.get("avg_rating"),
+#                         review_count=raw_product.get("review_count"),
+#                         orders=raw_product.get("orders"),
+#                         sku_count=raw_product.get("sku_count"),
+#                         skus=raw_product.get("skus"),
+#                         shopify_product_id=shopify_id,
+#                         shopify_status=shopify_status,
+#                         track_price=True,
+#                     )
+#                     db.add(new_product)
+#                     db.commit()
+#                     db.refresh(new_product)
+#                     product_id = new_product.id
+#                 return {
+#                     "message": "Product already existed in Shopify – local record created/updated. No duplicate created.",
+#                     "product_id": product_id,
+#                     "shopify_product": {"id": shopify_id, "title": title, "status": shopify_status}
+#                 }
+#         except Exception as e:
+#             print(f"Error checking Shopify product: {e}")
+#             raise HTTPException(409, f"Product '{title}' already exists in Shopify (title match), but could not retrieve its ID. Please contact support.")
+
+#     # 5. If not found in Shopify, create new product
+#     shopify_resp = create_shopify_product(raw_product)
+#     shopify_product_new = shopify_resp.get("product", {})
+#     shopify_id = str(shopify_product_new.get("id"))
+
+#     if existing:
+#         existing.shopify_product_id = shopify_id
+#         existing.shopify_status = shopify_product_new.get("status", "draft")
+#         existing.original_title = raw_product.get("title")
+#         existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
+#         existing.currency = raw_product.get("currency")
+#         existing.main_image = raw_product.get("main_image")
+#         existing.store_name = raw_product.get("store_name")
+#         existing.avg_rating = raw_product.get("avg_rating")
+#         existing.review_count = raw_product.get("review_count")
+#         existing.orders = raw_product.get("orders")
+#         existing.sku_count = raw_product.get("sku_count")
+#         existing.skus = raw_product.get("skus")
+#         existing.all_images = raw_product.get("all_images")
+#         existing.track_price = True
+#         db.commit()
+#         db.refresh(existing)
+#         product_id = existing.id
+#     else:
+#         new_product = ImportedProduct(
+#             aliexpress_id=aliexpress_id,
+#             original_title=raw_product.get("title"),
+#             original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
+#             currency=raw_product.get("currency"),
+#             main_image=raw_product.get("main_image"),
+#             all_images=raw_product.get("all_images"),
+#             store_name=raw_product.get("store_name"),
+#             avg_rating=raw_product.get("avg_rating"),
+#             review_count=raw_product.get("review_count"),
+#             orders=raw_product.get("orders"),
+#             sku_count=raw_product.get("sku_count"),
+#             skus=raw_product.get("skus"),
+#             shopify_product_id=shopify_id,
+#             shopify_status=shopify_product_new.get("status", "draft"),
+#             track_price=True,
+#         )
+#         db.add(new_product)
+#         db.commit()
+#         db.refresh(new_product)
+#         product_id = new_product.id
+
+#     return {
+#         "message": "Imported successfully",
+#         "product_id": product_id,
+#         "shopify_product": {
+#             "id": shopify_id,
+#             "title": shopify_product_new.get("title"),
+#             "status": shopify_product_new.get("status"),
+#         }
+#     }
+#     # main.py – add after existing endpoints
+
+
+
+# main.py
+
 @app.post("/import/{aliexpress_id}")
 def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
-    # 1. Check if this ID is already in product_mappings table
-    mapping_exists = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
-    if mapping_exists:
-        raise HTTPException(
-            status_code=409,
-            detail=f"AliExpress ID {aliexpress_id} is already mapped to Shopify product {mapping_exists.shopify_product_id}. "
-                   f"Use the 'Sync Mappings' page to update its price – do not import again."
-        )
-
-    # 2. Check local DB
-    existing = db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == aliexpress_id).first()
-    if existing and existing.shopify_product_id:
-        raise HTTPException(409, "Product already imported to Shopify")
-
-    # 3. Fetch fresh data from AliExpress
-    raw_product = get_product(aliexpress_id, db)
-
-    # 4. If not in local DB, check if product already exists in Shopify (by title)
-    title = raw_product.get("title")
-    if title and check_product_exists_in_shopify(title):
-        # Find existing Shopify product ID
-        shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
-        token = get_shopify_token()
-        try:
-            res = requests.get(
-                f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/products.json",
-                params={"title": title, "limit": 1, "fields": "id,title,status"},
-                headers={"X-Shopify-Access-Token": token},
-                timeout=15
-            )
-            res.raise_for_status()
-            products = res.json().get("products", [])
-            if products:
-                shopify_id = str(products[0]["id"])
-                shopify_status = products[0].get("status", "draft")
-                # Create local record only (no new Shopify product)
-                if existing:
-                    existing.shopify_product_id = shopify_id
-                    existing.shopify_status = shopify_status
-                    existing.original_title = raw_product.get("title")
-                    existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
-                    existing.currency = raw_product.get("currency")
-                    existing.main_image = raw_product.get("main_image")
-                    existing.store_name = raw_product.get("store_name")
-                    existing.avg_rating = raw_product.get("avg_rating")
-                    existing.sku_count = raw_product.get("sku_count")
-                    existing.skus = raw_product.get("skus")
-                    existing.all_images = raw_product.get("all_images")
-                    existing.track_price = True
-                    db.commit()
-                    db.refresh(existing)
-                    product_id = existing.id
-                else:
-                    new_product = ImportedProduct(
-                        aliexpress_id=aliexpress_id,
-                        original_title=raw_product.get("title"),
-                        original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
-                        currency=raw_product.get("currency"),
-                        main_image=raw_product.get("main_image"),
-                        all_images=raw_product.get("all_images"),
-                        store_name=raw_product.get("store_name"),
-                        avg_rating=raw_product.get("avg_rating"),
-                        review_count=raw_product.get("review_count"),
-                        orders=raw_product.get("orders"),
-                        sku_count=raw_product.get("sku_count"),
-                        skus=raw_product.get("skus"),
-                        shopify_product_id=shopify_id,
-                        shopify_status=shopify_status,
-                        track_price=True,
-                    )
-                    db.add(new_product)
-                    db.commit()
-                    db.refresh(new_product)
-                    product_id = new_product.id
-                return {
-                    "message": "Product already existed in Shopify – local record created/updated. No duplicate created.",
-                    "product_id": product_id,
-                    "shopify_product": {"id": shopify_id, "title": title, "status": shopify_status}
-                }
-        except Exception as e:
-            print(f"Error checking Shopify product: {e}")
-            raise HTTPException(409, f"Product '{title}' already exists in Shopify (title match), but could not retrieve its ID. Please contact support.")
-
-    # 5. If not found in Shopify, create new product
-    shopify_resp = create_shopify_product(raw_product)
-    shopify_product_new = shopify_resp.get("product", {})
-    shopify_id = str(shopify_product_new.get("id"))
-
-    if existing:
-        existing.shopify_product_id = shopify_id
-        existing.shopify_status = shopify_product_new.get("status", "draft")
-        existing.original_title = raw_product.get("title")
-        existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
-        existing.currency = raw_product.get("currency")
-        existing.main_image = raw_product.get("main_image")
-        existing.store_name = raw_product.get("store_name")
-        existing.avg_rating = raw_product.get("avg_rating")
-        existing.review_count = raw_product.get("review_count")
-        existing.orders = raw_product.get("orders")
-        existing.sku_count = raw_product.get("sku_count")
-        existing.skus = raw_product.get("skus")
-        existing.all_images = raw_product.get("all_images")
-        existing.track_price = True
-        db.commit()
-        db.refresh(existing)
-        product_id = existing.id
-    else:
-        new_product = ImportedProduct(
-            aliexpress_id=aliexpress_id,
-            original_title=raw_product.get("title"),
-            original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
-            currency=raw_product.get("currency"),
-            main_image=raw_product.get("main_image"),
-            all_images=raw_product.get("all_images"),
-            store_name=raw_product.get("store_name"),
-            avg_rating=raw_product.get("avg_rating"),
-            review_count=raw_product.get("review_count"),
-            orders=raw_product.get("orders"),
-            sku_count=raw_product.get("sku_count"),
-            skus=raw_product.get("skus"),
-            shopify_product_id=shopify_id,
-            shopify_status=shopify_product_new.get("status", "draft"),
-            track_price=True,
-        )
-        db.add(new_product)
-        db.commit()
-        db.refresh(new_product)
-        product_id = new_product.id
-
-    return {
-        "message": "Imported successfully",
-        "product_id": product_id,
-        "shopify_product": {
-            "id": shopify_id,
-            "title": shopify_product_new.get("title"),
-            "status": shopify_product_new.get("status"),
+ 
+    # 1. Already fully pending?
+    existing_pending = db.query(PendingImport).filter(
+        PendingImport.aliexpress_id == aliexpress_id,
+        PendingImport.status == "pending",
+    ).first()
+    if existing_pending:
+        oos = existing_pending.out_of_stock_skus or []
+        return {
+            "status":            "pending",
+            "aliexpress_id":     aliexpress_id,
+            "out_of_stock_skus": oos,
+            "message": (
+                f"Product is already in the pending queue "
+                f"({len(oos)} variant(s) out of stock). "
+                "Will import automatically when stock is available."
+            ),
         }
+ 
+    # 2. Fetch fresh data
+    raw_product = get_product(aliexpress_id, db)
+    stock_info  = classify_skus(raw_product)
+ 
+    print(f"[Import][DEBUG] {aliexpress_id}: "
+          f"in_stock={len(stock_info['in_stock'])} "
+          f"out_of_stock={len(stock_info['out_of_stock'])} "
+          f"unknown={len(stock_info['unknown'])} "
+          f"no_info={stock_info['no_info']} "
+          f"all_in_stock={stock_info['all_in_stock']}")
+ 
+    # 3. Decide whether to import or queue
+    #    In "all" mode: ANY variant with stock==0 → pending
+    #    In "any" mode: ALL variants with stock==0 → pending
+    should_import = is_product_in_stock(raw_product)
+ 
+    if not should_import:
+        # Queue it — do not import to Shopify
+        upsert_pending(aliexpress_id, raw_product, stock_info, "pending", db)
+        oos = stock_info["out_of_stock"]
+        return {
+            "status":            "pending",
+            "aliexpress_id":     aliexpress_id,
+            "out_of_stock_skus": oos,
+            "message": (
+                f"Product has {len(oos)} out-of-stock variant(s). "
+                "Added to pending queue — will import when all variants are in stock."
+                if IMPORT_MODE == "all" else
+                f"Product is completely out of stock ({len(oos)} variant(s)). "
+                "Added to pending queue — will import when stock returns."
+            ),
+        }
+ 
+    # 4. Import to Shopify
+    try:
+        product, created = import_aliexpress_product_to_shopify(raw_product, db)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(500, f"Import failed: {str(e)}")
+ 
+    shopify_info = {
+        "id":     product.shopify_product_id,
+        "title":  product.original_title,
+        "status": product.shopify_status,
     }
-    # main.py – add after existing endpoints
+ 
+    # 5. Clean success — no OOS variants
+    return {
+        "status":            "imported",
+        "product_id":        product.id,
+        "out_of_stock_skus": [],
+        "shopify_product":   shopify_info,
+        "message":           "Imported successfully" if created else "Linked to existing Shopify product",
+    }
+ 
+
+
 
 # ─────────────────────────────────────────────
 # PRODUCT MAPPING ENDPOINTS
@@ -1971,3 +2094,509 @@ def debug_run_sync_now():
 
     print("="*60 + "\n")
     return {"message": "Manual sync triggered — check terminal output"}
+
+# main.py
+
+# def is_product_in_stock(product_data: dict) -> bool:
+#     """
+#     Determine if a product has any available stock.
+#     Uses total_stock and stock_available flags from the API.
+#     """
+#     total_stock = product_data.get("total_stock")
+#     stock_available = product_data.get("stock_available")
+
+#     # If total_stock is an integer > 0 → in stock
+#     if total_stock is not None and isinstance(total_stock, (int, float)) and total_stock > 0:
+#         return True
+
+#     # If stock_available is explicitly True → in stock
+#     if stock_available is True:
+#         return True
+
+#     # If stock_available is False → out of stock
+#     if stock_available is False:
+#         return False
+
+#     # If total_stock is 0 or None, and stock_available is None, we cannot be sure.
+#     # We'll assume out of stock to be safe, but you could allow import by default.
+#     # Let's default to False (don't import) to prevent selling unavailable items.
+#     return False
+
+def is_product_in_stock(product_data: dict) -> bool:
+    """
+    Returns True when it is safe to import (respects IMPORT_MODE).
+ 
+    "all"  mode → every SKU must have stock > 0 (or all stock is hidden)
+    "any"  mode → at least one SKU has stock > 0 (or all stock is hidden)
+    """
+    result = classify_skus(product_data)
+ 
+    if result["no_info"]:
+        return True   # AliExpress hides stock for this product — import it
+ 
+    if IMPORT_MODE == "all":
+        return result["all_in_stock"]   # no variant has stock == 0
+    else:
+        return result["any_in_stock"]   # at least one variant has stock > 0
+
+    
+
+# main.py
+
+def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tuple[ImportedProduct, bool]:
+    """
+    Creates Shopify product (if not already exists) and stores local record.
+    Returns (ImportedProduct, created) where created is True if a new Shopify product was made.
+    Raises HTTPException on errors.
+    """
+    aliexpress_id = raw_product.get("product_id")
+    if not aliexpress_id:
+        raise HTTPException(400, "Missing product_id in AliExpress data")
+
+    # 1. Check if already mapped (ProductMapping) → conflict
+    mapping_exists = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
+    if mapping_exists:
+        raise HTTPException(
+            409,
+            detail=f"AliExpress ID {aliexpress_id} is already mapped to Shopify product {mapping_exists.shopify_product_id}. "
+                   f"Use the 'Sync Mappings' page to update its price – do not import again."
+        )
+
+    # 2. Check local imported product
+    existing = db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == aliexpress_id).first()
+    if existing and existing.shopify_product_id:
+        raise HTTPException(409, "Product already imported to Shopify")
+
+    # 3. Duplicate check by title in Shopify (if product already exists)
+    title = raw_product.get("title")
+    created = False
+    shopify_id = None
+    shopify_status = "draft"
+
+    if title and check_product_exists_in_shopify(title):
+        # Find existing Shopify product by title and link it
+        shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
+        token = get_shopify_token()
+        try:
+            res = requests.get(
+                f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/products.json",
+                params={"title": title, "limit": 1, "fields": "id,title,status"},
+                headers={"X-Shopify-Access-Token": token},
+                timeout=15
+            )
+            res.raise_for_status()
+            products = res.json().get("products", [])
+            if products:
+                shopify_id = str(products[0]["id"])
+                shopify_status = products[0].get("status", "draft")
+                # Update existing local record if any
+                if existing:
+                    existing.shopify_product_id = shopify_id
+                    existing.shopify_status = shopify_status
+                    # Update other fields
+                    existing.original_title = raw_product.get("title")
+                    existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
+                    existing.currency = raw_product.get("currency")
+                    existing.main_image = raw_product.get("main_image")
+                    existing.store_name = raw_product.get("store_name")
+                    existing.avg_rating = raw_product.get("avg_rating")
+                    existing.sku_count = raw_product.get("sku_count")
+                    existing.skus = raw_product.get("skus")
+                    existing.all_images = raw_product.get("all_images")
+                    existing.track_price = True
+                    db.commit()
+                    db.refresh(existing)
+                    return existing, False
+                else:
+                    # Create local record only (no new Shopify product)
+                    new_product = ImportedProduct(
+                        aliexpress_id=aliexpress_id,
+                        original_title=raw_product.get("title"),
+                        original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
+                        currency=raw_product.get("currency"),
+                        main_image=raw_product.get("main_image"),
+                        all_images=raw_product.get("all_images"),
+                        store_name=raw_product.get("store_name"),
+                        avg_rating=raw_product.get("avg_rating"),
+                        review_count=raw_product.get("review_count"),
+                        orders=raw_product.get("orders"),
+                        sku_count=raw_product.get("sku_count"),
+                        skus=raw_product.get("skus"),
+                        shopify_product_id=shopify_id,
+                        shopify_status=shopify_status,
+                        track_price=True,
+                    )
+                    db.add(new_product)
+                    db.commit()
+                    db.refresh(new_product)
+                    return new_product, False
+        except Exception as e:
+            print(f"Error checking Shopify product: {e}")
+            raise HTTPException(409, f"Product '{title}' already exists in Shopify (title match), but could not retrieve its ID. Please contact support.")
+
+    # 4. Product not found in Shopify → create new
+    shopify_resp = create_shopify_product(raw_product)
+    shopify_product_new = shopify_resp.get("product", {})
+    shopify_id = str(shopify_product_new.get("id"))
+    shopify_status = shopify_product_new.get("status", "draft")
+    created = True
+
+    if existing:
+        existing.shopify_product_id = shopify_id
+        existing.shopify_status = shopify_status
+        existing.original_title = raw_product.get("title")
+        existing.original_price = raw_product.get("sale_price") or raw_product.get("original_price")
+        existing.currency = raw_product.get("currency")
+        existing.main_image = raw_product.get("main_image")
+        existing.store_name = raw_product.get("store_name")
+        existing.avg_rating = raw_product.get("avg_rating")
+        existing.review_count = raw_product.get("review_count")
+        existing.orders = raw_product.get("orders")
+        existing.sku_count = raw_product.get("sku_count")
+        existing.skus = raw_product.get("skus")
+        existing.all_images = raw_product.get("all_images")
+        existing.track_price = True
+        db.commit()
+        db.refresh(existing)
+        return existing, created
+    else:
+        new_product = ImportedProduct(
+            aliexpress_id=aliexpress_id,
+            original_title=raw_product.get("title"),
+            original_price=raw_product.get("sale_price") or raw_product.get("original_price"),
+            currency=raw_product.get("currency"),
+            main_image=raw_product.get("main_image"),
+            all_images=raw_product.get("all_images"),
+            store_name=raw_product.get("store_name"),
+            avg_rating=raw_product.get("avg_rating"),
+            review_count=raw_product.get("review_count"),
+            orders=raw_product.get("orders"),
+            sku_count=raw_product.get("sku_count"),
+            skus=raw_product.get("skus"),
+            shopify_product_id=shopify_id,
+            shopify_status=shopify_status,
+            track_price=True,
+        )
+        db.add(new_product)
+        db.commit()
+        db.refresh(new_product)
+        return new_product, created
+
+# main.py
+
+# def process_pending_imports():
+#     """Check each pending product for stock. If in stock, import to Shopify."""
+#     db = SessionLocal()
+#     try:
+#         pendings = db.query(PendingImport).filter(PendingImport.status == "pending").all()
+#         if not pendings:
+#             return
+
+#         for pending in pendings:
+#             aliexpress_id = pending.aliexpress_id
+#             try:
+#                 # Fetch latest data
+#                 raw_product = get_product(aliexpress_id, db)
+#                 pending.last_checked = func.now()
+
+#                 if is_product_in_stock(raw_product):
+#                     # Now in stock → import
+#                     product, created = import_aliexpress_product_to_shopify(raw_product, db)
+#                     # Mark pending as processed
+#                     pending.status = "imported"
+#                     db.commit()
+#                     print(f"[Pending] Imported {aliexpress_id} (Shopify ID {product.shopify_product_id})")
+#                 else:
+#                     # Still out of stock – update last_checked and retry count
+#                     pending.retry_count += 1
+#                     db.commit()
+#                     print(f"[Pending] {aliexpress_id} still out of stock (retry {pending.retry_count})")
+#             except Exception as e:
+#                 print(f"[Pending] Error processing {aliexpress_id}: {e}")
+#                 # Optionally mark as failed after too many attempts
+#                 # pending.status = "failed"
+#                 # db.commit()
+#     finally:
+#         db.close()
+
+def process_pending_imports():
+    """
+    Background job: check each pending product.
+    If is_product_in_stock() now returns True → import to Shopify.
+    """
+    from sqlalchemy.sql import func as sqlfunc
+    db = SessionLocal()
+    try:
+        pendings = db.query(PendingImport).filter(
+            PendingImport.status == "pending"
+        ).all()
+ 
+        if not pendings:
+            print("[Pending] No pending records to process")
+            return
+ 
+        print(f"[Pending] Processing {len(pendings)} pending record(s)")
+ 
+        for pending in pendings:
+            aliexpress_id = pending.aliexpress_id
+            try:
+                raw_product = get_product(aliexpress_id, db)
+                stock_info  = classify_skus(raw_product)
+ 
+                # Refresh stored SKU info
+                pending.out_of_stock_skus = stock_info["out_of_stock"]
+                pending.in_stock_skus     = stock_info["in_stock"]
+                pending.last_checked      = sqlfunc.now()
+                pending.retry_count       = (pending.retry_count or 0) + 1
+ 
+                print(f"[Pending] {aliexpress_id}: "
+                      f"in_stock={len(stock_info['in_stock'])} "
+                      f"out_of_stock={len(stock_info['out_of_stock'])} "
+                      f"no_info={stock_info['no_info']}")
+ 
+                if is_product_in_stock(raw_product):
+                    # Now safe to import
+                    try:
+                        product, created = import_aliexpress_product_to_shopify(raw_product, db)
+                        pending.status = "imported"
+                        db.commit()
+                        print(f"[Pending] ✓ Imported {aliexpress_id} "
+                              f"→ Shopify {product.shopify_product_id}")
+                    except HTTPException as e:
+                        if e.status_code == 409:
+                            # Already imported via another path
+                            pending.status = "imported"
+                            db.commit()
+                            print(f"[Pending] {aliexpress_id} already in Shopify (409)")
+                        else:
+                            db.commit()
+                            print(f"[Pending] Import failed for {aliexpress_id}: {e.detail}")
+                else:
+                    db.commit()
+                    remaining = len(stock_info["out_of_stock"])
+                    print(f"[Pending] {aliexpress_id} still has "
+                          f"{remaining} OOS variant(s) (retry {pending.retry_count})")
+ 
+            except Exception as e:
+                print(f"[Pending] Error processing {aliexpress_id}: {e}")
+                db.commit()
+    finally:
+        db.close()
+ 
+
+
+# main.py
+
+@app.post("/admin/process-pending")
+def process_pending_now():
+    """Manually trigger pending import processing."""
+    process_pending_imports()
+    return {"message": "Pending imports processed"}
+
+# main.py
+
+# ═══════════════════════════════════════════════════════════════════════
+# FIXED /pending/list endpoint for main.py
+#
+# The frontend expects these fields on each pending record:
+#   id, aliexpress_id, title, main_image, total_skus,
+#   out_of_stock_skus, in_stock_skus, status,
+#   created_at, last_checked, retry_count
+#
+# Replace your existing @app.get("/pending/list") with this.
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/pending/list")
+def list_pending_imports(db: Session = Depends(get_db)):
+    pendings = db.query(PendingImport).order_by(PendingImport.created_at.desc()).all()
+    result = []
+    for p in pendings:
+        # product_data may be None if something went wrong during save
+        product_data = p.product_data or {}
+
+        # Safely extract title and image from the nested product_data JSON
+        title      = product_data.get("title") or "—"
+        main_image = product_data.get("main_image")
+
+        # out_of_stock_skus / in_stock_skus may not exist on old rows
+        # (before the column was added) — fall back to empty list safely
+        oos_skus = p.out_of_stock_skus or []
+        ins_skus = p.in_stock_skus     or []
+
+        # total_skus: prefer explicit count, fall back to summing both lists
+        total_skus = len(product_data.get("skus") or []) or (len(oos_skus) + len(ins_skus))
+
+        result.append({
+            "id":                p.id,
+            "aliexpress_id":     p.aliexpress_id,
+            "title":             title,
+            "main_image":        main_image,
+            "total_skus":        total_skus,
+            "out_of_stock_skus": oos_skus,
+            "in_stock_skus":     ins_skus,
+            "status":            p.status,
+            "created_at":        p.created_at.isoformat() if p.created_at else None,
+            "last_checked":      p.last_checked.isoformat() if p.last_checked else None,
+            "retry_count":       p.retry_count or 0,
+        })
+
+    return {"pendings": result}
+
+
+
+
+@app.post("/pending/retry")
+def retry_pending_import(aliexpress_id: str, db: Session = Depends(get_db)):
+    pending = db.query(PendingImport).filter(
+        PendingImport.aliexpress_id == aliexpress_id,
+        PendingImport.status.in_(["pending", "partial", "failed"]),
+    ).first()
+    if not pending:
+        raise HTTPException(404, "No active pending record found for this ID")
+ 
+    raw         = get_product(aliexpress_id, db)
+    stock_info  = classify_skus(raw)
+    pending.out_of_stock_skus = stock_info["out_of_stock"]
+    pending.in_stock_skus     = stock_info["in_stock"]
+    pending.last_checked      = sqlfunc.now()
+    pending.retry_count       = (pending.retry_count or 0) + 1
+ 
+    if stock_info["any_in_stock"]:
+        try:
+            product, created = import_aliexpress_product_to_shopify(raw, db)
+            pending.status = "imported"
+            db.commit()
+            oos_note = (
+                f" ({len(stock_info['out_of_stock'])} variant(s) still OOS — inventory will auto-update)"
+                if stock_info["any_oos"] else ""
+            )
+            return {
+                "message": f"Product imported to Shopify (ID: {product.shopify_product_id}){oos_note}",
+                "shopify_product_id": product.shopify_product_id,
+                "out_of_stock_skus":  stock_info["out_of_stock"],
+            }
+        except HTTPException as e:
+            if e.status_code == 409:
+                pending.status = "imported"
+                db.commit()
+                return {"message": "Product was already imported.", "out_of_stock_skus": []}
+            db.commit()
+            raise e
+    else:
+        db.commit()
+        return {
+            "message": f"Product still fully out of stock ({len(stock_info['out_of_stock'])} SKU(s))",
+            "out_of_stock_skus": stock_info["out_of_stock"],
+        }
+
+
+
+
+
+
+
+
+@app.delete("/pending/{pending_id}")
+def delete_pending_import(pending_id: int, db: Session = Depends(get_db)):
+    pending = db.query(PendingImport).filter(PendingImport.id == pending_id).first()
+    if not pending:
+        raise HTTPException(404, "Pending record not found")
+    db.delete(pending)
+    db.commit()
+    return {"message": "Pending record deleted"}
+
+
+def classify_skus(product_data: dict) -> dict:
+    """
+    Split SKUs into in-stock and out-of-stock lists.
+ 
+    Stock logic:
+    - stock > 0          → in stock
+    - stock == 0         → out of stock
+    - stock is None/null → UNKNOWN (DS hidden stock)
+ 
+    "no_info" is True only when EVERY single SKU has stock=None.
+    A mix of 0 and None is NOT treated as no_info.
+    """
+    skus = product_data.get("skus") or []
+ 
+    if not skus:
+        # No SKU data at all — treat as in-stock so import proceeds
+        return {
+            "in_stock":     [],
+            "out_of_stock": [],
+            "unknown":      [],
+            "any_in_stock": True,
+            "all_in_stock": True,
+            "any_oos":      False,
+            "no_info":      True,
+        }
+ 
+    in_stock    = []
+    out_of_stock = []
+    unknown     = []
+ 
+    for sku in skus:
+        stock_val = sku.get("stock")
+        try:
+            stock = int(stock_val) if stock_val is not None else None
+        except (ValueError, TypeError):
+            stock = None
+ 
+        entry = {
+            "sku_id":     sku.get("sku_id"),
+            "label":      sku.get("label") or sku.get("sku_attr") or "—",
+            "stock":      stock,
+            "sale_price": sku.get("sale_price"),
+            "price":      sku.get("price"),
+        }
+ 
+        if stock is None:
+            unknown.append(entry)          # stock hidden by AliExpress
+        elif stock > 0:
+            in_stock.append(entry)
+        else:
+            out_of_stock.append(entry)     # stock == 0 → definitely OOS
+ 
+    # "no_info" = truly no stock data anywhere (all None, no zeros)
+    no_info = len(unknown) == len(skus) and len(out_of_stock) == 0
+ 
+    return {
+        "in_stock":     in_stock,
+        "out_of_stock": out_of_stock,
+        "unknown":      unknown,
+        # ── convenience flags ──
+        "any_in_stock": len(in_stock) > 0 or no_info,
+        "all_in_stock": len(out_of_stock) == 0,          # no zeros anywhere
+        "any_oos":      len(out_of_stock) > 0,
+        "no_info":      no_info,
+    }
+ 
+
+def upsert_pending(aliexpress_id: str, raw_product: dict,
+                   stock_info: dict, status: str, db) -> PendingImport:
+    """Create or update a PendingImport row."""
+    record = db.query(PendingImport).filter(
+        PendingImport.aliexpress_id == aliexpress_id
+    ).first()
+ 
+    if record:
+        record.product_data      = raw_product
+        record.out_of_stock_skus = stock_info["out_of_stock"]
+        record.in_stock_skus     = stock_info["in_stock"]
+        record.status            = status
+        record.retry_count       = 0
+    else:
+        record = PendingImport(
+            aliexpress_id     = aliexpress_id,
+            product_data      = raw_product,
+            out_of_stock_skus = stock_info["out_of_stock"],
+            in_stock_skus     = stock_info["in_stock"],
+            status            = status,
+        )
+        db.add(record)
+ 
+    db.commit()
+    db.refresh(record)
+    return record
+ 
