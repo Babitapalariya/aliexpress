@@ -619,24 +619,32 @@ function miniRow(p){
 
 // ── PRODUCTS TABLE ─────────────────────────────────────────────────────
 async function loadProducts(page){
-  prodPage=page||1;
-  const q=document.getElementById("prod-search")?.value||"";
-  const tb=document.getElementById("prod-tbody");
-  tb.innerHTML=`<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
+  prodPage = page || 1;
+  const q = document.getElementById("prod-search")?.value || "";
+  const tb = document.getElementById("prod-tbody");
+  tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
   try{
-    const r=await fetch(`${API}/dashboard/products?page=${prodPage}&page_size=5`);
+    const url = `${API}/dashboard/products?page=${prodPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
+    const r = await fetch(url);
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d=await r.json(); prodPages=d.pages;
-    document.getElementById("prod-count-sub").textContent=`${d.total} products total`;
-    document.getElementById("sb-count").textContent=d.total;
-    let rows=d.products;
-    if(q){const ql=q.toLowerCase();rows=rows.filter(p=>(p.title||"").toLowerCase().includes(ql)||(p.aliexpress_id||"").includes(ql));}
-    if(!rows.length){tb.innerHTML=`<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;document.getElementById("prod-pag").style.display="none";return;}
-    tb.innerHTML=rows.map(p=>fullRow(p)).join("");
-    document.querySelectorAll(".product-checkbox").forEach(cb=>cb.addEventListener("change",updateSelectedCount));
-    buildPag(d.total,d.page,d.pages);
-  }catch(e){tb.innerHTML=`<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;}
+    const d = await r.json();
+    prodPages = d.pages;
+    document.getElementById("prod-count-sub").textContent = `${d.total} products total`;
+    document.getElementById("sb-count").textContent = d.total;
+    let rows = d.products;
+    if(!rows.length){
+      tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;
+      document.getElementById("prod-pag").style.display = "none";
+      return;
+    }
+    tb.innerHTML = rows.map(p => fullRow(p)).join("");
+    document.querySelectorAll(".product-checkbox").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+    buildPag(d.total, d.page, d.pages);
+  } catch(e) {
+    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;
+  }
 }
+
 function fullRow(p){
   const title=p.title||"—", price=p.price||"—", cur=p.currency||"USD";
   const rating=p.rating||p.avg_rating;
@@ -681,7 +689,13 @@ function buildPag(total,page,pages){
   h+=`<button class="pgb" onclick="loadProducts(${page+1})" ${page===pages?"disabled":""}>›</button>`;
   btns.innerHTML=h;
 }
-function searchDebounce(){clearTimeout(_searchTimer);_searchTimer=setTimeout(()=>loadProducts(1),300);}
+
+function searchDebounce(){
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => loadProducts(1), 300);
+}
+
+
 async function syncProductPrice(productId){
   showToast("Syncing price from AliExpress...","info");
   try{const r=await fetch(`${API}/dashboard/products/${productId}/sync-price`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Sync failed");}const d=await r.json();showToast(d.message,"ok");loadProducts(prodPage);loadStats();}

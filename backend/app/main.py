@@ -376,12 +376,31 @@ def dashboard_stats(db: Session = Depends(get_db)):
 
 
 @app.get("/dashboard/products")
+# def list_products(
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(5, ge=1, le=100),
+#     db: Session = Depends(get_db)
+# ):
+#     query = db.query(ImportedProduct)
+#     total = query.count()
+#     pages = math.ceil(total / page_size) if total > 0 else 1
+#     offset = (page - 1) * page_size
+#     products = query.order_by(ImportedProduct.imported_at.desc()).offset(offset).limit(page_size).all()
+
 def list_products(
     page: int = Query(1, ge=1),
     page_size: int = Query(5, ge=1, le=100),
+    search: str = Query(None, description="Search by title or AliExpress ID"),
     db: Session = Depends(get_db)
 ):
     query = db.query(ImportedProduct)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (ImportedProduct.original_title.ilike(search_term)) |
+            (ImportedProduct.custom_title.ilike(search_term)) |
+            (ImportedProduct.aliexpress_id.ilike(search_term))
+        )
     total = query.count()
     pages = math.ceil(total / page_size) if total > 0 else 1
     offset = (page - 1) * page_size
