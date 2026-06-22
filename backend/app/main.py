@@ -2122,24 +2122,18 @@ def debug_run_sync_now():
 #     # Let's default to False (don't import) to prevent selling unavailable items.
 #     return False
 
+# AFTER (corrected)
 def is_product_in_stock(product_data: dict) -> bool:
-    """
-    Returns True when it is safe to import (respects IMPORT_MODE).
- 
-    "all"  mode → every SKU must have stock > 0 (or all stock is hidden)
-    "any"  mode → at least one SKU has stock > 0 (or all stock is hidden)
-    """
     result = classify_skus(product_data)
- 
-    if result["no_info"]:
-        return True   # AliExpress hides stock for this product — import it
- 
-    if IMPORT_MODE == "all":
-        return result["all_in_stock"]   # no variant has stock == 0
-    else:
-        return result["any_in_stock"]   # at least one variant has stock > 0
 
-    
+    # Remove the no_info shortcut
+    if IMPORT_MODE == "all":
+        # Require ALL variants to have known stock > 0
+        return result["all_in_stock"]
+    else:
+        return result["any_in_stock"]
+
+
 
 # main.py
 
@@ -2453,43 +2447,69 @@ def retry_pending_import(aliexpress_id: str, db: Session = Depends(get_db)):
     ).first()
     if not pending:
         raise HTTPException(404, "No active pending record found for this ID")
- 
-    raw         = get_product(aliexpress_id, db)
-    stock_info  = classify_skus(raw)
+
+    raw        = get_product(aliexpress_id, db)
+    stock_info = classify_skus(raw)
+
     pending.out_of_stock_skus = stock_info["out_of_stock"]
     pending.in_stock_skus     = stock_info["in_stock"]
     pending.last_checked      = sqlfunc.now()
     pending.retry_count       = (pending.retry_count or 0) + 1
- 
-    if stock_info["any_in_stock"]:
+    db.commit()
+
+    # Only import if ALL variants are confirmed in stock (no OOS, no unknowns)
+    if is_product_in_stock(raw):
         try:
             product, created = import_aliexpress_product_to_shopify(raw, db)
             pending.status = "imported"
             db.commit()
-            oos_note = (
-                f" ({len(stock_info['out_of_stock'])} variant(s) still OOS — inventory will auto-update)"
-                if stock_info["any_oos"] else ""
-            )
             return {
-                "message": f"Product imported to Shopify (ID: {product.shopify_product_id}){oos_note}",
+                "status": "imported",
+                "message": f"Product successfully imported to Shopify (ID: {product.shopify_product_id})",
                 "shopify_product_id": product.shopify_product_id,
-                "out_of_stock_skus":  stock_info["out_of_stock"],
+                "out_of_stock_skus": [],
+                "can_retry": False,
             }
         except HTTPException as e:
             if e.status_code == 409:
                 pending.status = "imported"
                 db.commit()
-                return {"message": "Product was already imported.", "out_of_stock_skus": []}
+                return {
+                    "status": "imported",
+                    "message": "Product was already imported to Shopify.",
+                    "out_of_stock_skus": [],
+                    "can_retry": False,
+                }
             db.commit()
             raise e
     else:
+        # Still has OOS variants — do NOT import, keep in queue
+        oos  = stock_info["out_of_stock"]
+        ins  = stock_info["in_stock"]
+        unkn = stock_info["unknown"]
+
+        # Keep status as pending/partial, never mark imported
+        if ins and oos:
+            pending.status = "partial"
+        else:
+            pending.status = "pending"
         db.commit()
+
+        oos_labels = [s.get("label") or s.get("sku_id") or "—" for s in oos]
+        unkn_note  = f" ({len(unkn)} variant(s) have hidden stock)" if unkn else ""
+
         return {
-            "message": f"Product still fully out of stock ({len(stock_info['out_of_stock'])} SKU(s))",
-            "out_of_stock_skus": stock_info["out_of_stock"],
+            "status": "oos",
+            "message": (
+                f"{len(oos)} variant(s) are still out of stock{unkn_note}. "
+                f"This product will be automatically imported once all variants are available."
+            ),
+            "out_of_stock_skus": oos,
+            "out_of_stock_labels": oos_labels,
+            "in_stock_count": len(ins),
+            "oos_count": len(oos),
+            "can_retry": True,
         }
-
-
 
 
 
@@ -2507,42 +2527,26 @@ def delete_pending_import(pending_id: int, db: Session = Depends(get_db)):
 
 
 def classify_skus(product_data: dict) -> dict:
-    """
-    Split SKUs into in-stock and out-of-stock lists.
- 
-    Stock logic:
-    - stock > 0          → in stock
-    - stock == 0         → out of stock
-    - stock is None/null → UNKNOWN (DS hidden stock)
- 
-    "no_info" is True only when EVERY single SKU has stock=None.
-    A mix of 0 and None is NOT treated as no_info.
-    """
     skus = product_data.get("skus") or []
- 
+
     if not skus:
-        # No SKU data at all — treat as in-stock so import proceeds
         return {
-            "in_stock":     [],
-            "out_of_stock": [],
-            "unknown":      [],
-            "any_in_stock": True,
-            "all_in_stock": True,
-            "any_oos":      False,
-            "no_info":      True,
+            "in_stock": [], "out_of_stock": [], "unknown": [],
+            "any_in_stock": False,   # no known stock → not in stock
+            "all_in_stock": False,
+            "any_oos": False,
+            "no_info": True,
         }
- 
-    in_stock    = []
-    out_of_stock = []
-    unknown     = []
- 
+
+    in_stock, out_of_stock, unknown = [], [], []
+
     for sku in skus:
         stock_val = sku.get("stock")
         try:
             stock = int(stock_val) if stock_val is not None else None
         except (ValueError, TypeError):
             stock = None
- 
+
         entry = {
             "sku_id":     sku.get("sku_id"),
             "label":      sku.get("label") or sku.get("sku_attr") or "—",
@@ -2550,28 +2554,29 @@ def classify_skus(product_data: dict) -> dict:
             "sale_price": sku.get("sale_price"),
             "price":      sku.get("price"),
         }
- 
+
         if stock is None:
-            unknown.append(entry)          # stock hidden by AliExpress
+            unknown.append(entry)
         elif stock > 0:
             in_stock.append(entry)
         else:
-            out_of_stock.append(entry)     # stock == 0 → definitely OOS
- 
-    # "no_info" = truly no stock data anywhere (all None, no zeros)
-    no_info = len(unknown) == len(skus) and len(out_of_stock) == 0
- 
+            out_of_stock.append(entry)
+
+    no_info = (len(unknown) == len(skus) and len(out_of_stock) == 0)
+
     return {
-        "in_stock":     in_stock,
+        "in_stock": in_stock,
         "out_of_stock": out_of_stock,
-        "unknown":      unknown,
-        # ── convenience flags ──
-        "any_in_stock": len(in_stock) > 0 or no_info,
-        "all_in_stock": len(out_of_stock) == 0,          # no zeros anywhere
-        "any_oos":      len(out_of_stock) > 0,
-        "no_info":      no_info,
+        "unknown": unknown,
+        "any_in_stock": len(in_stock) > 0,   # no longer uses no_info
+        "all_in_stock": len(out_of_stock) == 0 and len(unknown) == 0,
+        "any_oos": len(out_of_stock) > 0,
+        "no_info": no_info,
     }
- 
+
+
+
+
 
 def upsert_pending(aliexpress_id: str, raw_product: dict,
                    stock_info: dict, status: str, db) -> PendingImport:
@@ -2600,3 +2605,16 @@ def upsert_pending(aliexpress_id: str, raw_product: dict,
     db.refresh(record)
     return record
  
+
+@app.post("/admin/requeue-partial-imports")
+def requeue_partial_imports(db: Session = Depends(get_db)):
+    """Re-queue imported products that still have OOS variants so they get re-checked."""
+    pendings = db.query(PendingImport).filter(PendingImport.status == "imported").all()
+    requeued = 0
+    for p in pendings:
+        oos = p.out_of_stock_skus or []
+        if len(oos) > 0:
+            p.status = "partial"
+            requeued += 1
+    db.commit()
+    return {"message": f"Re-queued {requeued} partially-imported products", "requeued": requeued}

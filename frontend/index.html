@@ -855,6 +855,7 @@ function setPendingFilter(f){
   ['all','pending','partial','imported'].forEach(id=>{const btn=document.getElementById('pf-'+id);if(btn)btn.classList.toggle('active',id===f);});
   renderPendingTable(_allPendingData);
 }
+
 async function loadPendingImports(){
   const tbody=document.getElementById("pending-tbody");
   if(!tbody) return;
@@ -863,7 +864,6 @@ async function loadPendingImports(){
     const r=await fetch(`${API}/pending/list`);
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const data=await r.json();
-    console.log("[Pending] API response:",data);
     _allPendingData=data.pendings||[];
     const cnt={pending:0,partial:0,imported:0,failed:0};
     _allPendingData.forEach(p=>{if(cnt[p.status]!==undefined)cnt[p.status]++;});
@@ -873,26 +873,72 @@ async function loadPendingImports(){
     const badge=document.getElementById("pending-count"); if(badge) badge.textContent=waiting||"0";
     const sub=document.getElementById("pending-sub"); if(sub) sub.textContent=`${_allPendingData.length} total · ${waiting} awaiting stock`;
     renderPendingTable(_allPendingData);
-  }catch(e){console.error("[Pending] load error:",e);if(tbody) tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--red);padding:32px">Error: ${e.message}</td></tr>`;}
+  }catch(e){
+    console.error("[Pending] load error:",e);
+    if(tbody) tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--red);padding:32px">Error: ${e.message}</td></tr>`;
+  }
 }
+
 function renderPendingTable(allRows){
   const tbody=document.getElementById("pending-tbody"); if(!tbody) return;
   const rows=_pendingFilter==='all'?allRows:allRows.filter(p=>p.status===_pendingFilter);
-  if(!rows.length){tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-inbox"></i><p>No ${_pendingFilter==='all'?'':_pendingFilter+' '}records</p>${_pendingFilter!=='all'?'<small>Try switching to "All"</small>':'<small>Products added to queue will appear here</small>'}</div></td></tr>`;return;}
+  if(!rows.length){
+    tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-inbox"></i><p>No ${_pendingFilter==='all'?'':_pendingFilter+' '}records</p>${_pendingFilter!=='all'?'<small>Try switching to "All"</small>':'<small>Products added to queue will appear here</small>'}</div></td></tr>`;
+    return;
+  }
   tbody.innerHTML=rows.map(p=>buildPendingRow(p)).join("");
 }
+
 function buildPendingRow(p){
   const imgEl=p.main_image?`<img src="${p.main_image}" class="pending-img" onerror="this.outerHTML='<div class=\\'pending-img-ph\\'><i class=\\'ti ti-photo\\'></i></div>'">`:`<div class="pending-img-ph"><i class="ti ti-photo"></i></div>`;
-  const sc={pending:{label:"Fully OOS",icon:"hourglass",cls:"status-badge-pending"},partial:{label:"Partial OOS",icon:"alert-triangle",cls:"status-badge-partial"},imported:{label:"Imported",icon:"circle-check",cls:"status-badge-imported"},failed:{label:"Failed",icon:"circle-x",cls:"status-badge-failed"}}[p.status]||{label:p.status,icon:"point",cls:"b-gray"};
+  const sc={
+    pending:{label:"Fully OOS",icon:"hourglass",cls:"status-badge-pending"},
+    partial:{label:"Partial OOS",icon:"alert-triangle",cls:"status-badge-partial"},
+    imported:{label:"Imported",icon:"circle-check",cls:"status-badge-imported"},
+    failed:{label:"Failed",icon:"circle-x",cls:"status-badge-failed"}
+  }[p.status]||{label:p.status,icon:"point",cls:"b-gray"};
   const statusBadge=`<span class="badge ${sc.cls}"><i class="ti ti-${sc.icon}"></i> ${sc.label}</span>`;
-  const oos=Array.isArray(p.out_of_stock_skus)?p.out_of_stock_skus:[], ins=Array.isArray(p.in_stock_skus)?p.in_stock_skus:[], total=p.total_skus||(oos.length+ins.length);
+  const oos=Array.isArray(p.out_of_stock_skus)?p.out_of_stock_skus:[];
+  const ins=Array.isArray(p.in_stock_skus)?p.in_stock_skus:[];
+  const total=p.total_skus||(oos.length+ins.length);
   const variantSummary=buildVariantAccordion(p.aliexpress_id,oos,ins,total);
   const createdAt=p.created_at?new Date(p.created_at).toLocaleString():"—";
   const lastChecked=p.last_checked?new Date(p.last_checked).toLocaleString():"Never";
-  const canRetry=["pending","partial","failed"].includes(p.status);
-  const actions=`<div class="td-actions">${canRetry?`<button class="btn btn-primary btn-sm" onclick="retryPendingImport('${p.aliexpress_id}')"><i class="ti ti-refresh"></i> Retry</button>`:""}<a href="https://www.aliexpress.com/item/${p.aliexpress_id}.html" target="_blank"><button class="btn btn-icon sm" title="View on AliExpress"><i class="ti ti-external-link"></i></button></a><button class="btn btn-icon sm" style="color:var(--red)" onclick="deletePendingImport(${p.id})"><i class="ti ti-trash"></i></button></div>`;
-  return `<tr><td>${imgEl}</td><td><div class="td-title" style="max-width:180px" title="${escapeHtml(p.title||'')}">${escapeHtml(p.title||p.aliexpress_id)}</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">${p.aliexpress_id}</div></td><td>${statusBadge}</td><td style="min-width:200px">${variantSummary}</td><td style="font-size:11px;color:var(--t3);white-space:nowrap">${createdAt}</td><td style="font-size:11px;color:var(--t3);white-space:nowrap">${lastChecked}</td><td style="text-align:center;font-size:12px">${p.retry_count||0}</td><td>${actions}</td></tr>`;
+
+  // Retry button shows for everything except confirmed imported
+  const canRetry = p.status !== "imported";
+
+  // OOS warning note shown when partial or pending and has OOS variants
+  const oosNote = canRetry && oos.length > 0
+    ? `<div style="font-size:10px;color:var(--orange);margin-top:4px;display:flex;align-items:center;gap:4px"><i class="ti ti-clock" style="font-size:11px"></i> Waiting for ${oos.length} OOS variant(s) — auto-imports when ready</div>`
+    : "";
+
+  const actions=`<div class="td-actions" style="flex-direction:column;align-items:flex-start;gap:6px">
+    <div style="display:flex;gap:6px">
+      ${canRetry?`<button class="btn btn-primary btn-sm" onclick="retryPendingImport('${p.aliexpress_id}')"><i class="ti ti-refresh"></i> Retry</button>`:""}
+      <a href="https://www.aliexpress.com/item/${p.aliexpress_id}.html" target="_blank"><button class="btn btn-icon sm" title="View on AliExpress"><i class="ti ti-external-link"></i></button></a>
+      <button class="btn btn-icon sm" style="color:var(--red)" onclick="deletePendingImport(${p.id})"><i class="ti ti-trash"></i></button>
+    </div>
+    ${oosNote}
+  </div>`;
+
+  return `<tr>
+    <td>${imgEl}</td>
+    <td>
+      <div class="td-title" style="max-width:180px" title="${escapeHtml(p.title||'')}">${escapeHtml(p.title||p.aliexpress_id)}</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">${p.aliexpress_id}</div>
+    </td>
+    <td>${statusBadge}</td>
+    <td style="min-width:200px">${variantSummary}</td>
+    <td style="font-size:11px;color:var(--t3);white-space:nowrap">${createdAt}</td>
+    <td style="font-size:11px;color:var(--t3);white-space:nowrap">${lastChecked}</td>
+    <td style="text-align:center;font-size:12px">${p.retry_count||0}</td>
+    <td>${actions}</td>
+  </tr>`;
 }
+
+
+
 function buildVariantAccordion(aliexpressId,oos,ins,total){
   if(!total) return`<span style="font-size:11px;color:var(--t3)">No variant data</span>`;
   const pillIns=ins.length?`<span class="badge b-green" style="font-size:10px"><i class="ti ti-circle-check" style="font-size:9px"></i> ${ins.length} in stock</span>`:'';
@@ -906,29 +952,95 @@ function buildVariantAccordion(aliexpressId,oos,ins,total){
   }).join('');
   return`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">${pillIns}${pillOos}</div><details class="sku-accordion"><summary><i class="ti ti-chevron-right chevron"></i>Show ${allSkus.length} variant${allSkus.length!==1?"s":""}</summary><div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:4px;max-height:200px;overflow-y:auto"><table class="sku-table"><thead><tr><th>Variant</th><th>Stock</th><th>Price</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
 }
+
+
 async function retryPendingImport(aliexpressId){
-  showToast("Checking stock & retrying…","info");
+  const allBtns=document.querySelectorAll(`button[onclick="retryPendingImport('${aliexpressId}')"]`);
+  allBtns.forEach(b=>{b.disabled=true;b.innerHTML=`<i class="ti ti-loader-2 spin"></i> Checking…`;});
+  showToast("Checking stock…","info");
   try{
     const r=await fetch(`${API}/pending/retry?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
-    const data=await r.json(); if(!r.ok) throw new Error(data.detail||"Retry failed");
-    const oos=data.out_of_stock_skus||[];
-    showToast(data.message+(oos.length?` (${oos.length} SKU(s) still OOS)`:""),"ok");
-    loadPendingImports(); loadStats();
-  }catch(e){showToast("Retry failed: "+e.message,"err");}
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||"Retry failed");
+
+    if(data.status==="imported"){
+      showToast(data.message,"ok");
+    } else if(data.status==="oos"){
+      // Show a clear OOS message — do NOT hide retry button
+      const oosList=data.out_of_stock_labels||[];
+      const preview=oosList.slice(0,3).join(", ")+(oosList.length>3?` +${oosList.length-3} more`:"");
+      showToast(
+        `⚠️ ${data.oos_count} variant(s) still out of stock${preview?`: ${preview}`:""} — will auto-import when available.`,
+        "info"
+      );
+    }
+
+    // Always refresh from server and re-render ALL rows (no filter)
+    const fetchR=await fetch(`${API}/pending/list`);
+    if(!fetchR.ok) throw new Error(`HTTP ${fetchR.status}`);
+    const freshData=await fetchR.json();
+    _allPendingData=freshData.pendings||[];
+
+    // Update counters
+    const cnt={pending:0,partial:0,imported:0,failed:0};
+    _allPendingData.forEach(p=>{if(cnt[p.status]!==undefined)cnt[p.status]++;});
+    const psP=document.getElementById("ps-pending-count"),
+          psPa=document.getElementById("ps-partial-count"),
+          psI=document.getElementById("ps-imported-count");
+    if(psP)  psP.textContent=cnt.pending;
+    if(psPa) psPa.textContent=cnt.partial;
+    if(psI)  psI.textContent=cnt.imported;
+    const waiting=cnt.pending+cnt.partial;
+    const badge=document.getElementById("pending-count");
+    if(badge) badge.textContent=waiting||"0";
+    const sub=document.getElementById("pending-sub");
+    if(sub) sub.textContent=`${_allPendingData.length} total · ${waiting} awaiting stock`;
+
+    // Always render ALL rows so retry button stays visible
+    renderPendingTable(_allPendingData);
+    loadStats();
+
+  }catch(e){
+    showToast("Retry failed: "+e.message,"err");
+    // Re-enable buttons on error
+    allBtns.forEach(b=>{b.disabled=false;b.innerHTML=`<i class="ti ti-refresh"></i> Retry`;});
+  }
 }
+
+
+
 async function deletePendingImport(id){
   if(!confirm("Delete this pending record?"))return;
-  try{const r=await fetch(`${API}/pending/${id}`,{method:"DELETE"});if(!r.ok)throw new Error((await r.json()).detail);showToast("Deleted","ok");loadPendingImports();}
-  catch(e){showToast("Delete failed: "+e.message,"err");}
+  try{
+    const r=await fetch(`${API}/pending/${id}`,{method:"DELETE"});
+    if(!r.ok)throw new Error((await r.json()).detail);
+    showToast("Deleted","ok");
+    loadPendingImports();
+  }catch(e){showToast("Delete failed: "+e.message,"err");}
 }
+
 async function processPendingImports(){
   showToast("Processing pending imports…","info");
-  try{const r=await fetch(`${API}/admin/process-pending`,{method:"POST"});if(!r.ok)throw new Error((await r.json()).detail);const d=await r.json();showToast(d.message||"Pending imports processed","ok");loadPendingImports();loadStats();}
-  catch(e){showToast("Process failed: "+e.message,"err");}
+  try{
+    const r=await fetch(`${API}/admin/process-pending`,{method:"POST"});
+    if(!r.ok)throw new Error((await r.json()).detail);
+    const d=await r.json();
+    showToast(d.message||"Pending imports processed","ok");
+    loadPendingImports();
+    loadStats();
+  }catch(e){showToast("Process failed: "+e.message,"err");}
 }
+
 async function updatePendingBadge(){
-  try{const r=await fetch(`${API}/pending/list`),data=await r.json();const w=(data.pendings||[]).filter(p=>['pending','partial'].includes(p.status)).length;document.getElementById("pending-count").textContent=w||"0";}catch(e){}
+  try{
+    const r=await fetch(`${API}/pending/list`),data=await r.json();
+    const w=(data.pendings||[]).filter(p=>['pending','partial'].includes(p.status)).length;
+    document.getElementById("pending-count").textContent=w||"0";
+  }catch(e){}
 }
+
+
+
 
 // ── MAPPINGS ───────────────────────────────────────────────────────────
 async function loadMappings(page=1){
