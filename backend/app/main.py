@@ -31,6 +31,7 @@ from .aliexpress import get_product, get_shipping_info
 
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from sqlalchemy.sql import func as sqlfunc
+from .database import SessionLocal
 
 
 
@@ -272,36 +273,40 @@ def sync_all_tracked_products():
 
 def start_scheduler():
     global scheduler
-    scheduler = BackgroundScheduler()
-    scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+    print("[Scheduler] Starting scheduler...")
+    try:
+        scheduler = BackgroundScheduler()
+        scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
-    scheduler.add_job(
-        sync_all_tracked_products,
-        trigger=IntervalTrigger(hours=1),
-        id="price_sync_job",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        sync_all_mapped_products_background,
-        trigger=IntervalTrigger(hours=1),
-        id="mapped_price_sync_job",
-        replace_existing=True,
-    )
-    # NEW: process pending imports every 30 minutes (or hourly)
-    scheduler.add_job(
-        process_pending_imports,
-        trigger=IntervalTrigger(minutes=30),
-        id="pending_import_job",
-        replace_existing=True,
-    )
-    scheduler.start()
+        scheduler.add_job(
+            sync_all_tracked_products,
+            trigger=IntervalTrigger(hours=1),
+            id="price_sync_job",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            sync_all_mapped_products_background,
+            trigger=IntervalTrigger(hours=1),
+            id="mapped_price_sync_job",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            process_pending_imports,
+            trigger=IntervalTrigger(minutes=30),
+            id="pending_import_job",
+            replace_existing=True,
+        )
 
-    jobs = scheduler.get_jobs()
-    print(f"[Scheduler] Started with {len(jobs)} job(s):")
-    for j in jobs:
-        print(f"  - {j.id} → next run at {j.next_run_time}")
-
-
+        scheduler.start()
+        jobs = scheduler.get_jobs()
+        print(f"[Scheduler] Started with {len(jobs)} job(s):")
+        for j in jobs:
+            print(f"  - {j.id} → next run at {j.next_run_time}")
+    except Exception as e:
+        print(f"[Scheduler] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        scheduler = None 
 
 def shutdown_scheduler():
     if scheduler:
@@ -318,7 +323,11 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="AliShopify Backend", lifespan=lifespan)
+#app = FastAPI(title="AliShopify Backend", lifespan=lifespan)
+app = FastAPI(title="AliShopify Backend")
+
+
+
 
 # CORS
 # app.add_middleware(
@@ -338,8 +347,20 @@ app.include_router(auth_router)
 
 from fastapi import FastAPI as _RootFastAPI
 from fastapi.middleware.cors import CORSMiddleware as _RootCORS
+
+
+@asynccontextmanager
+async def root_lifespan(root_app: FastAPI):
+    start_scheduler()
+    sync_existing_shopify_products_to_db()   # initial sync
+    yield
+    shutdown_scheduler()
+
+root_app = _RootFastAPI(title="AliShopify Backend Root", lifespan=root_lifespan)
+#root_app.add_middleware(...)   # CORS
+#root_app.mount("/api", app)  
  
-root_app = _RootFastAPI(title="AliShopify Backend Root")
+#root_app = _RootFastAPI(title="AliShopify Backend Root")
  
 # Re-apply CORS on the root app as well (covers the mount boundary)
 root_app.add_middleware(
@@ -2066,29 +2087,7 @@ def _job_listener(event):
     else:
         print(f"[Scheduler][OK] Job '{event.job_id}' completed successfully")
 
-def start_scheduler():
-    global scheduler
-    scheduler = BackgroundScheduler()
-    scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
-    scheduler.add_job(
-        sync_all_tracked_products,
-        trigger=IntervalTrigger(hours=1),
-        id="price_sync_job",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        sync_all_mapped_products_background,
-        trigger=IntervalTrigger(hours=1),
-        id="mapped_price_sync_job",
-        replace_existing=True,
-    )
-    scheduler.start()
-
-    jobs = scheduler.get_jobs()
-    print(f"[Scheduler] Started with {len(jobs)} job(s):")
-    for j in jobs:
-        print(f"  - {j.id} → next run at {j.next_run_time}")
 
 
 @app.post("/debug/run-sync-now")
@@ -2637,3 +2636,22 @@ def requeue_partial_imports(db: Session = Depends(get_db)):
             requeued += 1
     db.commit()
     return {"message": f"Re-queued {requeued} partially-imported products", "requeued": requeued}
+
+
+
+@app.get("/debug/scheduler-status")
+def scheduler_status():
+    if scheduler is None:
+        return {"running": False, "message": "Scheduler not started"}
+    jobs = scheduler.get_jobs()
+    return {
+        "running": True,
+        "jobs": [
+            {
+                "id": j.id,
+                "next_run_time": str(j.next_run_time),
+                "trigger": str(j.trigger),
+            }
+            for j in jobs
+        ]
+    }
