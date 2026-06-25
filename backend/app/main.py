@@ -216,6 +216,23 @@ def sync_existing_shopify_products_to_db():
         db.close()
 
 
+# def sync_all_tracked_products():
+#     print(f"[Sync][DEBUG] sync_all_tracked_products() invoked")
+#     sync_existing_shopify_products_to_db()
+#     db = SessionLocal()
+#     try:
+#         products = db.query(ImportedProduct).filter(ImportedProduct.track_price == True).all()
+#         print(f"[Sync] Starting price sync for {len(products)} products")
+#         if not products:
+#             print("[Sync][DEBUG] No products with track_price=True found — nothing to sync")
+#         for p in products:
+#             sync_product_price(p.id, db)
+#     except Exception as e:
+#         print(f"[Sync] Background task error: {e}")
+#     finally:
+#         db.close()
+
+
 def sync_all_tracked_products():
     print(f"[Sync][DEBUG] sync_all_tracked_products() invoked")
     sync_existing_shopify_products_to_db()
@@ -223,15 +240,28 @@ def sync_all_tracked_products():
     try:
         products = db.query(ImportedProduct).filter(ImportedProduct.track_price == True).all()
         print(f"[Sync] Starting price sync for {len(products)} products")
-        if not products:
-            print("[Sync][DEBUG] No products with track_price=True found — nothing to sync")
         for p in products:
             sync_product_price(p.id, db)
+            # After price sync, check if this product has OOS variants
+            # and queue it if not already tracked
+            try:
+                existing_pending = db.query(PendingImport).filter(
+                    PendingImport.aliexpress_id == p.aliexpress_id,
+                    PendingImport.status.in_(["pending", "partial"])
+                ).first()
+                if not existing_pending:
+                    raw = get_product(p.aliexpress_id, db)
+                    stock_info = classify_skus(raw)
+                    if stock_info["out_of_stock"]:
+                        upsert_pending(p.aliexpress_id, raw, stock_info, "pending", db)
+                        print(f"[Sync] Auto-queued {p.aliexpress_id} — "
+                              f"{len(stock_info['out_of_stock'])} OOS variant(s) detected")
+            except Exception as e:
+                print(f"[Sync] OOS check failed for {p.aliexpress_id}: {e}")
     except Exception as e:
         print(f"[Sync] Background task error: {e}")
     finally:
         db.close()
-
 
 # ─────────────────────────────────────────────
 # SCHEDULER LIFESPAN
@@ -740,81 +770,63 @@ def fetch_aliexpress_product(aliexpress_id: str, db: Session = Depends(get_db)):
 
 @app.post("/import/{aliexpress_id}")
 def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
- 
-    # 1. Already fully pending?
+
+    # 1. Already in pending queue (just return status, don't block)
     existing_pending = db.query(PendingImport).filter(
         PendingImport.aliexpress_id == aliexpress_id,
         PendingImport.status == "pending",
     ).first()
-    if existing_pending:
-        oos = existing_pending.out_of_stock_skus or []
-        return {
-            "status":            "pending",
-            "aliexpress_id":     aliexpress_id,
-            "out_of_stock_skus": oos,
-            "message": (
-                f"Product is already in the pending queue "
-                f"({len(oos)} variant(s) out of stock). "
-                "Will import automatically when stock is available."
-            ),
-        }
- 
+
     # 2. Fetch fresh data
     raw_product = get_product(aliexpress_id, db)
-    stock_info  = classify_skus(raw_product)
- 
+    stock_info = classify_skus(raw_product)
+
     print(f"[Import][DEBUG] {aliexpress_id}: "
           f"in_stock={len(stock_info['in_stock'])} "
           f"out_of_stock={len(stock_info['out_of_stock'])} "
-          f"unknown={len(stock_info['unknown'])} "
-          f"no_info={stock_info['no_info']} "
-          f"all_in_stock={stock_info['all_in_stock']}")
- 
-    # 3. Decide whether to import or queue
-    #    In "all" mode: ANY variant with stock==0 → pending
-    #    In "any" mode: ALL variants with stock==0 → pending
-    should_import = is_product_in_stock(raw_product)
- 
-    if not should_import:
-        # Queue it — do not import to Shopify
-        upsert_pending(aliexpress_id, raw_product, stock_info, "pending", db)
-        oos = stock_info["out_of_stock"]
-        return {
-            "status":            "pending",
-            "aliexpress_id":     aliexpress_id,
-            "out_of_stock_skus": oos,
-            "message": (
-                f"Product has {len(oos)} out-of-stock variant(s). "
-                "Added to pending queue — will import when all variants are in stock."
-                if IMPORT_MODE == "all" else
-                f"Product is completely out of stock ({len(oos)} variant(s)). "
-                "Added to pending queue — will import when stock returns."
-            ),
-        }
- 
-    # 4. Import to Shopify
+          f"unknown={len(stock_info['unknown'])}")
+
+    # 3. ALWAYS import to Shopify (no longer blocking on OOS)
     try:
         product, created = import_aliexpress_product_to_shopify(raw_product, db)
     except HTTPException as e:
         raise e
     except Exception as e:
         raise HTTPException(500, f"Import failed: {str(e)}")
- 
+
     shopify_info = {
-        "id":     product.shopify_product_id,
-        "title":  product.original_title,
+        "id": product.shopify_product_id,
+        "title": product.original_title,
         "status": product.shopify_status,
     }
- 
-    # 5. Clean success — no OOS variants
+
+    oos = stock_info["out_of_stock"]
+
+    # 4. If there are OOS variants, add to pending queue for inventory tracking
+    if oos:
+        upsert_pending(aliexpress_id, raw_product, stock_info, "pending", db)
+        return {
+            "status": "imported",
+            "product_id": product.id,
+            "out_of_stock_skus": oos,
+            "shopify_product": shopify_info,
+            "message": (
+                f"Imported to Shopify successfully. "
+                f"{len(oos)} variant(s) are out of stock — "
+                f"added to pending queue and will auto-update inventory when stock returns."
+            ),
+            "queued_for_inventory_sync": True,
+        }
+
+    # 5. All variants in stock — clean import
     return {
-        "status":            "imported",
-        "product_id":        product.id,
+        "status": "imported",
+        "product_id": product.id,
         "out_of_stock_skus": [],
-        "shopify_product":   shopify_info,
-        "message":           "Imported successfully" if created else "Linked to existing Shopify product",
+        "shopify_product": shopify_info,
+        "message": "Imported successfully" if created else "Linked to existing Shopify product",
+        "queued_for_inventory_sync": False,
     }
- 
 
 
 
@@ -2333,8 +2345,8 @@ def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tupl
 
 def process_pending_imports():
     """
-    Background job: check each pending product.
-    If is_product_in_stock() now returns True → import to Shopify.
+    Background job: for products already in Shopify but with OOS variants,
+    check if stock has returned and push inventory update.
     """
     from sqlalchemy.sql import func as sqlfunc
     db = SessionLocal()
@@ -2342,60 +2354,76 @@ def process_pending_imports():
         pendings = db.query(PendingImport).filter(
             PendingImport.status == "pending"
         ).all()
- 
+
         if not pendings:
             print("[Pending] No pending records to process")
             return
- 
+
         print(f"[Pending] Processing {len(pendings)} pending record(s)")
- 
+
         for pending in pendings:
             aliexpress_id = pending.aliexpress_id
             try:
                 raw_product = get_product(aliexpress_id, db)
-                stock_info  = classify_skus(raw_product)
- 
-                # Refresh stored SKU info
+                stock_info = classify_skus(raw_product)
+
                 pending.out_of_stock_skus = stock_info["out_of_stock"]
-                pending.in_stock_skus     = stock_info["in_stock"]
-                pending.last_checked      = sqlfunc.now()
-                pending.retry_count       = (pending.retry_count or 0) + 1
- 
+                pending.in_stock_skus = stock_info["in_stock"]
+                pending.last_checked = sqlfunc.now()
+                pending.retry_count = (pending.retry_count or 0) + 1
+
                 print(f"[Pending] {aliexpress_id}: "
                       f"in_stock={len(stock_info['in_stock'])} "
-                      f"out_of_stock={len(stock_info['out_of_stock'])} "
-                      f"no_info={stock_info['no_info']}")
- 
-                if is_product_in_stock(raw_product):
-                    # Now safe to import
+                      f"out_of_stock={len(stock_info['out_of_stock'])}")
+
+                # Find the linked ImportedProduct to get shopify_product_id
+                imported = db.query(ImportedProduct).filter(
+                    ImportedProduct.aliexpress_id == aliexpress_id
+                ).first()
+
+                if not imported or not imported.shopify_product_id:
+                    # Product not imported yet (legacy behavior) — try to import
                     try:
                         product, created = import_aliexpress_product_to_shopify(raw_product, db)
-                        pending.status = "imported"
+                        if not stock_info["out_of_stock"]:
+                            pending.status = "imported"
                         db.commit()
-                        print(f"[Pending] ✓ Imported {aliexpress_id} "
-                              f"→ Shopify {product.shopify_product_id}")
+                        print(f"[Pending] ✓ Imported {aliexpress_id} → Shopify {product.shopify_product_id}")
                     except HTTPException as e:
                         if e.status_code == 409:
-                            # Already imported via another path
                             pending.status = "imported"
                             db.commit()
-                            print(f"[Pending] {aliexpress_id} already in Shopify (409)")
                         else:
                             db.commit()
                             print(f"[Pending] Import failed for {aliexpress_id}: {e.detail}")
+                    continue
+
+                # Product already in Shopify — push inventory update
+                skus = raw_product.get("skus", [])
+                if skus:
+                    from .shopify import update_shopify_product_inventory_with_skus
+                    inv_updated = update_shopify_product_inventory_with_skus(
+                        imported.shopify_product_id, skus
+                    )
+                    print(f"[Pending] Inventory sync for {aliexpress_id}: updated={inv_updated}")
+
+                # If all variants now have stock → mark done
+                if not stock_info["out_of_stock"] and not stock_info["unknown"]:
+                    pending.status = "imported"
+                    print(f"[Pending] ✓ All variants in stock — marking {aliexpress_id} as imported")
+                elif stock_info["in_stock"] and stock_info["out_of_stock"]:
+                    pending.status = "partial"
+                    print(f"[Pending] {aliexpress_id} partially restocked — {len(stock_info['out_of_stock'])} still OOS")
                 else:
-                    db.commit()
-                    remaining = len(stock_info["out_of_stock"])
-                    print(f"[Pending] {aliexpress_id} still has "
-                          f"{remaining} OOS variant(s) (retry {pending.retry_count})")
- 
+                    print(f"[Pending] {aliexpress_id} still fully OOS ({len(stock_info['out_of_stock'])} variants)")
+
+                db.commit()
+
             except Exception as e:
                 print(f"[Pending] Error processing {aliexpress_id}: {e}")
                 db.commit()
     finally:
         db.close()
- 
-
 
 # main.py
 
@@ -2466,69 +2494,82 @@ def retry_pending_import(aliexpress_id: str, db: Session = Depends(get_db)):
     if not pending:
         raise HTTPException(404, "No active pending record found for this ID")
 
-    raw        = get_product(aliexpress_id, db)
+    raw = get_product(aliexpress_id, db)
     stock_info = classify_skus(raw)
 
     pending.out_of_stock_skus = stock_info["out_of_stock"]
-    pending.in_stock_skus     = stock_info["in_stock"]
-    pending.last_checked      = sqlfunc.now()
-    pending.retry_count       = (pending.retry_count or 0) + 1
+    pending.in_stock_skus = stock_info["in_stock"]
+    pending.last_checked = sqlfunc.now()
+    pending.retry_count = (pending.retry_count or 0) + 1
     db.commit()
 
-    # Only import if ALL variants are confirmed in stock (no OOS, no unknowns)
-    if is_product_in_stock(raw):
+    # Find linked imported product
+    imported = db.query(ImportedProduct).filter(
+        ImportedProduct.aliexpress_id == aliexpress_id
+    ).first()
+
+    if not imported or not imported.shopify_product_id:
+        # Fallback: product not yet in Shopify, try importing now
         try:
             product, created = import_aliexpress_product_to_shopify(raw, db)
-            pending.status = "imported"
+            if not stock_info["out_of_stock"]:
+                pending.status = "imported"
             db.commit()
             return {
                 "status": "imported",
-                "message": f"Product successfully imported to Shopify (ID: {product.shopify_product_id})",
+                "message": f"Product imported to Shopify (ID: {product.shopify_product_id})",
                 "shopify_product_id": product.shopify_product_id,
-                "out_of_stock_skus": [],
-                "can_retry": False,
+                "out_of_stock_skus": stock_info["out_of_stock"],
+                "can_retry": bool(stock_info["out_of_stock"]),
             }
         except HTTPException as e:
             if e.status_code == 409:
                 pending.status = "imported"
                 db.commit()
-                return {
-                    "status": "imported",
-                    "message": "Product was already imported to Shopify.",
-                    "out_of_stock_skus": [],
-                    "can_retry": False,
-                }
-            db.commit()
+                return {"status": "imported", "message": "Already in Shopify.", "out_of_stock_skus": [], "can_retry": False}
             raise e
-    else:
-        # Still has OOS variants — do NOT import, keep in queue
-        oos  = stock_info["out_of_stock"]
-        ins  = stock_info["in_stock"]
-        unkn = stock_info["unknown"]
 
-        # Keep status as pending/partial, never mark imported
-        if ins and oos:
-            pending.status = "partial"
-        else:
-            pending.status = "pending"
+    # Product is in Shopify — push inventory update
+    skus = raw.get("skus", [])
+    inv_updated = False
+    if skus:
+        from .shopify import update_shopify_product_inventory_with_skus
+        inv_updated = update_shopify_product_inventory_with_skus(imported.shopify_product_id, skus)
+
+    oos = stock_info["out_of_stock"]
+    ins = stock_info["in_stock"]
+
+    if not oos and not stock_info["unknown"]:
+        pending.status = "imported"
+        db.commit()
+        return {
+            "status": "imported",
+            "message": "All variants are now in stock — inventory updated in Shopify!",
+            "out_of_stock_skus": [],
+            "inventory_updated": inv_updated,
+            "can_retry": False,
+        }
+    elif ins and oos:
+        pending.status = "partial"
+        db.commit()
+    else:
         db.commit()
 
-        oos_labels = [s.get("label") or s.get("sku_id") or "—" for s in oos]
-        unkn_note  = f" ({len(unkn)} variant(s) have hidden stock)" if unkn else ""
-
-        return {
-            "status": "oos",
-            "message": (
-                f"{len(oos)} variant(s) are still out of stock{unkn_note}. "
-                f"This product will be automatically imported once all variants are available."
-            ),
-            "out_of_stock_skus": oos,
-            "out_of_stock_labels": oos_labels,
-            "in_stock_count": len(ins),
-            "oos_count": len(oos),
-            "can_retry": True,
-        }
-
+    oos_labels = [s.get("label") or s.get("sku_id") or "—" for s in oos]
+    return {
+        "status": "oos",
+        "message": (
+            f"{len(oos)} variant(s) still out of stock. "
+            f"Inventory synced where stock is available. "
+            f"Will auto-update when remaining variants restock."
+        ),
+        "out_of_stock_skus": oos,
+        "out_of_stock_labels": oos_labels,
+        "in_stock_count": len(ins),
+        "oos_count": len(oos),
+        "inventory_updated": inv_updated,
+        "can_retry": True,
+    }
 
 
 
@@ -2655,3 +2696,57 @@ def scheduler_status():
             for j in jobs
         ]
     }
+
+@app.post("/admin/backfill-oos-to-pending")
+def backfill_oos_to_pending(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Scan all imported products, find those with OOS variants,
+    and add them to the pending queue for inventory tracking.
+    """
+    def run():
+        inner_db = SessionLocal()
+        try:
+            products = inner_db.query(ImportedProduct).filter(
+                ImportedProduct.shopify_product_id.isnot(None)
+            ).all()
+
+            print(f"[Backfill] Scanning {len(products)} imported products for OOS variants...")
+            queued = 0
+            skipped = 0
+            errors = 0
+
+            for prod in products:
+                try:
+                    # Skip if already in pending queue
+                    existing = inner_db.query(PendingImport).filter(
+                        PendingImport.aliexpress_id == prod.aliexpress_id
+                    ).first()
+                    if existing:
+                        skipped += 1
+                        continue
+
+                    # Fetch fresh AliExpress data
+                    raw = get_product(prod.aliexpress_id, inner_db)
+                    stock_info = classify_skus(raw)
+
+                    # Only queue if there are actual OOS variants (not just unknown)
+                    if stock_info["out_of_stock"]:
+                        upsert_pending(
+                            prod.aliexpress_id, raw, stock_info, "pending", inner_db
+                        )
+                        queued += 1
+                        print(f"[Backfill] Queued {prod.aliexpress_id} — "
+                              f"{len(stock_info['out_of_stock'])} OOS variant(s)")
+                    else:
+                        skipped += 1
+
+                except Exception as e:
+                    errors += 1
+                    print(f"[Backfill] Error for {prod.aliexpress_id}: {e}")
+
+            print(f"[Backfill] Done — queued={queued}, skipped={skipped}, errors={errors}")
+        finally:
+            inner_db.close()
+
+    background_tasks.add_task(run)
+    return {"message": "Backfill started in background — check terminal for progress"}

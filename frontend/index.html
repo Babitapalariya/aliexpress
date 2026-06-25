@@ -446,7 +446,35 @@ tbody tr:last-child td{border-bottom:none}
           <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-brand-aliexpress"></i></div><div><div class="card-title">AliExpress OAuth</div><div class="card-sub">Token-based authentication</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Access token saved in database</div></div></div></div></div>
           <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-green"><i class="ti ti-brand-shopify"></i></div><div><div class="card-title">Shopify API</div><div class="card-sub">Client credentials grant</div></div></div></div><div class="card-body"><div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:10px"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Auto-refreshing token active</div></div></div></div></div>
         </div>
+      
+        <div class="card">
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon ci-orange"><i class="ti ti-database-import"></i></div>
+            <div>
+              <div class="card-title">Backfill OOS to Pending Queue</div>
+              <div class="card-sub">Scan all imported products and queue those with out-of-stock variants</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+            Run this once to catch any products already imported to Shopify that have OOS variants.
+            They'll appear in the Pending Imports queue and auto-update inventory when stock returns.
+          </p>
+          <button class="btn btn-warn" onclick="runBackfillOOS()" id="btn-backfill-oos">
+            <i class="ti ti-database-import"></i> Scan & Queue OOS Products
+          </button>
+          <div id="backfill-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
+        </div>
       </div>
+      </div>
+
+
+
+      
+
+
     </div>
   </div>
 </div>
@@ -748,7 +776,11 @@ function drawCard(id){
       const oos=p.oosSkus||[], oosCount=oos.length;
       const nameList=oos.slice(0,3).map(s=>s.label||s.sku_id||"—");
       const extra=oosCount>3?` +${oosCount-3} more`:"";
-      foot=`<div class="pc-status pcs-skip" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 12px"><div style="display:flex;align-items:center;gap:6px;font-weight:700"><i class="ti ti-clock"></i>${oosCount} variant${oosCount!==1?"s":""} out of stock — queued</div>${nameList.length?`<div style="font-size:10px;opacity:.75">${nameList.join(", ")}${extra}</div>`:""}<div style="font-size:10px;opacity:.6">Will auto-import when all variants are in stock</div></div>`;
+      foot=`<div class="pc-status pcs-ok" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 12px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:700"><i class="ti ti-circle-check"></i>Imported to Shopify</div>
+        <div style="font-size:10px;opacity:.8;display:flex;align-items:center;gap:4px"><i class="ti ti-clock" style="font-size:11px"></i>${oosCount} variant(s) OOS — tracking in queue</div>
+        ${nameList.length?`<div style="font-size:10px;opacity:.65">${nameList.join(", ")}${extra}</div>`:""}
+      </div>`;
       break;}
     case "skip": foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Already in Shopify</div>`;break;
     case "ierr": foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${p.err||""}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;break;
@@ -767,7 +799,31 @@ async function importOne(id){
     if(r.status===409){p.status="skip";p.err=res.detail||"Already in Shopify";drawCard(id);showToast(p.err,"info");return;}
     if(!r.ok){throw new Error(res.detail||`HTTP ${r.status}`);}
     if(res.status==="pending"){p.status="pending";p.oosSkus=res.out_of_stock_skus||[];p.err=res.message;drawCard(id);showToast(`${p.oosSkus.length} variant(s) OOS — added to pending queue.`,"info");updatePendingBadge();return;}
-    if(res.status==="imported"){p.sid=res?.shopify_product?.id||null;p.status="ok";drawCard(id);showToast("Imported to Shopify successfully!","ok");loadStats();return;}
+    
+    
+    
+    //if(res.status==="imported"){p.sid=res?.shopify_product?.id||null;p.status="ok";drawCard(id);showToast("Imported to Shopify successfully!","ok");loadStats();return;}
+    
+    // In importOne, change the pending handling:
+    if(res.status==="imported" && res.queued_for_inventory_sync){
+      p.sid=res?.shopify_product?.id||null;
+      p.status="pending";  // show "imported + tracking" card
+      p.oosSkus=res.out_of_stock_skus||[];
+      drawCard(id);
+      showToast(`Imported! ${p.oosSkus.length} variant(s) OOS — tracking in queue.`,"ok");
+      loadStats();
+      updatePendingBadge();
+      return;
+    }
+    if(res.status==="imported"){
+      p.sid=res?.shopify_product?.id||null;
+      p.status="ok";
+      drawCard(id);
+      showToast("Imported to Shopify successfully!","ok");
+      loadStats();
+      return;
+    }
+    
     throw new Error(res.message||"Unexpected response from server");
   }catch(e){p.status="ierr";p.err=e.message;drawCard(id);showToast("Import failed: "+e.message,"err");}
 }
@@ -1159,6 +1215,28 @@ async function submitBulkIncreaseMappings(){
   const increase_by=parseFloat(amount); if(isNaN(increase_by)){showToast("Invalid number","err");return;}
   try{const res=await fetch(`${API}/mappings/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mapping_ids:window.bulkMappingIds,increase_by})});if(!res.ok){const e=await res.json();throw new Error(e.detail||"Bulk increase failed");}const d=await res.json();showToast(d.message,"ok");closeBulkMappingModal();loadMappings(mappingPage);}
   catch(e){showToast("Bulk increase failed: "+e.message,"err");}
+}
+
+async function runBackfillOOS() {
+  const btn = document.getElementById("btn-backfill-oos");
+  const result = document.getElementById("backfill-result");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Scanning… (this may take a few minutes)`;
+  result.innerHTML = "";
+  try {
+    const r = await fetch(`${API}/admin/backfill-oos-to-pending`, { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    result.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> ${d.message}</div>
+      <div style="margin-top:8px;font-size:12px;color:var(--t3)">Check the Pending Imports page in a minute to see queued products.</div>`;
+    showToast(d.message, "ok");
+    updatePendingBadge();
+  } catch(e) {
+    result.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Backfill failed: " + e.message, "err");
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-database-import"></i> Scan & Queue OOS Products`;
 }
 </script>
 </body>
