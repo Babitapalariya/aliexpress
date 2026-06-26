@@ -468,6 +468,29 @@ tbody tr:last-child td{border-bottom:none}
           <div id="backfill-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
         </div>
       </div>
+
+      <div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <div class="card-header-left">
+      <div class="card-icon ci-purple"><i class="ti ti-photo-scan"></i></div>
+      <div>
+        <div class="card-title">Backfill SKU Variant Images</div>
+        <div class="card-sub">Upload AliExpress per-variant images to existing Shopify products</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+      Run this once to add colour/size swatch images to variants on products already imported to Shopify.
+      New imports will get SKU images automatically. This scans all imported products and attaches any
+      missing variant images in the background.
+    </p>
+    <button class="btn btn-primary" onclick="runBackfillSkuImages()" id="btn-backfill-sku-images">
+      <i class="ti ti-photo-scan"></i> Scan & Attach SKU Images
+    </button>
+    <div id="backfill-sku-images-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
+  </div>
+</div>
       </div>
 
 
@@ -700,8 +723,12 @@ function fullRow(p){
     <td><div class="td-actions">
       <button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
       <button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>
+      <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncProductImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
+      
       <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
       ${p.shopify_product_id?`<a href="https://admin.shopify.com/products/${p.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
+      
+      
       <button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
     </div></td>
   </tr>`;
@@ -1238,6 +1265,47 @@ async function runBackfillOOS() {
   btn.disabled = false;
   btn.innerHTML = `<i class="ti ti-database-import"></i> Scan & Queue OOS Products`;
 }
+
+async function syncProductImages(productId) {
+  showToast("Syncing SKU images from AliExpress…", "info");
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-images`, { method: "POST" });
+    if (!r.ok) {
+      const e = await r.json();
+      throw new Error(e.detail || "Image sync failed");
+    }
+    const d = await r.json();
+    showToast(d.message, "ok");
+  } catch(e) {
+    showToast("Image sync error: " + e.message, "err");
+  }
+}
+ 
+async function runBackfillSkuImages() {
+  const btn = document.getElementById("btn-backfill-sku-images");
+  const result = document.getElementById("backfill-sku-images-result");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Scanning… (may take a few minutes)`;
+  result.innerHTML = "";
+  try {
+    const r = await fetch(`${API}/admin/backfill-sku-images`, { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    result.innerHTML = `
+      <div class="badge b-green"><i class="ti ti-circle-check"></i> ${d.message}</div>
+      <div style="margin-top:8px;font-size:12px;color:var(--t3)">
+        Check terminal logs for per-product details. Images will appear in Shopify immediately.
+      </div>`;
+    showToast(d.message, "ok");
+  } catch(e) {
+    result.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Backfill failed: " + e.message, "err");
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-photo-scan"></i> Scan & Attach SKU Images`;
+}
+
+
 </script>
 </body>
 </html>

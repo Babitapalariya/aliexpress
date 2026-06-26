@@ -2750,3 +2750,106 @@ def backfill_oos_to_pending(background_tasks: BackgroundTasks, db: Session = Dep
 
     background_tasks.add_task(run)
     return {"message": "Backfill started in background — check terminal for progress"}
+
+
+# ══════════════════════════════════════════════════════════
+# ADD THIS ENDPOINT to main.py  (after /admin/backfill-sku-metafields)
+# ══════════════════════════════════════════════════════════
+
+@app.post("/admin/backfill-sku-images")
+def backfill_sku_images_endpoint(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Scan every imported product that has a Shopify ID.
+    For each one, fetch fresh AliExpress data (which now includes per-SKU images),
+    then call backfill_sku_images() to upload missing variant images to Shopify.
+    Runs in the background — check terminal logs for progress.
+    """
+    def run():
+        from .database import SessionLocal
+        from .shopify import backfill_sku_images
+        from .aliexpress import get_product as ali_get_product
+
+        inner_db = SessionLocal()
+        try:
+            products = inner_db.query(ImportedProduct).filter(
+                ImportedProduct.shopify_product_id.isnot(None)
+            ).all()
+
+            print(f"[BackfillImages] Scanning {len(products)} product(s)…")
+            total_attached = 0
+            total_skipped  = 0
+            errors = 0
+
+            for prod in products:
+                try:
+                    # Fetch fresh data so we get the latest sku[].image URLs
+                    raw = ali_get_product(prod.aliexpress_id, inner_db)
+                    skus = raw.get("skus", [])
+
+                    # Quick check: does this product have any sku images at all?
+                    has_images = any(s.get("image") for s in skus)
+                    if not has_images:
+                        print(f"[BackfillImages] {prod.aliexpress_id} — no SKU images in AliExpress data, skipping")
+                        total_skipped += 1
+                        continue
+
+                    result = backfill_sku_images(prod.shopify_product_id, skus)
+                    total_attached += result["attached"]
+                    total_skipped  += result["skipped"]
+                    print(
+                        f"[BackfillImages] {prod.aliexpress_id} → "
+                        f"attached={result['attached']} skipped={result['skipped']} "
+                        f"total_variants={result['total_variants']}"
+                    )
+                except Exception as e:
+                    errors += 1
+                    print(f"[BackfillImages] Error for {prod.aliexpress_id}: {e}")
+
+            print(
+                f"[BackfillImages] Done — "
+                f"total_attached={total_attached} total_skipped={total_skipped} errors={errors}"
+            )
+        finally:
+            inner_db.close()
+
+    background_tasks.add_task(run)
+    return {"message": "SKU image backfill started in background — check terminal for progress"}
+
+
+# ══════════════════════════════════════════════════════════
+# ADD THIS ENDPOINT to main.py  (single-product image sync)
+# Lets the frontend trigger a per-product image sync from the table
+# ══════════════════════════════════════════════════════════
+
+@app.post("/dashboard/products/{product_id}/sync-images")
+def sync_product_images(product_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch fresh AliExpress SKU data for this product and attach any
+    missing variant images to the linked Shopify product.
+    """
+    from .shopify import backfill_sku_images
+    from .aliexpress import get_product as ali_get_product
+
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        raise HTTPException(400, "Product has no Shopify ID linked")
+
+    try:
+        raw  = ali_get_product(product.aliexpress_id, db)
+        skus = raw.get("skus", [])
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch AliExpress data: {e}")
+
+    result = backfill_sku_images(product.shopify_product_id, skus)
+    return {
+        "message": (
+            f"Attached {result['attached']} image(s). "
+            f"{result['skipped']} variant(s) already had images."
+        ),
+        **result,
+    }

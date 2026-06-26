@@ -7,6 +7,7 @@ Key findings from debug endpoint:
 - Variant names: sku.ae_sku_property_dtos
 - Sales count: ae_item_base_info_dto.sales_count (NOT lastest_volume)
 - Extra data: package_info_dto, ae_store_info available
+- SKU images: sku.ae_sku_property_dtos[*].sku_property_value_id_long_image (first prop with image)
 """
 
 import hashlib
@@ -74,13 +75,14 @@ def _check_error(body: dict):
 
 
 # ─────────────────────────────────────────────
-# Variant name resolver
+# Variant name + image resolver
 # ─────────────────────────────────────────────
 
-def _resolve_sku_label(sku: dict) -> str:
+def _resolve_sku_info(sku: dict) -> dict:
     """
-    Build a human-readable label from ae_sku_property_dtos.
-    e.g. "Red / XL" instead of "5:100014065;14:200002987"
+    Returns {"label": str, "image": str|None}
+    Extracts human-readable label AND the per-variant image from ae_sku_property_dtos.
+    The image is taken from the first property that has a non-null image URL.
     """
     props = sku.get("ae_sku_property_dtos", {})
     if isinstance(props, dict):
@@ -91,14 +93,15 @@ def _resolve_sku_label(sku: dict) -> str:
         prop_list = []
 
     if not prop_list:
-        # Fall back to raw sku_attr
         raw = sku.get("sku_attr", "")
         parts = [p.split(":")[-1].strip() for p in raw.split(";") if ":" in p]
-        return " / ".join(parts) if parts else raw
+        label = " / ".join(parts) if parts else raw
+        return {"label": label, "image": None}
 
     parts = []
+    image_url = None
+
     for prop in prop_list:
-        # Use property_value_definition_name if available (has translated name)
         val = (
             prop.get("property_value_definition_name")
             or prop.get("attr_value")
@@ -108,7 +111,24 @@ def _resolve_sku_label(sku: dict) -> str:
         if val:
             parts.append(str(val).strip())
 
-    return " / ".join(parts) if parts else sku.get("sku_attr", "")
+        # Grab the first image found across any property
+        if image_url is None:
+            img = (
+                prop.get("sku_property_value_id_long_image")   # most common DS field
+                or prop.get("property_value_id_long_image")
+                or prop.get("sku_image")
+                or prop.get("image_path")
+            )
+            if img and isinstance(img, str) and img.startswith("http"):
+                image_url = img
+
+    label = " / ".join(parts) if parts else sku.get("sku_attr", "")
+    return {"label": label, "image": image_url}
+
+
+# Keep the old name as an alias so nothing breaks
+def _resolve_sku_label(sku: dict) -> str:
+    return _resolve_sku_info(sku)["label"]
 
 
 # ─────────────────────────────────────────────
@@ -116,20 +136,14 @@ def _resolve_sku_label(sku: dict) -> str:
 # ─────────────────────────────────────────────
 
 def _parse_freight(result: dict) -> dict:
-    """
-    Extract shipping from logistics_info_dto.
-    Confirmed fields: delivery_time (int days), ship_to_country (str)
-    """
     logistics = result.get("logistics_info_dto", {})
 
     if logistics:
         days = logistics.get("delivery_time")
         country = logistics.get("ship_to_country", "")
 
-        # Check for list of shipping options (some products have multiple)
         ae_logistics = logistics.get("ae_logistics_info", [])
         if isinstance(ae_logistics, list) and ae_logistics:
-            # Pick cheapest option
             cheapest = None
             cheapest_price = float("inf")
             for item in ae_logistics:
@@ -157,7 +171,6 @@ def _parse_freight(result: dict) -> dict:
                     "days":   str(est_days) if est_days else (str(days) if days else ""),
                 }
 
-        # Simple case: just delivery_time days
         if days is not None:
             return {
                 "cost":   "Calculated at checkout",
@@ -165,7 +178,6 @@ def _parse_freight(result: dict) -> dict:
                 "days":   f"{days} days to {country}" if country else f"{days} days",
             }
 
-    # ae_item_properties fallback
     props = result.get("ae_item_properties", {})
     freight_tpl = props.get("freight_template", {})
     if freight_tpl and isinstance(freight_tpl, dict):
@@ -190,14 +202,8 @@ def _parse_freight(result: dict) -> dict:
 # ─────────────────────────────────────────────
 
 def _parse_inventory(result: dict, sku_list: list) -> dict:
-    """
-    Correct field is sku_available_stock (confirmed from all_sku_fields in debug).
-    ipm_sku_stock is always null for DS products.
-    sales_count in base info is the order count (not lastest_volume).
-    """
     base = result.get("ae_item_base_info_dto", {})
 
-    # Sales count — confirmed field name from debug
     sales_count = None
     for field in ("sales_count", "lastest_volume", "volume"):
         val = base.get(field)
@@ -208,14 +214,13 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
             except (ValueError, TypeError):
                 pass
 
-    # Build SKU inventory using the CORRECT field: sku_available_stock
     sku_inventory = []
     total_stock = 0
     any_stock = False
 
     for sku in sku_list:
-        stock_val = sku.get("sku_available_stock")   # ← correct field
-        label = _resolve_sku_label(sku)
+        stock_val = sku.get("sku_available_stock")
+        info = _resolve_sku_info(sku)
 
         try:
             stock = int(stock_val) if stock_val is not None else None
@@ -228,7 +233,7 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
 
         sku_inventory.append({
             "sku_id": sku.get("sku_id"),
-            "attr":   label,
+            "attr":   info["label"],
             "stock":  stock,
         })
 
@@ -242,7 +247,6 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
             "note":            f"{total_stock} units across {len(sku_inventory)} SKU(s)",
         }
 
-    # sku_available_stock also null/0 — truly hidden
     return {
         "total_stock":     None,
         "stock_available": None,
@@ -281,23 +285,22 @@ def _parse_product(raw: dict) -> dict:
         .get("image_urls", "")
     )
 
-    # Package info (weight, dimensions) — present in API but ignored before
-    pkg = result.get("package_info_dto", {})
-
-    # Store info
+    pkg   = result.get("package_info_dto", {})
     store = result.get("ae_store_info", {})
 
-    # Build SKUs with resolved human-readable labels
+    # Build SKUs with resolved human-readable labels AND per-variant images
     skus = []
     for sku in sku_list:
+        info = _resolve_sku_info(sku)
         skus.append({
             "sku_id":       sku.get("sku_id"),
             "sku_attr":     sku.get("sku_attr"),
-            "label":        _resolve_sku_label(sku),   # human-readable e.g. "Red / XL"
+            "label":        info["label"],
+            "image":        info["image"],           # ← NEW: per-variant image URL
             "price":        sku.get("sku_price"),
             "sale_price":   sku.get("offer_sale_price"),
             "bulk_price":   sku.get("offer_bulk_sale_price"),
-            "stock":        sku.get("sku_available_stock"),   # CORRECT field
+            "stock":        sku.get("sku_available_stock"),
             "currency":     sku.get("currency_code"),
         })
 
@@ -325,9 +328,9 @@ def _parse_product(raw: dict) -> dict:
         # Ratings & Sales
         "avg_rating":    product.get("avg_evaluation_rating"),
         "review_count":  product.get("evaluation_count"),
-        "orders":        product.get("sales_count"),   # correct field name
+        "orders":        product.get("sales_count"),
 
-        # Variants / SKUs
+        # Variants / SKUs  (now includes per-variant "image" field)
         "sku_count": len(skus),
         "skus":      skus,
 
@@ -340,7 +343,7 @@ def _parse_product(raw: dict) -> dict:
         # Links
         "product_url": f"https://www.aliexpress.com/item/{product.get('product_id')}.html",
 
-        # Shipping (correctly parsed)
+        # Shipping
         "shipping_info": {
             "cost":   shipping["cost"],
             "method": shipping["method"],
