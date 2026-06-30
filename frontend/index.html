@@ -520,7 +520,10 @@ tbody tr:last-child td{border-bottom:none}
         <div class="fg full"><label>Description (HTML supported)</label><textarea id="m-desc" placeholder="Custom description…"></textarea></div>
       </div>
       <div style="margin:16px 0;padding:12px;background:#f8fafc;border-radius:12px;border:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-weight:700;font-size:12px"><i class="ti ti-truck"></i> Shipping & Inventory</span><button class="btn btn-xs" onclick="refreshProductDetails()"><i class="ti ti-refresh"></i> Refresh</button></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-weight:700;font-size:12px"><i class="ti ti-truck"></i> Shipping & Inventory</span>
+          <button class="btn btn-xs" onclick="refreshProductDetails()"><i class="ti ti-refresh"></i> Refresh Info</button>
+    <button class="btn btn-xs btn-primary" onclick="pushInventoryToShopify()"><i class="ti ti-cloud-upload"></i> Push Stock to Shopify</button>
+        </div>
         <div id="modal-shipping-info" style="font-size:12px;color:var(--t2)">Loading...</div>
         <div id="modal-inventory-info" style="font-size:12px;color:var(--t2);margin-top:8px"></div>
       </div>
@@ -901,20 +904,105 @@ async function saveModal(){
   }catch(e){showToast("Save failed: "+e.message,"err");}
   btn.disabled=false;btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
 }
-async function loadVariantsForModal(productId){
-  const wrap=document.getElementById("m-variants-wrap");
-  wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
-  currentVariants=[];
-  try{
-    const r=await fetch(`${API}/dashboard/products/${productId}/variants`);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data=await r.json();currentVariants=data.variants||[];
-    if(!currentVariants.length){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;return;}
-    wrap.innerHTML=`<table style="width:100%;font-size:13px;border-collapse:collapse"><thead style="background:var(--bg)"><tr><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th><th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:130px">Price (USD)</th></tr></thead><tbody>${currentVariants.map((v,i)=>`<tr style="background:${i%2===0?"transparent":"var(--bg)"}"><td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td><td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku||"—"}</td><td style="padding:6px 8px;text-align:right"><input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}" style="width:100px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)"></td></tr>`).join("")}</tbody></table><div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border)"><button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button></div>`;
-  }catch(e){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;}
+// async function loadVariantsForModal(productId){
+//   const wrap=document.getElementById("m-variants-wrap");
+//   wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
+//   currentVariants=[];
+//   try{
+//     const r=await fetch(`${API}/dashboard/products/${productId}/variants`);
+//     if(!r.ok) throw new Error(`HTTP ${r.status}`);
+//     const data=await r.json();currentVariants=data.variants||[];
+//     if(!currentVariants.length){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;return;}
+//     wrap.innerHTML=`<table style="width:100%;font-size:13px;border-collapse:collapse"><thead style="background:var(--bg)"><tr><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th><th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th><th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:130px">Price (USD)</th></tr></thead><tbody>${currentVariants.map((v,i)=>`<tr style="background:${i%2===0?"transparent":"var(--bg)"}"><td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td><td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku||"—"}</td><td style="padding:6px 8px;text-align:right"><input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}" style="width:100px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)"></td></tr>`).join("")}</tbody></table><div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border)"><button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button></div>`;
+//   }catch(e){wrap.innerHTML=`<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;}
+// }
+
+
+async function loadVariantsForModal(productId) {
+  const wrap = document.getElementById("m-variants-wrap");
+  wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
+  currentVariants = [];
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/variants`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    currentVariants = data.variants || [];
+    if (!currentVariants.length) {
+      wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;
+      return;
+    }
+    wrap.innerHTML = `<table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead style="background:var(--bg)">
+        <tr>
+          <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
+          <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Price (USD)</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
+        </tr>
+      </thead>
+      <tbody>${currentVariants.map((v, i) => `
+        <tr style="background:${i % 2 === 0 ? "transparent" : "var(--bg)"}">
+          <td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td>
+          <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
+          <td style="padding:6px 8px;text-align:right">
+            <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}"
+              style="width:90px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          </td>
+          <td style="padding:6px 8px;text-align:right">
+            <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}"
+              style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          </td>
+        </tr>`).join("")}</tbody>
+    </table>
+    <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px">
+      <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
+      <button type="button" class="btn btn-xs" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
+    </div>`;
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;
+  }
 }
+ 
+
 function applyPriceToAllVariants(){const inputs=document.querySelectorAll(".variant-price-input");if(!inputs.length)return;const v=inputs[0].value;inputs.forEach(i=>i.value=v);}
-function getEditedVariantPrices(){return Array.from(document.querySelectorAll(".variant-price-input")).map(i=>({variant_id:i.dataset.variantId,price:i.value}));}
+
+
+//function getEditedVariantPrices(){return Array.from(document.querySelectorAll(".variant-price-input")).map(i=>({variant_id:i.dataset.variantId,price:i.value}));}
+
+function getEditedVariantPrices() {
+  // Now pairs each price input with its matching stock input by variant_id
+  const priceInputs = Array.from(document.querySelectorAll(".variant-price-input"));
+  return priceInputs.map(i => {
+    const vid = i.dataset.variantId;
+    const stockInput = document.querySelector(`.variant-stock-input[data-variant-id="${vid}"]`);
+    const out = { variant_id: vid, price: i.value };
+    if (stockInput && stockInput.value !== "") {
+      out.inventory_quantity = parseInt(stockInput.value, 10);
+    }
+    return out;
+  });
+}
+
+
+async function syncInventoryFromModal() {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  showToast("Pulling live stock from AliExpress…", "info");
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+    if (!r.ok) {
+      const e = await r.json();
+      throw new Error(e.detail || "Inventory sync failed");
+    }
+    const d = await r.json();
+    showToast(d.message, "ok");
+    // Reload variant rows so the Stock column reflects what's now in Shopify
+    await loadVariantsForModal(productId);
+  } catch (e) {
+    showToast("Inventory sync error: " + e.message, "err");
+  }
+}
+
 async function refreshProductDetails(){
   const productId=document.getElementById("m-dbid").value, aliexpressId=document.getElementById("m-aeid").value;
   if(!productId) return;
@@ -1305,6 +1393,25 @@ async function runBackfillSkuImages() {
   btn.innerHTML = `<i class="ti ti-photo-scan"></i> Scan & Attach SKU Images`;
 }
 
+async function pushInventoryToShopify() {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  showToast("Pushing live AliExpress stock to Shopify…", "info");
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+    if (!r.ok) {
+      const e = await r.json();
+      throw new Error(e.detail || "Inventory sync failed");
+    }
+    const d = await r.json();
+    showToast(d.message, d.inventory_updated ? "ok" : "info");
+    // Refresh both the info panel and the variant stock inputs so everything matches Shopify
+    refreshProductDetails();
+    loadVariantsForModal(productId);
+  } catch (e) {
+    showToast("Push failed: " + e.message, "err");
+  }
+}
 
 </script>
 </body>
