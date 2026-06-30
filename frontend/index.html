@@ -672,32 +672,76 @@ function miniRow(p){
 }
 
 // ── PRODUCTS TABLE ─────────────────────────────────────────────────────
-async function loadProducts(page){
+// async function loadProducts(page){
+//   prodPage = page || 1;
+//   const q = document.getElementById("prod-search")?.value || "";
+//   const tb = document.getElementById("prod-tbody");
+//   tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
+//   try{
+//     const url = `${API}/dashboard/products?page=${prodPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
+//     const r = await fetch(url);
+//     if(!r.ok) throw new Error(`HTTP ${r.status}`);
+//     const d = await r.json();
+//     prodPages = d.pages;
+//     document.getElementById("prod-count-sub").textContent = `${d.total} products total`;
+//     document.getElementById("sb-count").textContent = d.total;
+//     let rows = d.products;
+//     if(!rows.length){
+//       tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;
+//       document.getElementById("prod-pag").style.display = "none";
+//       return;
+//     }
+//     tb.innerHTML = rows.map(p => fullRow(p)).join("");
+//     document.querySelectorAll(".product-checkbox").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+//     buildPag(d.total, d.page, d.pages);
+//   } catch(e) {
+//     tb.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;
+//   }
+// }
+
+
+
+async function loadProducts(page) {
   prodPage = page || 1;
   const q = document.getElementById("prod-search")?.value || "";
   const tb = document.getElementById("prod-tbody");
   tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
-  try{
+  try {
     const url = `${API}/dashboard/products?page=${prodPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
     const r = await fetch(url);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     prodPages = d.pages;
-    document.getElementById("prod-count-sub").textContent = `${d.total} products total`;
-    document.getElementById("sb-count").textContent = d.total;
+ 
+    // FIX: label reflects whether a search is active, instead of always
+    // implying this is the full catalog count.
+    document.getElementById("prod-count-sub").textContent = q
+      ? `${d.total} result${d.total !== 1 ? "s" : ""} found for "${q}"`
+      : `${d.total} products total`;
+ 
+    // FIX: sidebar badge must always reflect the TOTAL catalog size,
+    // never the filtered search count. Don't touch it here at all —
+    // loadStats() owns this value via /dashboard/stats.
+    // (removed: document.getElementById("sb-count").textContent = d.total;)
+ 
     let rows = d.products;
-    if(!rows.length){
-      tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;
+    if (!rows.length) {
+      tb.innerHTML = q
+        ? `<tr><td colspan="11"><div class="empty"><i class="ti ti-search-off"></i><p>No products match "${q}"</p><small>Try a different search term or clear the search</small></div></td></tr>`
+        : `<tr><td colspan="11"><div class="empty"><i class="ti ti-inbox"></i><p>No products found</p></div></td></tr>`;
       document.getElementById("prod-pag").style.display = "none";
       return;
     }
     tb.innerHTML = rows.map(p => fullRow(p)).join("");
     document.querySelectorAll(".product-checkbox").forEach(cb => cb.addEventListener("change", updateSelectedCount));
     buildPag(d.total, d.page, d.pages);
-  } catch(e) {
+  } catch (e) {
     tb.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;
   }
 }
+ 
+
+
 
 function fullRow(p){
   const title=p.title||"—", price=p.price||"—", cur=p.currency||"USD";
