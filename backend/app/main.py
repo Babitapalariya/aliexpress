@@ -2175,7 +2175,7 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
         "inventory_updated": inventory_updated_count,
     }
 
-    
+
 def _job_listener(event):
     if event.exception:
         print(f"[Scheduler][ERROR] Job '{event.job_id}' failed: {event.exception}")
@@ -2980,3 +2980,118 @@ def sync_product_inventory(product_id: int, db: Session = Depends(get_db)):
         "total_stock": new_total_stock,
     }
  
+
+@app.post("/dashboard/products/bulk-sync-inventory")
+def bulk_sync_inventory(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    payload: {
+        "product_ids": [1, 2, 3]   # omit or pass [] to sync ALL imported products
+    }
+    Runs in background so the HTTP response returns immediately.
+    Check terminal logs for per-product progress.
+    """
+    from .shopify import update_shopify_product_inventory_with_skus
+    from .aliexpress import get_product as ali_get_product
+ 
+    product_ids = payload.get("product_ids", [])
+ 
+    # Resolve which products to process
+    query = db.query(ImportedProduct).filter(
+        ImportedProduct.shopify_product_id.isnot(None)
+    )
+    if product_ids:
+        query = query.filter(ImportedProduct.id.in_(product_ids))
+    products = query.all()
+ 
+    if not products:
+        raise HTTPException(404, "No valid products found with a linked Shopify ID")
+ 
+    total = len(products)
+ 
+    # Snapshot what we need before handing off to background task
+    # (db session is not safe to pass across threads)
+    product_snapshots = [
+        {
+            "id": p.id,
+            "aliexpress_id": p.aliexpress_id,
+            "shopify_product_id": p.shopify_product_id,
+        }
+        for p in products
+    ]
+ 
+    def run():
+        from .database import SessionLocal
+        from .shopify import update_shopify_product_inventory_with_skus
+        from .aliexpress import get_product as ali_get_product
+ 
+        inner_db = SessionLocal()
+        success = 0
+        failed = 0
+        skipped = 0
+ 
+        print(f"\n[BulkInventory] Starting sync for {total} product(s)…")
+ 
+        try:
+            for snap in product_snapshots:
+                aliexpress_id    = snap["aliexpress_id"]
+                shopify_id       = snap["shopify_product_id"]
+ 
+                try:
+                    raw  = ali_get_product(aliexpress_id, inner_db)
+                    skus = raw.get("skus", [])
+ 
+                    if not skus:
+                        print(f"[BulkInventory] {aliexpress_id} — no SKUs returned, skipping")
+                        skipped += 1
+                        continue
+ 
+                    # Check if AliExpress actually reports stock for this product
+                    has_stock_data = any(
+                        s.get("stock") is not None for s in skus
+                    )
+                    if not has_stock_data:
+                        print(f"[BulkInventory] {aliexpress_id} — stock hidden by DS API, skipping")
+                        skipped += 1
+                        continue
+ 
+                    updated = update_shopify_product_inventory_with_skus(shopify_id, skus)
+ 
+                    # Also update local total_stock cache
+                    new_total = raw.get("total_stock")
+                    if new_total is not None:
+                        prod = inner_db.query(ImportedProduct).filter(
+                            ImportedProduct.id == snap["id"]
+                        ).first()
+                        if prod:
+                            prod.total_stock = new_total
+                            inner_db.commit()
+ 
+                    if updated:
+                        success += 1
+                        print(f"[BulkInventory] ✓ {aliexpress_id} → Shopify {shopify_id}")
+                    else:
+                        skipped += 1
+                        print(f"[BulkInventory] ~ {aliexpress_id} — no changes needed")
+ 
+                except Exception as e:
+                    failed += 1
+                    print(f"[BulkInventory] ✗ {aliexpress_id}: {e}")
+ 
+        finally:
+            inner_db.close()
+            print(
+                f"[BulkInventory] Done — "
+                f"updated={success} unchanged/skipped={skipped} errors={failed}"
+            )
+ 
+    background_tasks.add_task(run)
+ 
+    return {
+        "message": f"Bulk inventory sync started for {total} product(s) — running in background",
+        "total": total,
+        "note": "Check terminal logs for per-product progress. This may take a few minutes for large catalogs.",
+    }

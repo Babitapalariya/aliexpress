@@ -365,10 +365,29 @@ tbody tr:last-child td{border-bottom:none}
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-packages"></i></div><div><div class="card-title">All Products</div><div class="card-sub" id="prod-count-sub">Loading…</div></div></div>
             <div class="toolbar"><div class="search-box"><i class="ti ti-search"></i><input type="text" id="prod-search" placeholder="Search by title or ID…" oninput="searchDebounce()"/></div><button class="btn btn-sm" onclick="loadProducts()"><i class="ti ti-refresh"></i></button></div>
           </div>
-          <div class="toolbar" style="padding:12px 22px">
+
+
+          <!-- <div class="toolbar" style="padding:12px 22px">
             <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
             <span id="selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
-          </div>
+          </div> -->
+
+ 
+<div class="toolbar" style="padding:12px 22px;gap:8px">
+  <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseModal()">
+    <i class="ti ti-plus"></i> Bulk Increase Price
+  </button>
+  <button class="btn btn-sm" id="btn-bulk-inv-selected" onclick="bulkSyncInventorySelected()"
+    style="display:none">
+    <i class="ti ti-refresh"></i> Sync Inventory (Selected)
+  </button>
+  <button class="btn btn-sm" onclick="bulkSyncInventoryAll()">
+    <i class="ti ti-cloud-download"></i> Sync All Inventory
+  </button>
+  <span id="selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
+  <span id="bulk-inv-status" style="font-size:12px;color:var(--t2)"></span>
+</div>
+ 
           <div class="tbl-wrap"><table>
             <thead><tr><th style="width:28px"></th><th style="width:52px"></th><th>Product</th><th>AliExpress ID</th><th>Price</th><th>Mode</th><th>Rating</th><th>SKUs</th><th>Status</th><th>Imported</th><th>Actions</th></tr></thead>
             <tbody id="prod-tbody"><tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr></tbody>
@@ -491,7 +510,35 @@ tbody tr:last-child td{border-bottom:none}
     <div id="backfill-sku-images-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
   </div>
 </div>
+
+
+
+
+ 
+<div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <div class="card-header-left">
+      <div class="card-icon ci-green"><i class="ti ti-stack"></i></div>
+      <div>
+        <div class="card-title">Bulk Sync Inventory to Shopify</div>
+        <div class="card-sub">Push live AliExpress stock to ALL imported products at once</div>
       </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+      Fetches current stock from AliExpress for every imported product and pushes it to Shopify
+      in one background job. Products where AliExpress doesn't expose stock (DS API hidden) are
+      skipped automatically. Check terminal logs for per-product progress.
+    </p>
+    <button class="btn btn-primary" onclick="bulkSyncInventoryAll()" id="btn-bulk-inv-settings">
+      <i class="ti ti-cloud-download"></i> Sync All Inventory Now
+    </button>
+    <div id="bulk-inv-settings-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
+  </div>
+</div>
+      
+</div>
 
 
 
@@ -780,7 +827,73 @@ function fullRow(p){
     </div></td>
   </tr>`;
 }
-function updateSelectedCount(){const c=document.querySelectorAll('.product-checkbox:checked').length;document.getElementById('selected-count').innerText=`${c} selected`;}
+
+//function updateSelectedCount(){const c=document.querySelectorAll('.product-checkbox:checked').length;document.getElementById('selected-count').innerText=`${c} selected`;}
+
+
+function updateSelectedCount() {
+  const c = document.querySelectorAll('.product-checkbox:checked').length;
+  document.getElementById('selected-count').innerText = `${c} selected`;
+  const selBtn = document.getElementById('btn-bulk-inv-selected');
+  if (selBtn) selBtn.style.display = c > 0 ? '' : 'none';
+}
+
+async function bulkSyncInventorySelected() {
+  const ids = Array.from(document.querySelectorAll('.product-checkbox:checked'))
+    .map(cb => parseInt(cb.dataset.id));
+  if (!ids.length) { showToast("Select at least one product first", "err"); return; }
+  await _doBulkInventorySync(ids, `${ids.length} selected product(s)`);
+}
+
+
+// ── Bulk inventory sync for ALL imported products ──
+async function bulkSyncInventoryAll() {
+  if (!confirm(`This will fetch live AliExpress stock for ALL imported products and push to Shopify.\\n\\nThis runs in the background and may take a few minutes for large catalogs. Continue?`)) return;
+  await _doBulkInventorySync([], "all products");
+}
+ 
+// ── Shared implementation ──
+async function _doBulkInventorySync(productIds, label) {
+  // Disable buttons to prevent double-fire
+  const btns = ['btn-bulk-inv-selected', 'btn-bulk-inv-settings']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  btns.forEach(b => { b.disabled = true; b._origHTML = b.innerHTML; b.innerHTML = `<i class="ti ti-loader-2 spin"></i> Starting…`; });
+ 
+  const statusEl = document.getElementById('bulk-inv-status');
+  const resultEl = document.getElementById('bulk-inv-settings-result');
+  if (statusEl) statusEl.textContent = `Syncing inventory for ${label}…`;
+  if (resultEl) resultEl.innerHTML = `<i class="ti ti-loader-2 spin"></i> Running in background…`;
+ 
+  showToast(`Bulk inventory sync started for ${label}`, "info");
+ 
+  try {
+    const r = await fetch(`${API}/dashboard/products/bulk-sync-inventory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_ids: productIds }),
+    });
+    if (!r.ok) {
+      const e = await r.json();
+      throw new Error(e.detail || `HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    showToast(d.message, "ok");
+    if (statusEl) statusEl.textContent = `Sync running for ${d.total} product(s) — check terminal`;
+    if (resultEl) resultEl.innerHTML = `
+      <div class="badge b-green" style="margin-bottom:8px">
+        <i class="ti ti-circle-check"></i> ${d.message}
+      </div>
+      <div style="font-size:12px;color:var(--t3);margin-top:6px">${d.note}</div>`;
+  } catch (e) {
+    showToast("Bulk inventory sync failed: " + e.message, "err");
+    if (statusEl) statusEl.textContent = "";
+    if (resultEl) resultEl.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+  }
+ 
+  btns.forEach(b => { b.disabled = false; b.innerHTML = b._origHTML; });
+}
+
 function buildPag(total,page,pages){
   const el=document.getElementById("prod-pag");
   if(pages<=1){el.style.display="none";return;} el.style.display="flex";
