@@ -537,6 +537,28 @@ tbody tr:last-child td{border-bottom:none}
     <div id="bulk-inv-settings-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
   </div>
 </div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <div class="card-header-left">
+      <div class="card-icon ci-purple"><i class="ti ti-truck"></i></div>
+      <div>
+        <div class="card-title">Set Vendor to UGNE</div>
+        <div class="card-sub">Update all imported Shopify products to use vendor "UGNE"</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+      This will set the vendor field to <strong>"UGNE"</strong> on every product that has been imported.
+      It runs in the background and may take a few minutes for large catalogs.
+    </p>
+    <button class="btn btn-primary" onclick="runBackfillVendor()" id="btn-backfill-vendor">
+      <i class="ti ti-truck"></i> Set Vendor to UGNE
+    </button>
+    <div id="backfill-vendor-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
+  </div>
+</div>
       
 </div>
 
@@ -1568,6 +1590,35 @@ async function pushInventoryToShopify() {
   } catch (e) {
     showToast("Push failed: " + e.message, "err");
   }
+}
+
+async function runBackfillVendor() {
+  const btn = document.getElementById("btn-backfill-vendor");
+  const result = document.getElementById("backfill-vendor-result");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Starting… (may take a few minutes)`;
+  result.innerHTML = "";
+
+  try {
+    const r = await fetch(`${API}/admin/backfill-vendor`, { method: "POST" });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    result.innerHTML = `
+      <div class="badge b-green"><i class="ti ti-circle-check"></i> ${d.message}</div>
+      <div style="margin-top:8px;font-size:12px;color:var(--t3)">${d.note}</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--t3)">Check terminal logs for per-product progress.</div>
+    `;
+    showToast(d.message, "ok");
+  } catch (e) {
+    result.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Vendor backfill failed: " + e.message, "err");
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-truck"></i> Set Vendor to UGNE`;
 }
 
 </script>

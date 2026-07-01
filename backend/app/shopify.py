@@ -347,7 +347,8 @@ def normalize_aliexpress_product(product: dict) -> dict:
     payload = {
         "title": title,
         "body_html": body_html,
-        "vendor": product.get("store_name") or "AliExpress",
+        #"vendor": product.get("store_name") or "AliExpress",
+        "vendor": "UGNE",
         "product_type": "",
         "status": "draft",
         "tags": ", ".join(tags),

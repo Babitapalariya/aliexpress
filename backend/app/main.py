@@ -3095,3 +3095,66 @@ def bulk_sync_inventory(
         "total": total,
         "note": "Check terminal logs for per-product progress. This may take a few minutes for large catalogs.",
     }
+
+
+@app.post("/admin/backfill-vendor")
+def backfill_vendor(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Set vendor = 'UGNE' on every imported product in Shopify.
+    Runs in the background – check terminal for progress.
+    """
+    products = db.query(ImportedProduct).filter(
+        ImportedProduct.shopify_product_id.isnot(None)
+    ).all()
+
+    if not products:
+        raise HTTPException(404, "No imported products with a Shopify ID found")
+
+    total = len(products)
+    snapshots = [
+        {"id": p.id, "aliexpress_id": p.aliexpress_id, "shopify_product_id": p.shopify_product_id}
+        for p in products
+    ]
+
+    def run():
+        from .database import SessionLocal
+        from .shopify import _base, _h
+        import requests as req
+
+        inner_db = SessionLocal()
+        success = 0
+        failed = 0
+
+        print(f"\n[VendorBackfill] Setting vendor='UGNE' on {total} product(s)…")
+
+        try:
+            for snap in snapshots:
+                try:
+                    res = req.put(
+                        f"{_base()}/products/{snap['shopify_product_id']}.json",
+                        json={"product": {"vendor": "UGNE"}},
+                        headers=_h(),
+                        timeout=15,
+                    )
+                    if res.status_code == 200:
+                        success += 1
+                        print(f"[VendorBackfill] ✓ {snap['aliexpress_id']} → vendor=UGNE")
+                    else:
+                        failed += 1
+                        print(f"[VendorBackfill] ✗ {snap['aliexpress_id']}: {res.text}")
+                except Exception as e:
+                    failed += 1
+                    print(f"[VendorBackfill] ✗ {snap['aliexpress_id']}: {e}")
+        finally:
+            inner_db.close()
+            print(f"[VendorBackfill] Done — updated={success} errors={failed}")
+
+    background_tasks.add_task(run)
+    return {
+        "message": f"Vendor backfill started for {total} product(s) — running in background",
+        "total": total,
+        "note": "Check terminal logs for progress.",
+    }
