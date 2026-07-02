@@ -672,7 +672,8 @@ tbody tr:last-child td{border-bottom:none}
 
 <script>
   
- //const API = "http://127.0.0.1:8001/api";
+    
+//const API = "http://127.0.0.1:8001/api";
 const API = "https://aliexpress.retradviews.com/api";
 let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
 let _pendingFilter='all', _allPendingData=[], currentVariants=[];
@@ -1802,11 +1803,17 @@ function hideLookupPanel() {
 }
  
 // ── Smart ID lookup ────────────────────────────────────────────────────
+// Shows lookup results directly IN the products table using the same
+// fullRow() format, instead of separate cards above the table.
+ 
 async function doSmartLookup(q) {
-  showLookupPanel(`
-    <div style="padding:14px;text-align:center;color:var(--t3);font-size:12px">
-      <i class="ti ti-loader-2 spin"></i> Looking up ID ${q}…
-    </div>`);
+  const tb = document.getElementById("prod-tbody");
+  tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Looking up ID ${q}…</p></div></td></tr>`;
+  hideLookupPanel();
+ 
+  // Also update the subtitle so user knows it's a lookup
+  document.getElementById("prod-count-sub").textContent = `Searching for ID "${q}"…`;
+  document.getElementById("prod-pag").style.display = "none";
  
   try {
     const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}`);
@@ -1814,90 +1821,155 @@ async function doSmartLookup(q) {
     const d = await r.json();
  
     if (!d.found) {
-      hideLookupPanel();
-      loadProducts(1);
-      showLookupPanel(`
-        <div style="padding:14px 16px;background:var(--orange-bg);border:1px solid var(--orange-border);
-          border-radius:10px;font-size:13px;color:#92400e;display:flex;align-items:flex-start;gap:10px">
-          <i class="ti ti-alert-triangle" style="font-size:18px;flex-shrink:0;margin-top:1px;color:var(--orange)"></i>
-          <div>
-            <div style="font-weight:700;margin-bottom:4px">ID ${q} not found in your imports</div>
-            <div style="font-size:12px">${d.message}</div>
-            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-              <a href="https://www.aliexpress.com/item/${q}.html" target="_blank">
-                <button class="btn btn-xs"><i class="ti ti-external-link"></i> Check on AliExpress</button>
-              </a>
-              <button class="btn btn-xs" onclick="document.getElementById('prod-search').value='';searchDebounce()">
-                <i class="ti ti-x"></i> Clear Search
-              </button>
-            </div>
+      // Nothing found — show helpful empty state in the table
+      document.getElementById("prod-count-sub").textContent = `No results for "${q}"`;
+      tb.innerHTML = `<tr><td colspan="11">
+        <div class="empty">
+          <i class="ti ti-search-off" style="font-size:44px;margin-bottom:12px;opacity:.5"></i>
+          <p>ID "${q}" not found in your imports</p>
+          <small style="margin-top:6px;display:block;max-width:420px;line-height:1.6">${d.message}</small>
+          <div style="display:flex;gap:8px;margin-top:14px;justify-content:center;flex-wrap:wrap">
+            <a href="https://www.aliexpress.com/item/${q}.html" target="_blank">
+              <button class="btn btn-sm"><i class="ti ti-external-link"></i> Check on AliExpress</button>
+            </a>
+            <button class="btn btn-sm" onclick="document.getElementById('prod-search').value='';searchDebounce()">
+              <i class="ti ti-x"></i> Clear Search
+            </button>
           </div>
-        </div>`);
+        </div>
+      </td></tr>`;
       return;
     }
  
-    const cards = d.results.map(p => {
-      const isOldId = p.match_reason.toLowerCase().includes("old");
-      const isDead  = p.is_dead_listing;
-      const bgColor = isDead ? "var(--red-bg)" : isOldId ? "var(--orange-bg)" : "var(--green-bg)";
-      const bColor  = isDead ? "var(--red-border)" : isOldId ? "var(--orange-border)" : "var(--green-border)";
-      const icon    = isDead ? "❌" : isOldId ? "⚠️" : "✅";
+    // Found — render in the same table format as fullRow()
+    // Inject match_reason as a small note under the product title
+    document.getElementById("prod-count-sub").textContent =
+      `${d.count} result${d.count !== 1 ? "s" : ""} found for ID "${q}"`;
  
-      return `
-        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;
-          background:${bgColor};border:1px solid ${bColor};border-radius:10px;margin-bottom:8px">
-          ${p.main_image
-            ? `<img src="${p.main_image}" style="width:48px;height:48px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid ${bColor}">`
-            : `<div style="width:48px;height:48px;border-radius:8px;background:var(--border-2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-photo" style="color:var(--t3)"></i></div>`}
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              ${p.title || "—"}
-            </div>
-            <div style="font-size:11px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <span style="font-family:var(--mono);color:var(--t3)">Current ID: ${p.aliexpress_id}</span>
-              ${p.replacement_aliexpress_id
-                ? `<span style="font-family:var(--mono);color:var(--orange)">Old ID: ${p.replacement_aliexpress_id}</span>`
-                : ""}
-              ${isDead ? `<span class="badge b-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Dead listing</span>` : ""}
-            </div>
-            <div style="font-size:11px;margin-top:3px;font-weight:600;color:${isDead ? 'var(--red)' : isOldId ? '#92400e' : 'var(--green)'}">
-              ${icon} ${p.match_reason}
-            </div>
-          </div>
-          <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-            ${p.shopify_url
-              ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify"><i class="ti ti-brand-shopify"></i></button></a>`
-              : ""}
-            <a href="${p.aliexpress_url}" target="_blank">
-              <button class="btn btn-xs" title="View on AliExpress"><i class="ti ti-external-link"></i></button>
-            </a>
-            ${isDead
-              ? `<button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id},'${p.aliexpress_id}')">
-                  <i class="ti ti-arrows-exchange"></i> Remap</button>`
-              : `<button class="btn btn-primary btn-xs" onclick="highlightProductRow(${p.id})">
-                  <i class="ti ti-eye"></i> Show in Table</button>`}
-          </div>
-        </div>`;
+    tb.innerHTML = d.results.map(p => {
+      const title  = p.title || "—";
+      const price  = p.price || "—";
+      const cur    = p.currency || "USD";
+      const date   = p.imported_at
+        ? new Date(p.imported_at).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" })
+        : "—";
+ 
+      const imgEl = p.main_image
+        ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>`
+        : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
+ 
+      const statusBadge = p.shopify_status === "active"
+        ? `<span class="badge b-green">Active</span>`
+        : `<span class="badge b-gray">Draft</span>`;
+ 
+      const deadBadge = p.is_dead_listing
+        ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>`
+        : "";
+ 
+      // Match reason badge — colour-coded
+      const isOldId  = p.match_reason.toLowerCase().includes("old");
+      const isDead   = p.is_dead_listing;
+      const reasonBadge = isOldId
+        ? `<span class="badge b-orange" style="margin-top:3px;font-size:10px"><i class="ti ti-history"></i> Old ID match</span>`
+        : isDead
+          ? `<span class="badge b-red" style="margin-top:3px;font-size:10px"><i class="ti ti-alert-triangle"></i> Dead listing</span>`
+          : `<span class="badge b-green" style="margin-top:3px;font-size:10px"><i class="ti ti-circle-check"></i> ID match</span>`;
+ 
+      const oldIdNote = p.replacement_aliexpress_id
+        ? `<div style="font-size:10px;color:var(--orange);margin-top:2px;font-family:var(--mono)">Old ID: ${p.replacement_aliexpress_id}</div>`
+        : "";
+ 
+      const pj = escJson(p);
+ 
+      return `<tr style="${isDead ? 'background:var(--red-bg)' : isOldId ? 'background:var(--orange-bg)' : ''}">
+        <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
+        <td>${imgEl}</td>
+        <td>
+          <div class="td-title" style="max-width:200px" title="${title}">${title}</div>
+          <div class="td-sub">${p.store_name || ""}</div>
+          <div style="margin-top:3px">${reasonBadge}</div>
+          ${oldIdNote}
+        </td>
+        <td><span class="td-id">${p.aliexpress_id}</span></td>
+        <td><span class="td-price">${cur} ${price}</span></td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>${statusBadge}${deadBadge}</td>
+        <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
+        <td><div class="td-actions">
+          <button class="btn btn-primary btn-icon sm" title="Sync Price"
+            onclick="syncProductPrice(${p.id})">
+            <i class="ti ti-refresh" style="font-size:13px"></i>
+          </button>
+          <button class="btn btn-primary btn-icon sm" title="Sync SKU Images"
+            onclick="syncProductImages(${p.id})">
+            <i class="ti ti-photo-scan" style="font-size:13px"></i>
+          </button>
+          <button class="btn btn-primary btn-icon sm" title="Increase Price"
+            onclick="openIncreasePriceModalImported(${p.id})">
+            <i class="ti ti-plus" style="font-size:13px"></i>
+          </button>
+          <button class="btn btn-icon sm" title="Check listing status"
+            onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')">
+            <i class="ti ti-radar" style="font-size:13px"></i>
+          </button>
+          ${isDead
+            ? `<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID"
+                onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')">
+                <i class="ti ti-arrows-exchange" style="font-size:13px"></i>
+               </button>`
+            : ""}
+          <button class="btn btn-primary btn-icon sm" title="Edit"
+            onclick='openModal(${pj})'>
+            <i class="ti ti-edit" style="font-size:13px"></i>
+          </button>
+          ${p.shopify_url
+            ? `<a href="${p.shopify_url}" target="_blank">
+                <button class="btn btn-icon sm" title="View in Shopify">
+                  <i class="ti ti-external-link" style="font-size:13px"></i>
+                </button></a>`
+            : ""}
+          <button class="btn btn-icon sm" style="color:var(--red)"
+            onclick="delProduct(${p.id})">
+            <i class="ti ti-trash" style="font-size:13px"></i>
+          </button>
+        </div></td>
+      </tr>`;
     }).join("");
  
-    showLookupPanel(`
-      <div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px">
-        <i class="ti ti-search"></i> ${d.message}
-      </div>
-      ${cards}
-      <button class="btn btn-xs" style="margin-top:6px"
-        onclick="hideLookupPanel();document.getElementById('prod-search').value='';loadProducts(1)">
-        <i class="ti ti-x"></i> Clear & show all products
-      </button>`);
+    // Re-attach checkbox listeners
+    document.querySelectorAll(".product-checkbox").forEach(cb =>
+      cb.addEventListener("change", updateSelectedCount)
+    );
+ 
+    // Show a "clear search" note below the table if found via old ID
+    const hasOldIdMatch = d.results.some(p =>
+      p.match_reason.toLowerCase().includes("old")
+    );
+    if (hasOldIdMatch) {
+      showLookupPanel(`
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 4px;font-size:12px;color:#92400e">
+          <i class="ti ti-history" style="color:var(--orange);font-size:16px;flex-shrink:0"></i>
+          <span>Found by <strong>old AliExpress ID</strong> — this product was remapped.
+          The current active ID is shown in the table above.</span>
+          <button class="btn btn-xs" style="margin-left:auto;flex-shrink:0"
+            onclick="document.getElementById('prod-search').value='';hideLookupPanel();loadProducts(1)">
+            <i class="ti ti-x"></i> Clear
+          </button>
+        </div>`);
+    }
  
   } catch(e) {
-    hideLookupPanel();
+    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--red);padding:40px">${e.message}</td></tr>`;
     showToast("Lookup failed: " + e.message, "err");
-    loadProducts(1);
   }
 }
  
+
+
 // Highlight a row in the table after showing search result
+// away but keep it in case it's called from elsewhere ──────────────────
 async function highlightProductRow(productId) {
   hideLookupPanel();
   document.getElementById("prod-search").value = "";
