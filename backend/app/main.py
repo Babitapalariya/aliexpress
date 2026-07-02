@@ -445,13 +445,22 @@ def list_products(
     db: Session = Depends(get_db)
 ):
     query = db.query(ImportedProduct)
+    # if search:
+    #     search_term = f"%{search}%"
+    #     query = query.filter(
+    #         (ImportedProduct.original_title.ilike(search_term)) |
+    #         (ImportedProduct.custom_title.ilike(search_term)) |
+    #         (ImportedProduct.aliexpress_id.ilike(search_term))
+    #     )
+
     if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            (ImportedProduct.original_title.ilike(search_term)) |
-            (ImportedProduct.custom_title.ilike(search_term)) |
-            (ImportedProduct.aliexpress_id.ilike(search_term))
-        )
+       search_term = f"%{search}%"
+       query = query.filter(
+           (ImportedProduct.original_title.ilike(search_term)) |
+           (ImportedProduct.custom_title.ilike(search_term)) |
+           (ImportedProduct.aliexpress_id.ilike(search_term)) |
+           (ImportedProduct.replacement_aliexpress_id.ilike(search_term))
+       )
     total = query.count()
     pages = math.ceil(total / page_size) if total > 0 else 1
     offset = (page - 1) * page_size
@@ -481,6 +490,8 @@ def list_products(
             "track_price": p.track_price,
             "price_mode": p.price_mode,
             "price_increase": p.price_increase,
+            "replacement_aliexpress_id": p.replacement_aliexpress_id,
+            "is_dead_listing": p.is_dead_listing,
         })
     return {"products": result, "total": total, "page": page, "pages": pages}
 
@@ -3158,3 +3169,416 @@ def backfill_vendor(
         "total": total,
         "note": "Check terminal logs for progress.",
     }
+
+def is_listing_dead(raw_product: dict) -> bool:
+    """
+    A listing is dead/delisted when AliExpress returns the product
+    but with no usable price data. This happens when a supplier
+    relists under a new product ID — the old ID still resolves
+    but returns null prices.
+    """
+    sale_price     = raw_product.get("sale_price")
+    original_price = raw_product.get("original_price")
+    skus           = raw_product.get("skus") or []
+ 
+    if sale_price is None and original_price is None:
+        sku_prices = [s.get("sale_price") or s.get("price") for s in skus]
+        if not any(sku_prices):
+            return True
+    return False
+
+
+# ─────────────────────────────────────────────
+# ENDPOINT: Check if a single product's listing is still alive
+# GET /dashboard/products/{product_id}/check-listing
+# ─────────────────────────────────────────────
+ 
+@app.get("/dashboard/products/{product_id}/check-listing")
+def check_listing_status(product_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch this product from AliExpress and report whether the listing
+    is still active (has prices) or appears dead/delisted.
+    """
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+ 
+    try:
+        raw = get_product(product.aliexpress_id, db)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch from AliExpress: {e}")
+ 
+    dead = is_listing_dead(raw)
+ 
+    product.is_dead_listing = dead
+    db.commit()
+ 
+    return {
+        "aliexpress_id":   product.aliexpress_id,
+        "is_dead_listing": dead,
+        "sale_price":      raw.get("sale_price"),
+        "original_price":  raw.get("original_price"),
+        "sku_prices": [
+            {"sku_id": s.get("sku_id"), "price": s.get("sale_price") or s.get("price")}
+            for s in (raw.get("skus") or [])
+        ],
+        "message": (
+            "DEAD listing — AliExpress returned no prices. "
+            "The supplier likely relisted under a new product ID. "
+            "Use the Remap function to point this product to the new ID."
+            if dead else
+            "Listing is active with valid prices."
+        ),
+    }
+ 
+ 
+# ─────────────────────────────────────────────
+# ENDPOINT: Remap product to a new AliExpress ID
+# POST /dashboard/products/{product_id}/remap-listing
+# ─────────────────────────────────────────────
+ 
+@app.post("/dashboard/products/{product_id}/remap-listing")
+def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db)):
+    """
+    Point an imported product to a new AliExpress product ID
+    (when the supplier has relisted under a new ID).
+ 
+    payload: { "new_aliexpress_id": "3256809945399812" }
+ 
+    This will:
+    1. Verify the new ID is alive (has prices)
+    2. Save old ID in replacement_aliexpress_id for future searches
+    3. Update aliexpress_id in DB to new ID
+    4. Re-fetch and cache all product data (title, images, skus, price)
+    5. Update the Shopify aliexpress.product_id metafield
+    6. Push fresh prices and inventory to Shopify from new listing
+    7. Clear the is_dead_listing flag
+    """
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+ 
+    new_id = (payload.get("new_aliexpress_id") or "").strip()
+    if not new_id:
+        raise HTTPException(400, "new_aliexpress_id is required")
+    if new_id == product.aliexpress_id:
+        raise HTTPException(400, "new_aliexpress_id is the same as the current ID")
+ 
+    # Check if another product already uses this new ID
+    conflict = db.query(ImportedProduct).filter(
+        ImportedProduct.aliexpress_id == new_id,
+        ImportedProduct.id != product_id
+    ).first()
+    if conflict:
+        raise HTTPException(409, f"New ID {new_id} is already in use by product id={conflict.id}")
+ 
+    # 1. Verify the new ID is alive
+    try:
+        raw = get_product(new_id, db)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch new ID from AliExpress: {e}")
+ 
+    if is_listing_dead(raw):
+        raise HTTPException(400, f"New ID {new_id} also appears dead (no prices). "
+                                 f"Please verify the correct new listing ID on AliExpress.")
+ 
+    old_id = product.aliexpress_id
+ 
+    # 2. Update DB — store old ID so it stays searchable
+    product.replacement_aliexpress_id = old_id
+    product.aliexpress_id  = new_id
+    product.is_dead_listing = False
+ 
+    # 3. Refresh product data from new listing
+    product.original_title  = raw.get("title") or product.original_title
+    product.original_price  = raw.get("sale_price") or raw.get("original_price") or product.original_price
+    product.currency        = raw.get("currency") or product.currency
+    product.main_image      = raw.get("main_image") or product.main_image
+    product.all_images      = raw.get("all_images") or product.all_images
+    product.store_name      = raw.get("store_name") or product.store_name
+    product.avg_rating      = raw.get("avg_rating") or product.avg_rating
+    product.review_count    = raw.get("review_count") or product.review_count
+    product.orders          = raw.get("orders") or product.orders
+    product.sku_count       = raw.get("sku_count") or product.sku_count
+    product.skus            = raw.get("skus") or product.skus
+    product.total_stock     = raw.get("total_stock") or product.total_stock
+    db.commit()
+ 
+    # 4. Update Shopify metafield + push prices + inventory
+    shopify_mf_updated    = False
+    shopify_price_updated = False
+    shopify_inv_updated   = False
+ 
+    if product.shopify_product_id:
+        try:
+            from .shopify import (
+                _base, _h,
+                update_shopify_product_prices_with_skus,
+                update_shopify_product_inventory_with_skus,
+            )
+ 
+            # Update aliexpress.product_id metafield so future syncs use new ID
+            mf_res = requests.get(
+                f"{_base()}/products/{product.shopify_product_id}/metafields.json",
+                params={"namespace": "aliexpress", "key": "product_id"},
+                headers=_h(), timeout=15,
+            )
+            mfs = mf_res.json().get("metafields", []) if mf_res.status_code == 200 else []
+            mf_payload = {
+                "metafield": {
+                    "namespace": "aliexpress",
+                    "key":       "product_id",
+                    "value":     new_id,
+                    "type":      "single_line_text_field",
+                }
+            }
+            if mfs:
+                r2 = requests.put(
+                    f"{_base()}/metafields/{mfs[0]['id']}.json",
+                    json=mf_payload, headers=_h(), timeout=15,
+                )
+                shopify_mf_updated = r2.status_code == 200
+            else:
+                r2 = requests.post(
+                    f"{_base()}/products/{product.shopify_product_id}/metafields.json",
+                    json=mf_payload, headers=_h(), timeout=15,
+                )
+                shopify_mf_updated = r2.status_code == 201
+ 
+            # Push prices from new listing
+            new_skus = raw.get("skus", [])
+            if new_skus:
+                price_result = update_shopify_product_prices_with_skus(
+                    product.shopify_product_id, new_skus
+                )
+                shopify_price_updated = price_result in ("updated", "unchanged")
+ 
+                inv_result = update_shopify_product_inventory_with_skus(
+                    product.shopify_product_id, new_skus
+                )
+                shopify_inv_updated = bool(inv_result)
+ 
+            # Also re-store SKU ID metafields for price sync matching
+            from .shopify import store_aliexpress_sku_ids
+            if new_skus:
+                store_aliexpress_sku_ids(product.shopify_product_id, new_skus)
+ 
+        except Exception as e:
+            print(f"[Remap] Shopify update failed (non-fatal): {e}")
+ 
+    print(f"[Remap] Product id={product_id}: {old_id} → {new_id} "
+          f"(metafield={shopify_mf_updated} price={shopify_price_updated} inv={shopify_inv_updated})")
+ 
+    return {
+        "message":                   f"Successfully remapped from {old_id} to {new_id}",
+        "old_aliexpress_id":         old_id,
+        "new_aliexpress_id":         new_id,
+        "shopify_metafield_updated": shopify_mf_updated,
+        "shopify_price_updated":     shopify_price_updated,
+        "shopify_inv_updated":       shopify_inv_updated,
+        "new_title":                 raw.get("title"),
+        "new_price":                 raw.get("sale_price") or raw.get("original_price"),
+        "sku_count":                 raw.get("sku_count"),
+    }
+ 
+ 
+# ─────────────────────────────────────────────
+# ENDPOINT: Scan ALL products for dead listings
+# POST /admin/scan-dead-listings
+# ─────────────────────────────────────────────
+ 
+@app.post("/admin/scan-dead-listings")
+def scan_dead_listings(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Scan all imported products for dead/delisted AliExpress listings.
+    Products with null prices get flagged as is_dead_listing=True.
+    Runs in background — check terminal for progress.
+    Results available at GET /dead-listings.
+    """
+    products = db.query(ImportedProduct).filter(
+        ImportedProduct.shopify_product_id.isnot(None)
+    ).all()
+ 
+    if not products:
+        raise HTTPException(404, "No imported products found")
+ 
+    total     = len(products)
+    snapshots = [{"id": p.id, "aliexpress_id": p.aliexpress_id} for p in products]
+ 
+    def run():
+        from .database import SessionLocal
+        inner_db    = SessionLocal()
+        dead_count  = 0
+        alive_count = 0
+        error_count = 0
+ 
+        print(f"\n[DeadScan] Scanning {total} products for dead listings…")
+        try:
+            for snap in snapshots:
+                try:
+                    raw  = get_product(snap["aliexpress_id"], inner_db)
+                    dead = is_listing_dead(raw)
+                    prod = inner_db.query(ImportedProduct).filter(
+                        ImportedProduct.id == snap["id"]
+                    ).first()
+                    if prod:
+                        prod.is_dead_listing = dead
+                        inner_db.commit()
+                    if dead:
+                        dead_count += 1
+                        print(f"[DeadScan] DEAD: {snap['aliexpress_id']} — no prices returned")
+                    else:
+                        alive_count += 1
+                except Exception as e:
+                    error_count += 1
+                    print(f"[DeadScan] Error: {snap['aliexpress_id']}: {e}")
+        finally:
+            inner_db.close()
+            print(f"[DeadScan] Done — alive={alive_count} dead={dead_count} errors={error_count}")
+ 
+    background_tasks.add_task(run)
+    return {
+        "message": f"Dead listing scan started for {total} product(s) — running in background",
+        "total":   total,
+        "note":    "Check terminal for progress. Use GET /dead-listings to see results.",
+    }
+ 
+ 
+# ─────────────────────────────────────────────
+# ENDPOINT: Get all dead/flagged listings
+# GET /dead-listings
+# ─────────────────────────────────────────────
+ 
+@app.get("/dead-listings")
+def get_dead_listings(db: Session = Depends(get_db)):
+    """Returns all products flagged as dead/delisted AliExpress listings."""
+    products = db.query(ImportedProduct).filter(
+        ImportedProduct.is_dead_listing == True
+    ).all()
+    return {
+        "count": len(products),
+        "products": [
+            {
+                "id":                        p.id,
+                "aliexpress_id":             p.aliexpress_id,
+                "replacement_aliexpress_id": p.replacement_aliexpress_id,
+                "title":                     p.custom_title or p.original_title,
+                "main_image":                p.main_image,
+                "shopify_product_id":        p.shopify_product_id,
+                "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+                                             if p.shopify_product_id else None,
+                "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
+                "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+            }
+            for p in products
+        ],
+    }
+ 
+ 
+# ─────────────────────────────────────────────
+# ENDPOINT: Smart product lookup
+# GET /dashboard/products/lookup?q=...
+# ─────────────────────────────────────────────
+ 
+@app.get("/dashboard/products/lookup")
+def lookup_product(
+    q: str = Query(..., description="AliExpress ID (old or new), Shopify ID, or title keyword"),
+    db: Session = Depends(get_db)
+):
+    """
+    Find an imported product by:
+    - Current aliexpress_id (exact or partial)
+    - Old aliexpress_id stored in replacement_aliexpress_id (exact or partial)
+    - Shopify product ID
+    - Title keyword (partial match)
+ 
+    Returns all matches with match reason so you can identify the right one.
+    """
+    q = q.strip()
+    if not q:
+        raise HTTPException(400, "Search query q is required")
+ 
+    results  = []
+    seen_ids = set()
+ 
+    def add(p, reason: str):
+        if p.id in seen_ids:
+            return
+        seen_ids.add(p.id)
+        results.append({
+            "id":                        p.id,
+            "aliexpress_id":             p.aliexpress_id,
+            "replacement_aliexpress_id": p.replacement_aliexpress_id,
+            "title":                     p.custom_title or p.original_title,
+            "main_image":                p.main_image,
+            "price":                     p.custom_price or p.original_price,
+            "currency":                  p.currency,
+            "shopify_product_id":        p.shopify_product_id,
+            "shopify_status":            p.shopify_status,
+            "is_dead_listing":           p.is_dead_listing,
+            "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+            "match_reason":              reason,
+            "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
+            "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+                                         if p.shopify_product_id else None,
+        })
+ 
+    # 1. Exact current aliexpress_id
+    for p in db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == q).all():
+        add(p, "Exact AliExpress ID match (current ID)")
+ 
+    # 2. Exact old aliexpress_id (stored after remap)
+    for p in db.query(ImportedProduct).filter(
+        ImportedProduct.replacement_aliexpress_id == q
+    ).all():
+        add(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
+ 
+    # 3. Shopify product ID
+    for p in db.query(ImportedProduct).filter(
+        ImportedProduct.shopify_product_id == q
+    ).all():
+        add(p, "Shopify product ID match")
+ 
+    # 4. Partial current aliexpress_id
+    for p in db.query(ImportedProduct).filter(
+        ImportedProduct.aliexpress_id.ilike(f"%{q}%")
+    ).all():
+        add(p, "Partial AliExpress ID match (current ID)")
+ 
+    # 5. Partial old aliexpress_id
+    for p in db.query(ImportedProduct).filter(
+        ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
+    ).all():
+        add(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
+ 
+    # 6. Title keyword match
+    term = f"%{q}%"
+    for p in db.query(ImportedProduct).filter(
+        (ImportedProduct.original_title.ilike(term)) |
+        (ImportedProduct.custom_title.ilike(term))
+    ).all():
+        add(p, "Title keyword match")
+ 
+    if not results:
+        return {
+            "found":   False,
+            "count":   0,
+            "results": [],
+            "message": (
+                f"No product found matching '{q}'. "
+                f"If this was an AliExpress ID that was relisted under a new ID, "
+                f"go to Settings → Dead Listing Scanner to find and remap it. "
+                f"Or try searching by the product title keyword."
+            ),
+        }
+ 
+    return {
+        "found":   True,
+        "count":   len(results),
+        "results": results,
+        "message": f"Found {len(results)} product(s) matching '{q}'",
+    }
+ 

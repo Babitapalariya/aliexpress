@@ -50,6 +50,9 @@ class ImportedProduct(Base):
     last_shipment_fetch = Column(DateTime(timezone=True), nullable=True)
     price_mode = Column(String(20), default='auto', nullable=False)
 
+    replacement_aliexpress_id = Column(String(64), nullable=True, index=True)
+    is_dead_listing = Column(Boolean, default=False, nullable=False)
+
  
 class ProductMapping(Base):
     __tablename__ = "product_mappings"
