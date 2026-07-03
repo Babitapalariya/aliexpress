@@ -963,6 +963,11 @@ function fullRow(p) {
         onclick="openIncreasePriceModalImported(${p.id})">
         <i class="ti ti-plus" style="font-size:13px"></i>
       </button>
+      
+       <button class="btn btn-primary btn-icon sm" title="Edit"
+        onclick='openModal(${pj})'>
+        <i class="ti ti-edit" style="font-size:13px"></i>
+      </button>
       <button class="btn btn-icon sm" title="Check if AliExpress listing is still active"
         onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')">
         <i class="ti ti-radar" style="font-size:13px"></i>
@@ -973,10 +978,7 @@ function fullRow(p) {
             <i class="ti ti-arrows-exchange" style="font-size:13px"></i>
            </button>`
         : ""}
-      <button class="btn btn-primary btn-icon sm" title="Edit"
-        onclick='openModal(${pj})'>
-        <i class="ti ti-edit" style="font-size:13px"></i>
-      </button>
+     
       ${p.shopify_product_id
         ? `<a href="https://admin.shopify.com/products/${p.shopify_product_id}" target="_blank">
             <button class="btn btn-icon sm" title="View in Shopify">
@@ -1910,6 +1912,11 @@ async function doSmartLookup(q) {
             onclick="openIncreasePriceModalImported(${p.id})">
             <i class="ti ti-plus" style="font-size:13px"></i>
           </button>
+          
+          <button class="btn btn-primary btn-icon sm" title="Edit"
+            onclick='openModal(${pj})'>
+            <i class="ti ti-edit" style="font-size:13px"></i>
+          </button>
           <button class="btn btn-icon sm" title="Check listing status"
             onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')">
             <i class="ti ti-radar" style="font-size:13px"></i>
@@ -1920,10 +1927,7 @@ async function doSmartLookup(q) {
                 <i class="ti ti-arrows-exchange" style="font-size:13px"></i>
                </button>`
             : ""}
-          <button class="btn btn-primary btn-icon sm" title="Edit"
-            onclick='openModal(${pj})'>
-            <i class="ti ti-edit" style="font-size:13px"></i>
-          </button>
+          
           ${p.shopify_url
             ? `<a href="${p.shopify_url}" target="_blank">
                 <button class="btn btn-icon sm" title="View in Shopify">
