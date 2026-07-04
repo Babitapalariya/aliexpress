@@ -3454,17 +3454,23 @@ def scan_dead_listings(
  
 @app.get("/dead-listings")
 def get_dead_listings(db: Session = Depends(get_db)):
-    """Returns all products flagged as dead/delisted AliExpress listings."""
+    """
+    Returns all products that are either:
+      - currently flagged as dead (is_dead_listing=True)
+      - OR have been remapped (replacement_aliexpress_id is not null)
+    This ensures remapped products remain visible with a 'Remapped' badge.
+    """
     products = db.query(ImportedProduct).filter(
-        ImportedProduct.is_dead_listing == True
+        (ImportedProduct.is_dead_listing == True) |
+        (ImportedProduct.replacement_aliexpress_id.isnot(None))
     ).all()
     return {
         "count": len(products),
         "products": [
             {
                 "id":                        p.id,
-                "aliexpress_id":             p.aliexpress_id,
-                "replacement_aliexpress_id": p.replacement_aliexpress_id,
+                "aliexpress_id":             p.aliexpress_id,          # current (new) ID after remap
+                "replacement_aliexpress_id": p.replacement_aliexpress_id, # old ID if remapped
                 "title":                     p.custom_title or p.original_title,
                 "main_image":                p.main_image,
                 "shopify_product_id":        p.shopify_product_id,
@@ -3472,11 +3478,12 @@ def get_dead_listings(db: Session = Depends(get_db)):
                                              if p.shopify_product_id else None,
                 "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
                 "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+                # add a computed flag so frontend knows it's still dead vs remapped
+                "is_still_dead":             p.is_dead_listing,
             }
             for p in products
         ],
     }
- 
  
 # ─────────────────────────────────────────────
 # ENDPOINT: Smart product lookup
