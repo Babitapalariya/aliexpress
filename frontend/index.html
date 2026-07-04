@@ -2081,6 +2081,8 @@ async function runDeadScan() {
   btn.innerHTML = `<i class="ti ti-radar"></i> Scan for Dead Listings`;
 }
  
+// ── Replace the existing loadDeadListings() function ──────────────────
+
 async function loadDeadListings() {
   const wrap = document.getElementById("dead-listings-wrap");
   wrap.style.display = "";
@@ -2089,45 +2091,184 @@ async function loadDeadListings() {
     const r = await fetch(`${API}/dead-listings`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
- 
+
     if (!d.count) {
       wrap.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> No dead listings found</div>`;
       return;
     }
- 
-    wrap.innerHTML = `
-      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:10px">
-        <i class="ti ti-alert-triangle"></i> ${d.count} dead listing(s) detected
-      </div>
-      ${d.products.map(p => `
-        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;
-          background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;margin-bottom:8px">
+
+    // Split into remapped vs still-dead
+    const remapped   = d.products.filter(p => p.replacement_aliexpress_id);
+    const stillDead  = d.products.filter(p => !p.replacement_aliexpress_id);
+
+    const renderCard = (p) => {
+      const isRemapped = !!p.replacement_aliexpress_id;
+
+      // If remapped: the replacement_aliexpress_id holds the OLD id,
+      // and aliexpress_id is the NEW (current) id
+      const currentId = p.aliexpress_id;
+      const oldId     = p.replacement_aliexpress_id || null;
+
+      return `
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;
+          background:${isRemapped ? "var(--green-bg)" : "var(--red-bg)"};
+          border:1px solid ${isRemapped ? "var(--green-border)" : "var(--red-border)"};
+          border-radius:10px;margin-bottom:8px">
+
+          <!-- Image -->
           ${p.main_image
-            ? `<img src="${p.main_image}" style="width:42px;height:42px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid var(--red-border)">`
+            ? `<img src="${p.main_image}" style="width:42px;height:42px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid ${isRemapped ? "var(--green-border)" : "var(--red-border)"};">`
             : `<div style="width:42px;height:42px;border-radius:8px;background:var(--border-2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-photo" style="color:var(--t3)"></i></div>`}
+
+          <!-- Info -->
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
               ${p.title || "—"}
             </div>
-            <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:2px">
-              ID: ${p.aliexpress_id}
-            </div>
+
+            ${isRemapped ? `
+              <!-- REMAPPED: show old → new ID flow -->
+              <div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+                <span class="badge b-green" style="font-size:10px">
+                  <i class="ti ti-circle-check"></i> Remapped
+                </span>
+              </div>
+              <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
+                <div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px">
+                  <span style="font-size:10px;color:var(--t3);min-width:60px">Old ID:</span>
+                  <span style="font-family:var(--mono);color:var(--red);text-decoration:line-through">${oldId}</span>
+                  <a href="https://www.aliexpress.com/item/${oldId}.html" target="_blank"
+                    style="color:var(--t3);font-size:10px"><i class="ti ti-external-link"></i></a>
+                </div>
+                <div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px">
+                  <span style="font-size:10px;color:var(--t3);min-width:60px">New ID:</span>
+                  <span style="font-family:var(--mono);color:var(--green);font-weight:700">${currentId}</span>
+                  <a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"
+                    style="color:var(--green);font-size:10px"><i class="ti ti-external-link"></i></a>
+                </div>
+              </div>
+              <div style="margin-top:4px;font-size:10px;color:var(--t3)">
+                <i class="ti ti-info-circle"></i>
+                Still flagged as dead because the <em>old</em> ID is what was originally scanned.
+                The product is actively syncing via the new ID.
+              </div>
+            ` : `
+              <!-- STILL DEAD: show current (dead) ID -->
+              <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
+                <span class="badge b-red" style="font-size:10px">
+                  <i class="ti ti-alert-triangle"></i> Not remapped yet
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">
+                Dead ID: ${currentId}
+              </div>
+            `}
           </div>
-          <div style="display:flex;gap:6px;flex-shrink:0">
-            <a href="${p.aliexpress_url}" target="_blank">
-              <button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button>
-            </a>
-            ${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs"><i class="ti ti-brand-shopify"></i></button></a>` : ""}
-            <button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')">
-              <i class="ti ti-arrows-exchange"></i> Remap
-            </button>
+
+          <!-- Actions -->
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:flex-end">
+            ${isRemapped ? `
+              <!-- Remapped: show Shopify link + option to clear flag -->
+              <div style="display:flex;gap:6px">
+                <a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank">
+                  <button class="btn btn-xs btn-success" title="View new listing on AliExpress">
+                    <i class="ti ti-external-link"></i> New Listing
+                  </button>
+                </a>
+                ${p.shopify_url
+                  ? `<a href="${p.shopify_url}" target="_blank">
+                      <button class="btn btn-xs" title="View in Shopify"><i class="ti ti-brand-shopify"></i></button>
+                     </a>`
+                  : ""}
+              </div>
+              <button class="btn btn-xs" style="color:var(--t3);font-size:10px"
+                onclick="clearDeadFlag(${p.id})"
+                title="Remove from dead listings list (product is already fixed)">
+                <i class="ti ti-x"></i> Clear from list
+              </button>
+            ` : `
+              <!-- Not remapped: show AliExpress + Shopify + Remap button -->
+              <div style="display:flex;gap:6px">
+                <a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank">
+                  <button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button>
+                </a>
+                ${p.shopify_url
+                  ? `<a href="${p.shopify_url}" target="_blank">
+                      <button class="btn btn-xs"><i class="ti ti-brand-shopify"></i></button>
+                     </a>`
+                  : ""}
+              </div>
+              <button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id}, '${currentId}')">
+                <i class="ti ti-arrows-exchange"></i> Remap Now
+              </button>
+            `}
           </div>
-        </div>`).join("")}`;
+        </div>`;
+    };
+
+    let html = "";
+
+    // Section: still need remapping
+    if (stillDead.length) {
+      html += `
+        <div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:8px;
+          display:flex;align-items:center;gap:6px">
+          <i class="ti ti-alert-triangle"></i>
+          ${stillDead.length} product${stillDead.length !== 1 ? "s" : ""} need remapping
+        </div>
+        ${stillDead.map(renderCard).join("")}`;
+    }
+
+    // Section: already remapped
+    if (remapped.length) {
+      html += `
+        <div style="font-size:12px;font-weight:700;color:var(--green);margin-top:${stillDead.length ? "16px" : "0"};
+          margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <i class="ti ti-circle-check"></i>
+          ${remapped.length} product${remapped.length !== 1 ? "s" : ""} already remapped
+        </div>
+        ${remapped.map(renderCard).join("")}`;
+    }
+
+    // Summary header
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="font-size:13px;font-weight:700;color:var(--t1)">
+          ${d.count} flagged listing${d.count !== 1 ? "s" : ""}
+        </div>
+        ${stillDead.length
+          ? `<span class="badge b-red"><i class="ti ti-alert-triangle"></i> ${stillDead.length} need action</span>`
+          : ""}
+        ${remapped.length
+          ? `<span class="badge b-green"><i class="ti ti-circle-check"></i> ${remapped.length} remapped</span>`
+          : ""}
+      </div>
+      ${html}`;
+
   } catch(e) {
     wrap.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
   }
 }
- 
+
+// ── New helper: clear the dead flag once a product is confirmed fixed ──
+// Calls the check-listing endpoint which resets is_dead_listing=False
+// if AliExpress now returns prices (i.e. the new ID is active).
+async function clearDeadFlag(productId) {
+  showToast("Verifying listing is active and clearing flag…", "info");
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/check-listing`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (d.is_dead_listing) {
+      showToast("Listing still appears dead — flag not cleared", "err");
+    } else {
+      showToast("Listing verified active — removed from dead list ✅", "ok");
+      loadDeadListings(); // refresh the list
+    }
+  } catch(e) {
+    showToast("Failed: " + e.message, "err");
+  }
+}
 
 </script>
 
