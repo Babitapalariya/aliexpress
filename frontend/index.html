@@ -626,10 +626,29 @@ tbody tr:last-child td{border-bottom:none}
       
 </div>
 
-
+<div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <div class="card-header-left">
+      <div class="card-icon ci-orange"><i class="ti ti-database-import"></i></div>
+      <div>
+        <div class="card-title">Backfill SKU Data</div>
+        <div class="card-sub">Fetch AliExpress SKUs for all imported products (so the Increase column works)</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+      This will fetch fresh SKU data (prices, labels, stock) from AliExpress for every product that has a Shopify ID.
+      Runs in the background – check terminal for progress.
+    </p>
+    <button class="btn btn-warn" onclick="runBackfillSkus()" id="btn-backfill-skus">
+      <i class="ti ti-refresh"></i> Backfill SKU Data
+    </button>
+    <div id="backfill-skus-result" style="margin-top:12px;font-size:13px;color:var(--t2)"></div>
+  </div>
+</div>
 
       
-
 
     </div>
   </div>
@@ -637,7 +656,7 @@ tbody tr:last-child td{border-bottom:none}
 
 <!-- MODALS -->
 <div class="overlay" id="edit-overlay">
-  <div class="modal">
+  <div class="modal" style="max-width: 590px;">
     <div class="modal-hd"><h3>Modify Product</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-bd">
       <div class="modal-preview" id="mp"></div>
@@ -709,7 +728,7 @@ tbody tr:last-child td{border-bottom:none}
 const API = "https://aliexpress.retradviews.com/api";
 let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
 let _pendingFilter='all', _allPendingData=[], currentVariants=[];
-
+let _productSkus = [];   // holds AliExpress SKUs for the currently open modal
 // ── TOAST ──────────────────────────────────────────────────────────────
 function showToast(msg,type=""){
   const el=document.getElementById("toast");
@@ -1254,6 +1273,7 @@ function openModal(p){
   document.getElementById("m-rating").value=p.custom_rating||p.avg_rating||"";
   document.getElementById("m-desc").value=p.custom_description||"";
   document.getElementById("edit-overlay").classList.add("open");
+  _productSkus = p.skus || [];
   loadVariantsForModal(p.id);
   refreshProductDetails();
 }
@@ -1296,6 +1316,24 @@ async function loadVariantsForModal(productId) {
   const wrap = document.getElementById("m-variants-wrap");
   wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
   currentVariants = [];
+
+  // Log the SKUs to see if they exist
+  console.log("_productSkus for product", productId, _productSkus);
+
+  // Build a map: label → base price from AliExpress skus
+  const basePriceMap = {};
+  (_productSkus || []).forEach((sku, index) => {
+    const label = sku.label || sku.sku_attr || "";
+    const price = sku.sale_price || sku.price;
+    if (label && price) {
+      basePriceMap[label.toLowerCase().trim()] = parseFloat(price);
+    }
+    // Also store by index as fallback
+    if (price) {
+      basePriceMap[`_index_${index}`] = parseFloat(price);
+    }
+  });
+
   try {
     const r = await fetch(`${API}/dashboard/products/${productId}/variants`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1305,52 +1343,75 @@ async function loadVariantsForModal(productId) {
       wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;
       return;
     }
-    wrap.innerHTML = `<table style="width:100%;font-size:13px;border-collapse:collapse">
-      <thead style="background:var(--bg)">
-        <tr>
-          <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
-          <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
-          <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Price (USD)</th>
-          <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
-        </tr>
-      </thead>
-      <tbody>${currentVariants.map((v, i) => `
+
+    // Build table rows with increase calculation
+    let rowsHtml = currentVariants.map((v, i) => {
+      const label = v.label || "Default";
+      const labelKey = label.toLowerCase().trim();
+      let basePrice = basePriceMap[labelKey] || null;
+
+      // Fallback: if no label match, try matching by position (if counts match)
+      if (basePrice === null && _productSkus && _productSkus.length === currentVariants.length) {
+        basePrice = basePriceMap[`_index_${i}`] || null;
+      }
+
+      const currentPrice = parseFloat(v.price) || 0;
+      let increaseDisplay = "—";
+      if (basePrice !== null) {
+        const diff = currentPrice - basePrice;
+        if (Math.abs(diff) > 0.005) {
+          increaseDisplay = `+$${diff.toFixed(2)}`;
+        } else {
+          increaseDisplay = "$0.00";
+        }
+      }
+
+      return `
         <tr style="background:${i % 2 === 0 ? "transparent" : "var(--bg)"}">
-          <td style="padding:8px 12px;color:var(--t1);font-weight:600">${v.label}</td>
+          <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}</td>
           <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
-        
           <td style="padding:6px 8px;text-align:right;display:flex;align-items:center;gap:4px">
-  <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}"
-    style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
-  <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px"
-    onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount">
-    <i class="ti ti-plus"></i>
-  </button>
-</td>
-
-
+            <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}"
+              style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+            <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px"
+              onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount">
+              <i class="ti ti-plus"></i>
+            </button>
+          </td>
+          <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--orange);font-family:var(--mono);font-weight:600">
+            ${increaseDisplay}
+          </td>
           <td style="padding:6px 8px;text-align:right">
             <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}"
               style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           </td>
-        </tr>`).join("")}</tbody>
-    </table>
-   <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
-  <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()">
-    <i class="ti ti-copy"></i> Apply first price to all
-  </button>
-  <button type="button" class="btn btn-xs" onclick="increaseAllVariants()">
-    <i class="ti ti-plus"></i> Increase All
-  </button>
-  <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()">
-    <i class="ti ti-refresh"></i> Pull live stock from AliExpress
-  </button>
-</div>`;
+        </tr>`;
+    }).join("");
+
+    wrap.innerHTML = `
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <thead style="background:var(--bg)">
+          <tr>
+            <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
+            <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Price (USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Increase</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
+        <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Increase All</button>
+        <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
+      </div>`;
   } catch (e) {
     wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;
   }
 }
- 
+
+
 
 function applyPriceToAllVariants(){const inputs=document.querySelectorAll(".variant-price-input");if(!inputs.length)return;const v=inputs[0].value;inputs.forEach(i=>i.value=v);}
 
@@ -2451,6 +2512,28 @@ function increaseAllVariants() {
     inp.value = (cur + inc).toFixed(2);
   });
   showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
+}
+
+
+async function runBackfillSkus() {
+  const btn = document.getElementById("btn-backfill-skus");
+  const result = document.getElementById("backfill-skus-result");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Starting…`;
+  result.innerHTML = "";
+  try {
+    const r = await fetch(`${API}/admin/backfill-product-skus`, { method: "POST" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    result.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> ${d.message}</div>
+      <div style="margin-top:6px;font-size:12px;color:var(--t3)">Check terminal logs for progress.</div>`;
+    showToast(d.message, "ok");
+  } catch(e) {
+    result.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Backfill failed: " + e.message, "err");
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-refresh"></i> Backfill SKU Data`;
 }
 
 </script>

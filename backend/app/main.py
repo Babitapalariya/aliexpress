@@ -492,6 +492,7 @@ def list_products(
             "price_increase": p.price_increase,
             "replacement_aliexpress_id": p.replacement_aliexpress_id,
             "is_dead_listing": p.is_dead_listing,
+            "skus": p.skus, 
         })
     return {"products": result, "total": total, "page": page, "pages": pages}
 
@@ -3588,4 +3589,32 @@ def lookup_product(
         "results": results,
         "message": f"Found {len(results)} product(s) matching '{q}'",
     }
- 
+
+
+
+@app.post("/admin/backfill-product-skus")
+def backfill_product_skus(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Fetch fresh AliExpress data for every imported product and update its skus field.
+    Runs in the background.
+    """
+    def run():
+        from .database import SessionLocal
+        from .aliexpress import get_product as ali_get_product
+        inner_db = SessionLocal()
+        products = inner_db.query(ImportedProduct).filter(
+            ImportedProduct.shopify_product_id.isnot(None)
+        ).all()
+        for prod in products:
+            try:
+                raw = ali_get_product(prod.aliexpress_id, inner_db)
+                prod.skus = raw.get("skus")
+                prod.sku_count = raw.get("sku_count")
+                inner_db.commit()
+                print(f"[BackfillSkus] Updated {prod.aliexpress_id}")
+            except Exception as e:
+                print(f"[BackfillSkus] Failed {prod.aliexpress_id}: {e}")
+        inner_db.close()
+
+    background_tasks.add_task(run)
+    return {"message": "SKU backfill started – check terminal for progress"}

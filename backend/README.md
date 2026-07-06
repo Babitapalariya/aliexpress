@@ -65,6 +65,7 @@ Place the official AliExpress `iop` SDK files in the `iop/` directory. The app i
 ## Start backend
 uvicorn app.main:app --reload --port 8001
 python -m uvicorn app.main:app --reload --port 8001
+python -m uvicorn app.main:root_app --reload --port 8001
 
 ## Backend URL
 http://127.0.0.1:8001/docs
