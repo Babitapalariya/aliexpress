@@ -997,3 +997,70 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
  
     return changes
  
+
+def set_product_out_of_stock(shopify_product_id: str) -> bool:
+    """
+    Zero out inventory for ALL variants of a Shopify product across ALL locations.
+    Used when an AliExpress listing is confirmed dead (no prices) and hasn't been
+    remapped yet — we don't want to keep selling something we can no longer source.
+    Does NOT touch price, images, or any other variant fields.
+    """
+    if not settings.SHOPIFY_STORE:
+        return False
+
+    try:
+        res = requests.get(
+            f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"},
+            headers=_h(), timeout=15,
+        )
+        res.raise_for_status()
+        variants = res.json().get("product", {}).get("variants", [])
+        if not variants:
+            print(f"[DeadStock] No variants found for {shopify_product_id}")
+            return False
+    except Exception as e:
+        print(f"[DeadStock] Fetch variants failed: {e}")
+        return False
+
+    try:
+        loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+        loc_res.raise_for_status()
+        locations = loc_res.json().get("locations", [])
+    except Exception as e:
+        print(f"[DeadStock] Failed to fetch locations: {e}")
+        return False
+
+    if not locations:
+        print(f"[DeadStock] No Shopify locations found")
+        return False
+
+    success_count = 0
+    for variant in variants:
+        inventory_item_id = variant.get("inventory_item_id")
+        if not inventory_item_id:
+            continue
+        variant_ok = True
+        for loc in locations:
+            try:
+                res2 = requests.post(
+                    f"{_base()}/inventory_levels/set.json",
+                    json={
+                        "location_id": loc["id"],
+                        "inventory_item_id": inventory_item_id,
+                        "available": 0,
+                    },
+                    headers=_h(), timeout=20,
+                )
+                # 422 usually means this location isn't connected to this item — safe to ignore
+                if res2.status_code not in (200, 422):
+                    variant_ok = False
+                    print(f"[DeadStock] Failed to zero variant {variant['id']} @ location {loc['id']}: {res2.text}")
+            except Exception as e:
+                variant_ok = False
+                print(f"[DeadStock] Error zeroing variant {variant['id']} @ location {loc['id']}: {e}")
+        if variant_ok:
+            success_count += 1
+
+    print(f"[DeadStock] Zeroed inventory for {success_count}/{len(variants)} variant(s) of product {shopify_product_id}")
+    return success_count > 0

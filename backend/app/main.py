@@ -133,6 +133,26 @@ def sync_product_price(product_id: int, db: Session) -> bool:
                 sku["sale_price"] = str(new_price)
                 sku["price"] = str(new_price)
 
+    # NEW: catch dead listings during normal sync, not just manual scans
+    if is_listing_dead(latest_data):
+        print(f"[Sync] {product.aliexpress_id} appears DEAD (no prices) — marking and zeroing stock")
+        product.is_dead_listing = True
+        db.commit()
+        if product.shopify_product_id:
+            from .shopify import set_product_out_of_stock
+            try:
+                set_product_out_of_stock(product.shopify_product_id)
+                product.total_stock = 0
+                db.commit()
+            except Exception as e:
+                print(f"[Sync] Failed to zero stock for dead listing {product.aliexpress_id}: {e}")
+        return False
+
+    new_skus = latest_data.get("skus", [])
+    if not new_skus:
+        print(f"[Sync] No SKUs for {product.aliexpress_id}")
+        return False
+
     shopify_updated = False
     inventory_updated = False
     if product.shopify_product_id:
@@ -3214,45 +3234,104 @@ def is_listing_dead(raw_product: dict) -> bool:
 # GET /dashboard/products/{product_id}/check-listing
 # ─────────────────────────────────────────────
  
+# @app.get("/dashboard/products/{product_id}/check-listing")
+# def check_listing_status(product_id: int, db: Session = Depends(get_db)):
+#     """
+#     Fetch this product from AliExpress and report whether the listing
+#     is still active (has prices) or appears dead/delisted.
+#     """
+#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not product:
+#         raise HTTPException(404, "Product not found")
+ 
+#     try:
+#         raw = get_product(product.aliexpress_id, db)
+#     except Exception as e:
+#         raise HTTPException(500, f"Failed to fetch from AliExpress: {e}")
+ 
+#     dead = is_listing_dead(raw)
+ 
+#     product.is_dead_listing = dead
+#     db.commit()
+ 
+#     return {
+#         "aliexpress_id":   product.aliexpress_id,
+#         "is_dead_listing": dead,
+#         "sale_price":      raw.get("sale_price"),
+#         "original_price":  raw.get("original_price"),
+#         "sku_prices": [
+#             {"sku_id": s.get("sku_id"), "price": s.get("sale_price") or s.get("price")}
+#             for s in (raw.get("skus") or [])
+#         ],
+#         "message": (
+#             "DEAD listing — AliExpress returned no prices. "
+#             "The supplier likely relisted under a new product ID. "
+#             "Use the Remap function to point this product to the new ID."
+#             if dead else
+#             "Listing is active with valid prices."
+#         ),
+#     }
+ 
+ 
 @app.get("/dashboard/products/{product_id}/check-listing")
 def check_listing_status(product_id: int, db: Session = Depends(get_db)):
     """
     Fetch this product from AliExpress and report whether the listing
     is still active (has prices) or appears dead/delisted.
+    If dead and not yet remapped, inventory is zeroed in Shopify so it
+    shows as out of stock instead of continuing to sell stale stock.
     """
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
- 
+
     try:
         raw = get_product(product.aliexpress_id, db)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch from AliExpress: {e}")
- 
+
     dead = is_listing_dead(raw)
- 
     product.is_dead_listing = dead
     db.commit()
- 
+
+    stock_zeroed = False
+    restored = False
+
+    if dead and product.shopify_product_id:
+        from .shopify import set_product_out_of_stock
+        try:
+            stock_zeroed = set_product_out_of_stock(product.shopify_product_id)
+            if stock_zeroed:
+                product.total_stock = 0
+                db.commit()
+        except Exception as e:
+            print(f"[CheckListing] Failed to zero stock for {product.aliexpress_id}: {e}")
+    elif not dead and product.shopify_product_id:
+        # Listing is alive again (e.g. temporary AliExpress glitch, not an actual relist) —
+        # restore real price + inventory in case it was previously zeroed.
+        try:
+            restored = sync_product_price(product_id, db)
+        except Exception as e:
+            print(f"[CheckListing] Failed to restore stock for {product.aliexpress_id}: {e}")
+
     return {
-        "aliexpress_id":   product.aliexpress_id,
-        "is_dead_listing": dead,
-        "sale_price":      raw.get("sale_price"),
-        "original_price":  raw.get("original_price"),
+        "aliexpress_id":            product.aliexpress_id,
+        "is_dead_listing":          dead,
+        "stock_zeroed_in_shopify":  stock_zeroed,
+        "stock_restored":           restored,
+        "sale_price":               raw.get("sale_price"),
+        "original_price":           raw.get("original_price"),
         "sku_prices": [
             {"sku_id": s.get("sku_id"), "price": s.get("sale_price") or s.get("price")}
             for s in (raw.get("skus") or [])
         ],
         "message": (
-            "DEAD listing — AliExpress returned no prices. "
-            "The supplier likely relisted under a new product ID. "
-            "Use the Remap function to point this product to the new ID."
+            "DEAD listing — AliExpress returned no prices. Inventory has been set to 0 in Shopify "
+            "so it shows as out of stock until you remap it to the new AliExpress ID."
             if dead else
             "Listing is active with valid prices."
         ),
     }
- 
- 
 # ─────────────────────────────────────────────
 # ENDPOINT: Remap product to a new AliExpress ID
 # POST /dashboard/products/{product_id}/remap-listing
@@ -3431,11 +3510,13 @@ def scan_dead_listings(
  
     def run():
         from .database import SessionLocal
-        inner_db    = SessionLocal()
-        dead_count  = 0
-        alive_count = 0
-        error_count = 0
- 
+        from .shopify import set_product_out_of_stock
+        inner_db     = SessionLocal()
+        dead_count   = 0
+        alive_count  = 0
+        error_count  = 0
+        zeroed_count = 0
+
         print(f"\n[DeadScan] Scanning {total} products for dead listings…")
         try:
             for snap in snapshots:
@@ -3448,9 +3529,20 @@ def scan_dead_listings(
                     if prod:
                         prod.is_dead_listing = dead
                         inner_db.commit()
+
                     if dead:
                         dead_count += 1
                         print(f"[DeadScan] DEAD: {snap['aliexpress_id']} — no prices returned")
+                        if prod and prod.shopify_product_id:
+                            try:
+                                zeroed = set_product_out_of_stock(prod.shopify_product_id)
+                                if zeroed:
+                                    zeroed_count += 1
+                                    prod.total_stock = 0
+                                    inner_db.commit()
+                                    print(f"[DeadScan] Zeroed Shopify stock for {snap['aliexpress_id']}")
+                            except Exception as e:
+                                print(f"[DeadScan] Failed to zero stock for {snap['aliexpress_id']}: {e}")
                     else:
                         alive_count += 1
                 except Exception as e:
@@ -3458,8 +3550,8 @@ def scan_dead_listings(
                     print(f"[DeadScan] Error: {snap['aliexpress_id']}: {e}")
         finally:
             inner_db.close()
-            print(f"[DeadScan] Done — alive={alive_count} dead={dead_count} errors={error_count}")
- 
+            print(f"[DeadScan] Done — alive={alive_count} dead={dead_count} zeroed={zeroed_count} errors={error_count}")
+
     background_tasks.add_task(run)
     return {
         "message": f"Dead listing scan started for {total} product(s) — running in background",
