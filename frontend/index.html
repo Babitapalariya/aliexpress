@@ -480,7 +480,13 @@ tbody tr:last-child td{border-bottom:none}
               <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseMappingModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
               <span id="mapping-selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
               <button class="btn btn-sm" onclick="syncAllMapped()"><i class="ti ti-refresh"></i> Sync All Now</button>
-            </div>
+              <div class="search-box" style="min-width:200px">
+    <i class="ti ti-search"></i>
+    <input type="text" id="mapping-search" placeholder="Search by ID or title…" oninput="mappingSearchDebounce()"/>
+  </div>
+              </div>
+     
+
           </div>
           <div class="tbl-wrap"><table>
             <thead><tr><th style="width:28px"></th><th>AliExpress ID</th><th>Shopify ID</th><th>Title</th><th>Track Price</th><th>Mode</th><th>Actions</th></tr></thead>
@@ -729,6 +735,15 @@ const API = "https://aliexpress.retradviews.com/api";
 let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
 let _pendingFilter='all', _allPendingData=[], currentVariants=[];
 let _productSkus = [];   // holds AliExpress SKUs for the currently open modal
+
+let _mappingSearchTimer = null;
+function mappingSearchDebounce(){
+  clearTimeout(_mappingSearchTimer);
+  _mappingSearchTimer = setTimeout(() => loadMappings(1), 300);
+}
+
+
+
 // ── TOAST ──────────────────────────────────────────────────────────────
 function showToast(msg,type=""){
   const el=document.getElementById("toast");
@@ -1677,28 +1692,75 @@ async function updatePendingBadge(){
 
 
 // ── MAPPINGS ───────────────────────────────────────────────────────────
+ 
+
 async function loadMappings(page=1){
-  mappingPage=page;
-  const tbody=document.getElementById("mappings-tbody"); if(!tbody) return;
-  tbody.innerHTML=`<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></tr>`;
+  mappingPage = page;
+  const q = document.getElementById("mapping-search")?.value || "";
+  const tbody = document.getElementById("mappings-tbody"); if(!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></td></tr>`;
   try{
-    const r=await fetch(`${API}/mappings/list?page=${mappingPage}&page_size=5`);
+    const url = `${API}/mappings/list?page=${mappingPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
+    const r = await fetch(url);
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data=await r.json(); const mappings=data.mappings||[]; mappingPages=data.pages||1;
-    if(!mappings.length){tbody.innerHTML=`<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet.</p></div></tr>`;document.getElementById("mappings-pag").style.display="none";return;}
-    tbody.innerHTML=mappings.map(m=>{
+    const data = await r.json();
+    const mappings = data.mappings || [];
+    mappingPages = data.pages || 1;
+
+    if(!mappings.length){
+      tbody.innerHTML = q
+        ? `<tr><td colspan="7"><div class="empty"><i class="ti ti-search-off"></i><p>No mappings match "${q}"</p></div></td></tr>`
+        : `<tr><td colspan="7"><div class="empty"><i class="ti ti-inbox"></i><p>No mappings yet.</p></div></td></tr>`;
+      document.getElementById("mappings-pag").style.display = "none";
+      return;
+    }
+
+    tbody.innerHTML = mappings.map(m=>{
       let modeBadge='';
       if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
       else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
       else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
       else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
-      return`<tr><td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td><td class="td-id">${escapeHtml(m.aliexpress_id)}</td><td class="td-id">${escapeHtml(m.shopify_product_id)}</td><td>${escapeHtml(m.title||"—")}</td><td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}</td><td>${modeBadge}</td><td class="td-actions"><button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button><button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}<button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button><button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button></td></tr>`;
+      return`<tr>
+        <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
+        <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
+        <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
+        <td>${escapeHtml(m.title||"—")}</td>
+        <td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}</td>
+        <td>${modeBadge}</td>
+        <td class="td-actions">
+          <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+          <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
+          <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
+          ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
+          <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
+          <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
+        </td>
+      </tr>`;
     }).join("");
+
     document.querySelectorAll('.mapping-checkbox').forEach(cb=>{cb.removeEventListener('change',updateMappingSelectedCount);cb.addEventListener('change',updateMappingSelectedCount);});
     updateMappingSelectedCount();
-    buildMappingPag(data.total,mappingPage,mappingPages);
-  }catch(e){tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;document.getElementById("mappings-pag").style.display="none";}
+    buildMappingPag(data.total, mappingPage, mappingPages);
+  } catch(e){
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red)">Error: ${e.message}</td></tr>`;
+    document.getElementById("mappings-pag").style.display = "none";
+  }
 }
+
+async function syncMappingImages(mappingId){
+  showToast("Syncing SKU images from AliExpress…", "info");
+  try{
+    const r = await fetch(`${API}/mappings/${mappingId}/sync-images`, { method: "POST" });
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(d.message, "ok");
+  } catch(e){
+    showToast("Image sync error: " + e.message, "err");
+  }
+}
+
+
 function updateMappingSelectedCount(){const c=document.querySelectorAll('.mapping-checkbox:checked').length;const s=document.getElementById('mapping-selected-count');if(s)s.innerText=`${c} selected`;}
 function extractIdFromUrl(url,type){if(!url)return"";if(type==="aliexpress"){const m=url.match(/\/item\/(\d+)\.html/);return m?m[1]:url.trim();}if(type==="shopify"){const m=url.match(/\/products\/(\d+)/);return m?m[1]:url.trim();}return url.trim();}
 async function addMapping(){
@@ -1711,10 +1773,23 @@ async function addMapping(){
   catch(e){showToast("Error: "+e.message,"err");}
 }
 async function deleteMapping(id){if(!confirm("Delete mapping?"))return;try{const r=await fetch(`${API}/mappings/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(await r.text());showToast("Deleted","ok");await loadMappings(mappingPage);}catch(e){showToast("Delete failed: "+e.message,"err");}}
+
+
 async function syncMappedPrice(aliexpressId){
-  try{showToast("Syncing...","info");const r=await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail);}const d=await r.json();showToast(d.message||"Prices updated","ok");await loadMappings(mappingPage);}
-  catch(e){showToast("Sync error: "+e.message,"err");}
+  try{
+    showToast("Syncing...","info");
+    const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(d.message || "Prices updated", "ok");
+    await loadMappings(mappingPage);
+  } catch(e){
+    showToast("Sync error: " + e.message, "err");
+  }
 }
+
+
+
 async function toggleTrackMapping(id){try{const r=await fetch(`${API}/mappings/${id}/toggle-track`,{method:"POST"});if(!r.ok)throw new Error(await r.text());showToast("Tracking toggled","ok");await loadMappings(mappingPage);}catch(e){showToast("Toggle failed: "+e.message,"err");}}
 async function syncAllMapped(){try{showToast("Starting background sync...","info");const r=await fetch(`${API}/mappings/sync-all`,{method:"POST"});if(!r.ok)throw new Error(await r.text());const d=await r.json();showToast(d.message,"ok");}catch(e){showToast("Sync all failed: "+e.message,"err");}}
 function closePriceModal(){document.getElementById("price-modal").classList.remove("open");}
@@ -2534,6 +2609,15 @@ async function runBackfillSkus() {
   }
   btn.disabled = false;
   btn.innerHTML = `<i class="ti ti-refresh"></i> Backfill SKU Data`;
+}
+
+async function safeJson(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text ? text.slice(0, 200) : `HTTP ${response.status}` };
+  }
 }
 
 </script>

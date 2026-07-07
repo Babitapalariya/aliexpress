@@ -893,14 +893,24 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
 def list_mappings(
     page: int = Query(1, ge=1),
     page_size: int = Query(5, ge=1, le=100),
+    search: str = Query(None, description="Search by AliExpress ID, Shopify ID, or title"),
     db: Session = Depends(get_db)
 ):
-    total = db.query(ProductMapping).count()
+    query = db.query(ProductMapping)
+
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (ProductMapping.aliexpress_id.ilike(search_term)) |
+            (ProductMapping.shopify_product_id.ilike(search_term)) |
+            (ProductMapping.shopify_product_title.ilike(search_term))
+        )
+
+    total = query.count()
     pages = (total + page_size - 1) // page_size if total > 0 else 1
     offset = (page - 1) * page_size
 
-    mappings = db.query(ProductMapping)\
-        .order_by(ProductMapping.created_at.desc())\
+    mappings = query.order_by(ProductMapping.created_at.desc())\
         .offset(offset)\
         .limit(page_size)\
         .all()
@@ -919,6 +929,7 @@ def list_mappings(
         "page": page,
         "pages": pages
     }
+
 
 
 @app.delete("/mappings/{mapping_id}")
@@ -978,42 +989,40 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
     if not mapping or not mapping.track_price:
         raise HTTPException(404, "Mapping not found or price tracking disabled")
 
-    get_latest_token(db)
-
     try:
+        get_latest_token(db)
+
         raw = get_product(aliexpress_id, db)
+        aliexpress_skus = raw.get("skus", [])
+        if not aliexpress_skus:
+            raise HTTPException(500, "No SKUs found in AliExpress product")
+
+        from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
+
+        price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+        if price_result == "failed":
+            raise HTTPException(502, "Failed to update Shopify variant prices")
+
+        inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
+
+        mapping.price_mode = "auto"
+        mapping.price_increase = 0.0
+        db.commit()
+
+        price_msg = "Price already up to date" if price_result == "unchanged" else "Variant prices updated to AliExpress base"
+        inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
+        return {
+            "message": f"{price_msg} · {inv_msg}",
+            "product_id": mapping.shopify_product_id,
+            "price_mode": "auto",
+            "price_increase": 0.0,
+            "inventory_updated": inventory_updated,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, f"Failed to fetch from AliExpress: {str(e)}")
-
-    aliexpress_skus = raw.get("skus", [])
-    if not aliexpress_skus:
-        raise HTTPException(500, "No SKUs found in AliExpress product")
-
-    from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
-
-    # 1. Update prices
-    price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
-    if price_result == "failed":
-        raise HTTPException(502, "Failed to update Shopify variant prices")
-
-    # 2. Update inventory
-    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
-
-    # Reset mode to auto and clear increase
-    mapping.price_mode = "auto"
-    mapping.price_increase = 0.0
-    db.commit()
-
-    price_msg = "Price already up to date" if price_result == "unchanged" else "Variant prices updated to AliExpress base"
-    inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
-    return {
-        "message": f"{price_msg} · {inv_msg}",
-        "product_id": mapping.shopify_product_id,
-        "price_mode": "auto",
-        "price_increase": 0.0,
-        "inventory_updated": inventory_updated,
-    }
-
+        db.rollback()
+        raise HTTPException(500, f"Sync failed: {str(e)}")
 
 
 
@@ -2069,6 +2078,9 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     from .shopify import _base, _h
 
     # ── 1. Update prices ──
+    # ── 1. Update prices — per-variant PUT so image_id/inventory links survive ──
+     
+
     updated_variants = []
     for v in variants_payload:
         vid = v.get("variant_id")
@@ -2083,13 +2095,21 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     if not updated_variants:
         raise HTTPException(400, "No valid variant updates provided")
 
-    res = requests.put(
-        f"{_base()}/products/{product.shopify_product_id}.json",
-        json={"product": {"variants": updated_variants}},
-        headers=_h(), timeout=30,
-    )
-    if res.status_code != 200:
-        raise HTTPException(502, f"Shopify update failed: {res.text}")
+    price_success = 0
+    for uv in updated_variants:
+        try:
+            res = requests.put(
+                f"{_base()}/variants/{uv['id']}.json",
+                json={"variant": {"id": uv["id"], "price": uv["price"]}},
+                headers=_h(), timeout=20,
+            )
+            res.raise_for_status()
+            price_success += 1
+        except Exception as e:
+            print(f"[VariantEdit] Price update failed for variant {uv['id']}: {e}")
+
+    if price_success == 0:
+        raise HTTPException(502, "Shopify variant price update failed for all variants")
 
     # ── 2. Update inventory (multi-location safe) ──
     inventory_updates = {}
@@ -3618,3 +3638,28 @@ def backfill_product_skus(background_tasks: BackgroundTasks, db: Session = Depen
 
     background_tasks.add_task(run)
     return {"message": "SKU backfill started – check terminal for progress"}
+
+
+@app.post("/mappings/{mapping_id}/sync-images")
+def sync_mapping_images(mapping_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+
+    from .shopify import backfill_sku_images
+    from .aliexpress import get_product as ali_get_product
+
+    try:
+        raw = ali_get_product(mapping.aliexpress_id, db)
+        skus = raw.get("skus", [])
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch AliExpress data: {e}")
+
+    if not skus:
+        raise HTTPException(400, "No SKUs found for this AliExpress product")
+
+    result = backfill_sku_images(mapping.shopify_product_id, skus)
+    return {
+        "message": f"Attached {result['attached']} image(s). {result['skipped']} variant(s) already had images.",
+        **result,
+    }

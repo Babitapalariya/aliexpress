@@ -428,16 +428,16 @@ def update_shopify_product(shopify_product_id: str, updates: dict):
             res.raise_for_status()
             existing_variants = res.json().get("product", {}).get("variants", [])
 
-            if existing_variants:
-                updated_variants = []
-                for v in existing_variants:
-                    updated_variants.append({
-                        "id": v["id"],
-                        "price": str(updates["price"]),
-                    })
-                payload["variants"] = updated_variants
-            else:
-                payload["variants"] = [{"price": str(updates["price"])}]
+            for v in existing_variants:
+                try:
+                    r_v = requests.put(
+                        f"{_base()}/variants/{v['id']}.json",
+                        json={"variant": {"id": v["id"], "price": str(updates["price"])}},
+                        headers=_h(), timeout=20,
+                    )
+                    r_v.raise_for_status()
+                except Exception as e:
+                    print(f"[Shopify] Variant price update failed for {v['id']}: {e}")
 
         except Exception as e:
             detail = getattr(e, "response", None)
@@ -466,20 +466,34 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
     if not settings.SHOPIFY_STORE:
         return False
     try:
-        res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+        res = requests.get(
+            f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"},
+            headers=_h(), timeout=15,
+        )
         res.raise_for_status()
         variants = res.json().get("product", {}).get("variants", [])
         if not variants:
             return False
-        updated_variants = [{"id": v["id"], "price": str(new_price)} for v in variants]
-        r2 = requests.put(f"{_base()}/products/{shopify_product_id}.json", json={"product": {"variants": updated_variants}}, headers=_h(), timeout=30)
-        r2.raise_for_status()
-        print(f"[Shopify] Price updated for {shopify_product_id} to {new_price}")
-        return True
+
+        success_count = 0
+        for v in variants:
+            try:
+                r2 = requests.put(
+                    f"{_base()}/variants/{v['id']}.json",
+                    json={"variant": {"id": v["id"], "price": str(new_price)}},
+                    headers=_h(), timeout=20,
+                )
+                r2.raise_for_status()
+                success_count += 1
+            except Exception as e:
+                print(f"[Shopify] Price update failed for variant {v['id']}: {e}")
+
+        print(f"[Shopify] Price updated for {success_count}/{len(variants)} variant(s) of {shopify_product_id} to {new_price}")
+        return success_count > 0
     except Exception as e:
         print(f"[Shopify] Price update failed: {e}")
         return False
-
 
 # def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
 #     """
@@ -612,7 +626,6 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
 #         return "failed"
 
 
-
 def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
     """
     Returns one of: "updated", "unchanged", "failed"
@@ -695,27 +708,19 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
     print(f"[UPDATE][DEBUG] price_by_label = {price_by_label}")
     print(f"[UPDATE][DEBUG] matched_via_metafield = {matched_via_metafield}")
 
-    updated_variants = []
-    changes = False
+    # Build a list of (variant_id, new_price) for variants that actually need updating
+    to_update = []
     any_match_found = False
 
     for i, variant in enumerate(shopify_variants):
         new_price = None
         ae_sku_id = variant_ae_map.get(variant["id"])
 
-        # 1. Try metafield-based match (most reliable)
         if ae_sku_id and ae_sku_id in price_by_ae_sku:
             new_price = price_by_ae_sku[ae_sku_id]
-
-        # 2. Try label-based fuzzy match
         elif not matched_via_metafield:
             label = _variant_label(variant)
             new_price = _fuzzy_label_match(label)
-
-            # 3. POSITIONAL FALLBACK — replaces the old buggy
-            #    "if there's only 1 AE sku, apply it to everything" logic.
-            #    This was collapsing multiple variants onto a single price
-            #    whenever sku_id was missing/duplicated for more than one SKU.
             if new_price is None and i < len(aliexpress_skus):
                 ae_sku = aliexpress_skus[i]
                 ae_price = ae_sku.get("sale_price") or ae_sku.get("price")
@@ -724,37 +729,37 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
 
         if new_price is not None:
             any_match_found = True
-
-        if new_price is not None and abs(float(variant["price"]) - new_price) > 0.01:
-            var_copy = variant.copy()
-            var_copy["price"] = str(new_price)
-            updated_variants.append(var_copy)
-            changes = True
-            print(f"[UPDATE] {variant.get('option1', '?')}: {variant['price']} → {new_price}")
-        else:
-            updated_variants.append(variant.copy())
+            if abs(float(variant["price"]) - new_price) > 0.01:
+                to_update.append((variant["id"], new_price, variant.get("option1", "?"), variant["price"]))
 
     if not any_match_found:
         print("[UPDATE] No price changes (no metafield/label/positional match found)")
         return "failed"
 
-    if not changes:
+    if not to_update:
         print("[UPDATE] Price already up to date — no Shopify update needed")
         return "unchanged"
 
-    try:
-        r2 = requests.put(
-            f"{_base()}/products/{shopify_product_id}.json",
-            json={"product": {"variants": updated_variants}},
-            headers=_h(), timeout=30,
-        )
-        r2.raise_for_status()
-        print(f"[UPDATE] Success, {len(updated_variants)} variants updated")
-        return "updated"
-    except Exception as e:
-        print(f"[UPDATE] Update failed: {e}")
+    # ── Per-variant PUT — preserves image_id, inventory_item_id, everything else ──
+    success_count = 0
+    for variant_id, new_price, option_label, old_price in to_update:
+        try:
+            r2 = requests.put(
+                f"{_base()}/variants/{variant_id}.json",
+                json={"variant": {"id": variant_id, "price": str(new_price)}},
+                headers=_h(), timeout=20,
+            )
+            r2.raise_for_status()
+            success_count += 1
+            print(f"[UPDATE] {option_label}: {old_price} → {new_price}")
+        except Exception as e:
+            print(f"[UPDATE] Failed for variant {variant_id}: {e}")
+
+    if success_count == 0:
         return "failed"
 
+    print(f"[UPDATE] Success, {success_count}/{len(to_update)} variants updated")
+    return "updated"
 
 
 
@@ -777,9 +782,8 @@ def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
                 requests.post(mf_url, json=payload, headers=_h())
     print(f"[Shopify] Stored SKU IDs for {len(aliexpress_skus)} variants")
 
-
 def increase_shopify_product_price(shopify_product_id: str, increase_by: float) -> bool:
-    """Increase all variants of a Shopify product by a fixed amount."""
+    """Increase all variants of a Shopify product by a fixed amount — via per-variant PUT so image/inventory links survive."""
     if not settings.SHOPIFY_STORE:
         return False
     try:
@@ -796,32 +800,31 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
             print(f"[Shopify] No variants found for product {shopify_product_id}")
             return False
 
-        updated_variants = []
+        success_count = 0
         for variant in variants:
             try:
                 current_price = float(variant["price"])
             except (ValueError, TypeError):
                 current_price = 0.0
             new_price = current_price + increase_by
-            updated_variants.append({
-                "id": variant["id"],
-                "price": f"{new_price:.2f}"
-            })
 
-        update_payload = {"product": {"variants": updated_variants}}
-        r2 = requests.put(
-            f"{_base()}/products/{shopify_product_id}.json",
-            json=update_payload,
-            headers=_h(),
-            timeout=30
-        )
-        r2.raise_for_status()
-        print(f"[Shopify] Increased {len(updated_variants)} variants by {increase_by} for product {shopify_product_id}")
-        return True
+            try:
+                r2 = requests.put(
+                    f"{_base()}/variants/{variant['id']}.json",
+                    json={"variant": {"id": variant["id"], "price": f"{new_price:.2f}"}},
+                    headers=_h(),
+                    timeout=20,
+                )
+                r2.raise_for_status()
+                success_count += 1
+            except Exception as e:
+                print(f"[Shopify] Price increase failed for variant {variant['id']}: {e}")
+
+        print(f"[Shopify] Increased {success_count}/{len(variants)} variant(s) by {increase_by} for product {shopify_product_id}")
+        return success_count > 0
     except Exception as e:
         print(f"[Shopify] Price increase failed: {e}")
         return False
-
 
 def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
     """
