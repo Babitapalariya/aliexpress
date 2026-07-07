@@ -826,6 +826,7 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
         print(f"[Shopify] Price increase failed: {e}")
         return False
 
+
 def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
     """
     Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
@@ -842,13 +843,13 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     for sku in aliexpress_skus:
         ae_sku_id = str(sku.get("sku_id"))
         stock = sku.get("stock")
-        if ae_sku_id and stock is not None:
+        if ae_sku_id and ae_sku_id != "None" and stock is not None:
             try:
                 stock_by_ae_sku[ae_sku_id] = int(stock)
             except (ValueError, TypeError):
                 continue
  
-    if not stock_by_ae_sku:
+    if not stock_by_ae_sku and not aliexpress_skus:
         print("[Inventory] No AE stock data to sync")
         return False
  
@@ -923,20 +924,28 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         return " / ".join(parts).strip().lower()
  
     changes = False
-    for variant in shopify_variants:
+    for i, variant in enumerate(shopify_variants):
         new_stock = None
         ae_sku_id = variant_ae_map.get(variant["id"])
  
+        # 1. Metafield match (most reliable)
         if ae_sku_id and ae_sku_id in stock_by_ae_sku:
             new_stock = stock_by_ae_sku[ae_sku_id]
-        elif i < len(aliexpress_skus):
-            ae_sku = aliexpress_skus[i]
-            stock_val = ae_sku.get("stock")
-            if stock_val is not None:
-                try:
-                    new_stock = int(stock_val)
-                except (ValueError, TypeError):
-                    pass
+
+        # 2. Label fuzzy match
+        elif not matched_via_metafield:
+            label = _variant_label(variant)
+            if label and label in stock_by_label:
+                new_stock = stock_by_label[label]
+            # 3. Positional fallback — same index in aliexpress_skus
+            elif i < len(aliexpress_skus):
+                ae_sku = aliexpress_skus[i]
+                stock_val = ae_sku.get("stock")
+                if stock_val is not None:
+                    try:
+                        new_stock = int(stock_val)
+                    except (ValueError, TypeError):
+                        new_stock = None
  
         if new_stock is None:
             continue
@@ -948,10 +957,6 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
             continue
  
         if current_stock == new_stock:
-            # Total already matches — but it could still be split across
-            # locations incorrectly (e.g. 491+491=982 looking "correct"
-            # by coincidence). Only skip if there's a single location,
-            # otherwise still normalize to be safe.
             if len(locations) <= 1:
                 continue
  
@@ -980,8 +985,6 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
                         },
                         headers=_h(), timeout=20,
                     )
-                    # 422 here usually just means that location isn't
-                    # connected to this inventory item — safe to ignore
                     if zero_res.status_code not in (200, 422):
                         print(f"[Inventory] Could not zero location {other_loc_id} "
                               f"for variant {variant['id']}: {zero_res.text}")
@@ -996,7 +999,6 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
             print(f"[Inventory] Update failed for variant {variant['id']}: {e}")
  
     return changes
- 
 
 def set_product_out_of_stock(shopify_product_id: str) -> bool:
     """
