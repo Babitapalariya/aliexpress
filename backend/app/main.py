@@ -909,6 +909,48 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
 #     } for m in mappings]
 
 
+# @app.get("/mappings/list")
+# def list_mappings(
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(5, ge=1, le=100),
+#     search: str = Query(None, description="Search by AliExpress ID, Shopify ID, or title"),
+#     db: Session = Depends(get_db)
+# ):
+#     query = db.query(ProductMapping)
+
+#     if search:
+#         search_term = f"%{search}%"
+#         query = query.filter(
+#             (ProductMapping.aliexpress_id.ilike(search_term)) |
+#             (ProductMapping.shopify_product_id.ilike(search_term)) |
+#             (ProductMapping.shopify_product_title.ilike(search_term))
+#         )
+
+#     total = query.count()
+#     pages = (total + page_size - 1) // page_size if total > 0 else 1
+#     offset = (page - 1) * page_size
+
+#     mappings = query.order_by(ProductMapping.created_at.desc())\
+#         .offset(offset)\
+#         .limit(page_size)\
+#         .all()
+
+#     return {
+#         "mappings": [{
+#             "id": m.id,
+#             "aliexpress_id": m.aliexpress_id,
+#             "shopify_product_id": m.shopify_product_id,
+#             "title": m.shopify_product_title,
+#             "track_price": m.track_price,
+#             "price_mode": m.price_mode,
+#             "price_increase": m.price_increase
+#         } for m in mappings],
+#         "total": total,
+#         "page": page,
+#         "pages": pages
+#     }
+
+
 @app.get("/mappings/list")
 def list_mappings(
     page: int = Query(1, ge=1),
@@ -943,14 +985,13 @@ def list_mappings(
             "title": m.shopify_product_title,
             "track_price": m.track_price,
             "price_mode": m.price_mode,
-            "price_increase": m.price_increase
+            "price_increase": m.price_increase,
+            "is_dead_listing": m.is_dead_listing,   # NEW
         } for m in mappings],
         "total": total,
         "page": page,
         "pages": pages
     }
-
-
 
 @app.delete("/mappings/{mapping_id}")
 def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
@@ -964,43 +1005,47 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
  
 
 
+
 # @app.post("/mappings/sync-price")
 # def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db)):
 #     mapping = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
 #     if not mapping or not mapping.track_price:
 #         raise HTTPException(404, "Mapping not found or price tracking disabled")
 
-#     # Allow sync regardless of current mode – we will reset to auto
-#     get_latest_token(db)
-
 #     try:
+#         get_latest_token(db)
+
 #         raw = get_product(aliexpress_id, db)
+#         aliexpress_skus = raw.get("skus", [])
+#         if not aliexpress_skus:
+#             raise HTTPException(500, "No SKUs found in AliExpress product")
+
+#         from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
+
+#         price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+#         if price_result == "failed":
+#             raise HTTPException(502, "Failed to update Shopify variant prices")
+
+#         inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
+
+#         mapping.price_mode = "auto"
+#         mapping.price_increase = 0.0
+#         db.commit()
+
+#         price_msg = "Price already up to date" if price_result == "unchanged" else "Variant prices updated to AliExpress base"
+#         inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
+#         return {
+#             "message": f"{price_msg} · {inv_msg}",
+#             "product_id": mapping.shopify_product_id,
+#             "price_mode": "auto",
+#             "price_increase": 0.0,
+#             "inventory_updated": inventory_updated,
+#         }
+#     except HTTPException:
+#         raise
 #     except Exception as e:
-#         raise HTTPException(500, f"Failed to fetch from AliExpress: {str(e)}")
-
-#     aliexpress_skus = raw.get("skus", [])
-#     if not aliexpress_skus:
-#         raise HTTPException(500, "No SKUs found in AliExpress product")
-
-#     # Update Shopify with base prices – no increase applied
-#     from .shopify import update_shopify_product_prices_with_skus
-#     result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
-
-#     if result == "failed":
-#         raise HTTPException(502, "Failed to update Shopify variant prices")
-
-#     # Reset mode to auto and clear increase
-#     mapping.price_mode = "auto"
-#     mapping.price_increase = 0.0
-#     db.commit()
-
-#     message = "Price already up to date" if result == "unchanged" else "Variant prices updated to AliExpress base"
-#     return {
-#         "message": message,
-#         "product_id": mapping.shopify_product_id,
-#         "price_mode": "auto",
-#         "price_increase": 0.0,
-#     }
+#         db.rollback()
+#         raise HTTPException(500, f"Sync failed: {str(e)}")
 
 
 @app.post("/mappings/sync-price")
@@ -1013,6 +1058,29 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
         get_latest_token(db)
 
         raw = get_product(aliexpress_id, db)
+
+        # NEW: dead listing check
+        if is_listing_dead(raw):
+            mapping.is_dead_listing = True
+            db.commit()
+            zeroed = False
+            from .shopify import set_product_out_of_stock
+            try:
+                zeroed = set_product_out_of_stock(mapping.shopify_product_id)
+            except Exception as e:
+                print(f"[SyncMapping] Failed to zero stock for dead mapping {aliexpress_id}: {e}")
+            raise HTTPException(
+                409,
+                f"AliExpress listing {aliexpress_id} appears dead (no prices returned). "
+                f"Inventory {'was zeroed' if zeroed else 'could not be zeroed'} in Shopify. "
+                f"Please remap this mapping to a new AliExpress ID."
+            )
+
+        # Listing is alive — clear any previous dead flag
+        if mapping.is_dead_listing:
+            mapping.is_dead_listing = False
+            db.commit()
+
         aliexpress_skus = raw.get("skus", [])
         if not aliexpress_skus:
             raise HTTPException(500, "No SKUs found in AliExpress product")
@@ -1043,8 +1111,6 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"Sync failed: {str(e)}")
-
-
 
 
 @app.post("/mappings/sync-all")
@@ -1097,9 +1163,37 @@ def toggle_track(mapping_id: int, db: Session = Depends(get_db)):
     return {"id": mapping.id, "track_price": mapping.track_price}
 
 
+# def sync_all_mapped_products_background():
+#     from .database import SessionLocal
+#     from .shopify import update_shopify_product_inventory_with_skus
+#     db = SessionLocal()
+#     try:
+#         mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
+#         for m in mappings:
+#             if m.price_mode == "manual":
+#                 continue
+#             try:
+#                 raw = get_product(m.aliexpress_id, db)
+#                 skus = raw.get("skus", [])
+#                 if not skus:
+#                     continue
+#                 if m.price_mode == "increase" and m.price_increase != 0.0:
+#                     for sku in skus:
+#                         price = sku.get("sale_price") or sku.get("price")
+#                         if price:
+#                             sku["sale_price"] = str(float(price) + m.price_increase)
+#                             sku["price"] = str(float(price) + m.price_increase)
+#                 update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
+#                 update_shopify_product_inventory_with_skus(m.shopify_product_id, skus)  # NEW
+#                 print(f"[Hourly] Updated price+inventory for {m.aliexpress_id} (mode={m.price_mode})")
+#             except Exception as e:
+#                 print(f"[Hourly] Error for {m.aliexpress_id}: {e}")
+#     finally:
+#         db.close()
+
 def sync_all_mapped_products_background():
     from .database import SessionLocal
-    from .shopify import update_shopify_product_inventory_with_skus
+    from .shopify import update_shopify_product_inventory_with_skus, set_product_out_of_stock
     db = SessionLocal()
     try:
         mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
@@ -1108,6 +1202,22 @@ def sync_all_mapped_products_background():
                 continue
             try:
                 raw = get_product(m.aliexpress_id, db)
+
+                # NEW: dead listing check
+                if is_listing_dead(raw):
+                    print(f"[Hourly] {m.aliexpress_id} appears DEAD (no prices) — marking and zeroing stock")
+                    m.is_dead_listing = True
+                    db.commit()
+                    try:
+                        set_product_out_of_stock(m.shopify_product_id)
+                    except Exception as e:
+                        print(f"[Hourly] Failed to zero stock for dead mapping {m.aliexpress_id}: {e}")
+                    continue
+
+                if m.is_dead_listing:
+                    m.is_dead_listing = False
+                    db.commit()
+
                 skus = raw.get("skus", [])
                 if not skus:
                     continue
@@ -1118,12 +1228,13 @@ def sync_all_mapped_products_background():
                             sku["sale_price"] = str(float(price) + m.price_increase)
                             sku["price"] = str(float(price) + m.price_increase)
                 update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
-                update_shopify_product_inventory_with_skus(m.shopify_product_id, skus)  # NEW
+                update_shopify_product_inventory_with_skus(m.shopify_product_id, skus)
                 print(f"[Hourly] Updated price+inventory for {m.aliexpress_id} (mode={m.price_mode})")
             except Exception as e:
                 print(f"[Hourly] Error for {m.aliexpress_id}: {e}")
     finally:
         db.close()
+
 
 
 
@@ -3754,4 +3865,211 @@ def sync_mapping_images(mapping_id: int, db: Session = Depends(get_db)):
     return {
         "message": f"Attached {result['attached']} image(s). {result['skipped']} variant(s) already had images.",
         **result,
+    }
+
+
+@app.get("/mappings/{mapping_id}/check-listing")
+def check_mapping_listing_status(mapping_id: int, db: Session = Depends(get_db)):
+    """Check if a mapping's AliExpress listing is dead; zero Shopify stock if so."""
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+
+    try:
+        raw = get_product(mapping.aliexpress_id, db)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch from AliExpress: {e}")
+
+    dead = is_listing_dead(raw)
+    mapping.is_dead_listing = dead
+    db.commit()
+
+    stock_zeroed = False
+    if dead:
+        from .shopify import set_product_out_of_stock
+        try:
+            stock_zeroed = set_product_out_of_stock(mapping.shopify_product_id)
+        except Exception as e:
+            print(f"[CheckMappingListing] Failed to zero stock for {mapping.aliexpress_id}: {e}")
+
+    return {
+        "aliexpress_id": mapping.aliexpress_id,
+        "is_dead_listing": dead,
+        "stock_zeroed_in_shopify": stock_zeroed,
+        "sale_price": raw.get("sale_price"),
+        "original_price": raw.get("original_price"),
+        "message": (
+            "DEAD listing — inventory zeroed in Shopify. Please remap to a new AliExpress ID."
+            if dead else
+            "Listing is active with valid prices."
+        ),
+    }
+
+
+@app.post("/mappings/{mapping_id}/remap-listing")
+def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
+    """
+    Point a mapping to a new AliExpress product ID (supplier relisted).
+    payload: { "new_aliexpress_id": "3256809945399812" }
+    """
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+
+    new_id = (payload.get("new_aliexpress_id") or "").strip()
+    if not new_id:
+        raise HTTPException(400, "new_aliexpress_id is required")
+    if new_id == mapping.aliexpress_id:
+        raise HTTPException(400, "new_aliexpress_id is the same as the current ID")
+
+    conflict = db.query(ProductMapping).filter(
+        ProductMapping.aliexpress_id == new_id,
+        ProductMapping.id != mapping_id
+    ).first()
+    if conflict:
+        raise HTTPException(409, f"New ID {new_id} is already mapped (mapping id={conflict.id})")
+
+    try:
+        raw = get_product(new_id, db)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch new ID from AliExpress: {e}")
+
+    if is_listing_dead(raw):
+        raise HTTPException(400, f"New ID {new_id} also appears dead. Please verify the correct listing ID.")
+
+    old_id = mapping.aliexpress_id
+    mapping.aliexpress_id = new_id
+    mapping.is_dead_listing = False
+    mapping.price_mode = "auto"
+    mapping.price_increase = 0.0
+    db.commit()
+
+    price_updated = False
+    inv_updated = False
+    skus = raw.get("skus", [])
+    if skus:
+        from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus, store_aliexpress_sku_ids
+        try:
+            price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus)
+            price_updated = price_result in ("updated", "unchanged")
+            inv_updated = bool(update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus))
+            store_aliexpress_sku_ids(mapping.shopify_product_id, skus)
+        except Exception as e:
+            print(f"[RemapMapping] Shopify update failed (non-fatal): {e}")
+
+    print(f"[RemapMapping] Mapping id={mapping_id}: {old_id} → {new_id} (price={price_updated} inv={inv_updated})")
+
+    return {
+        "message": f"Successfully remapped mapping from {old_id} to {new_id}",
+        "old_aliexpress_id": old_id,
+        "new_aliexpress_id": new_id,
+        "shopify_price_updated": price_updated,
+        "shopify_inv_updated": inv_updated,
+        "new_title": raw.get("title"),
+        "new_price": raw.get("sale_price") or raw.get("original_price"),
+    }
+
+# ─────────────────────────────────────────────
+# ENDPOINT: Scan ALL mappings for dead listings
+# POST /admin/scan-dead-mappings
+# ─────────────────────────────────────────────
+
+@app.post("/admin/scan-dead-mappings")
+def scan_dead_mappings(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Scan all product mappings for dead/delisted AliExpress listings.
+    Mappings with null prices get flagged as is_dead_listing=True and
+    their Shopify inventory is zeroed. Runs in background.
+    Results available at GET /dead-mappings.
+    """
+    mappings = db.query(ProductMapping).all()
+
+    if not mappings:
+        raise HTTPException(404, "No mappings found")
+
+    total = len(mappings)
+    snapshots = [
+        {"id": m.id, "aliexpress_id": m.aliexpress_id, "shopify_product_id": m.shopify_product_id}
+        for m in mappings
+    ]
+
+    def run():
+        from .database import SessionLocal
+        from .shopify import set_product_out_of_stock
+        inner_db     = SessionLocal()
+        dead_count   = 0
+        alive_count  = 0
+        error_count  = 0
+        zeroed_count = 0
+
+        print(f"\n[DeadMappingScan] Scanning {total} mapping(s) for dead listings…")
+        try:
+            for snap in snapshots:
+                try:
+                    raw  = get_product(snap["aliexpress_id"], inner_db)
+                    dead = is_listing_dead(raw)
+                    m = inner_db.query(ProductMapping).filter(
+                        ProductMapping.id == snap["id"]
+                    ).first()
+                    if m:
+                        m.is_dead_listing = dead
+                        inner_db.commit()
+
+                    if dead:
+                        dead_count += 1
+                        print(f"[DeadMappingScan] DEAD: {snap['aliexpress_id']} — no prices returned")
+                        if snap["shopify_product_id"]:
+                            try:
+                                zeroed = set_product_out_of_stock(snap["shopify_product_id"])
+                                if zeroed:
+                                    zeroed_count += 1
+                                    print(f"[DeadMappingScan] Zeroed Shopify stock for {snap['aliexpress_id']}")
+                            except Exception as e:
+                                print(f"[DeadMappingScan] Failed to zero stock for {snap['aliexpress_id']}: {e}")
+                    else:
+                        alive_count += 1
+                except Exception as e:
+                    error_count += 1
+                    print(f"[DeadMappingScan] Error: {snap['aliexpress_id']}: {e}")
+        finally:
+            inner_db.close()
+            print(f"[DeadMappingScan] Done — alive={alive_count} dead={dead_count} zeroed={zeroed_count} errors={error_count}")
+
+    background_tasks.add_task(run)
+    return {
+        "message": f"Dead mapping scan started for {total} mapping(s) — running in background",
+        "total":   total,
+        "note":    "Check terminal for progress. Use GET /dead-mappings to see results.",
+    }
+
+
+# ─────────────────────────────────────────────
+# ENDPOINT: Get all dead/flagged mappings
+# GET /dead-mappings
+# ─────────────────────────────────────────────
+
+@app.get("/dead-mappings")
+def get_dead_mappings(db: Session = Depends(get_db)):
+    """Returns all mappings currently flagged as dead (is_dead_listing=True)."""
+    mappings = db.query(ProductMapping).filter(
+        ProductMapping.is_dead_listing == True
+    ).all()
+    return {
+        "count": len(mappings),
+        "mappings": [
+            {
+                "id":                 m.id,
+                "aliexpress_id":      m.aliexpress_id,
+                "shopify_product_id": m.shopify_product_id,
+                "title":              m.shopify_product_title,
+                "shopify_url":        f"https://admin.shopify.com/products/{m.shopify_product_id}"
+                                      if m.shopify_product_id else None,
+                "aliexpress_url":     f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
+                "created_at":         m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in mappings
+        ],
     }

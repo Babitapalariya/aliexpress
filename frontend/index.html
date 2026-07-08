@@ -480,10 +480,14 @@ tbody tr:last-child td{border-bottom:none}
               <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseMappingModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
               <span id="mapping-selected-count" style="font-size:12px;color:var(--t3)">0 selected</span>
               <button class="btn btn-sm" onclick="syncAllMapped()"><i class="ti ti-refresh"></i> Sync All Now</button>
-              <div class="search-box" style="min-width:200px">
-    <i class="ti ti-search"></i>
-    <input type="text" id="mapping-search" placeholder="Search by ID or title…" oninput="mappingSearchDebounce()"/>
-  </div>
+                <button class="btn btn-danger btn-sm" onclick="runMappingDeadScan(); goPage('settings', document.querySelector('[data-page=settings]'))">
+                <i class="ti ti-radar"></i> Scan Dead Listings
+              </button>
+                <div class="search-box" style="min-width:200px">
+                  <i class="ti ti-search"></i>
+                  <input type="text" id="mapping-search" placeholder="Search by ID or title…" oninput="mappingSearchDebounce()"/>
+                </div>
+  
               </div>
      
 
@@ -654,6 +658,36 @@ tbody tr:last-child td{border-bottom:none}
   </div>
 </div>
 
+
+<div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <div class="card-header-left">
+      <div class="card-icon" style="background:var(--red-bg)">
+        <i class="ti ti-radar" style="color:var(--red);font-size:18px"></i>
+      </div>
+      <div>
+        <div class="card-title">Dead Listing Scanner — Mappings</div>
+        <div class="card-sub">Same scan, but for products linked via Product Mappings</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+      Scans every entry in <strong>Product Mappings</strong> (not Imported Products) for dead AliExpress IDs.
+      Dead mappings get flagged and their Shopify inventory is automatically zeroed until you remap them.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-danger" onclick="runMappingDeadScan()" id="btn-mapping-dead-scan">
+        <i class="ti ti-radar"></i> Scan Mappings for Dead Listings
+      </button>
+      <button class="btn btn-sm" onclick="loadDeadMappings()">
+        <i class="ti ti-list"></i> View Dead Mappings
+      </button>
+    </div>
+    <div id="mapping-dead-scan-result" style="font-size:13px;color:var(--t2)"></div>
+    <div id="mapping-dead-listings-wrap" style="display:none;margin-top:16px"></div>
+  </div>
+</div>
       
 
     </div>
@@ -1715,29 +1749,61 @@ async function loadMappings(page=1){
       return;
     }
 
+    // tbody.innerHTML = mappings.map(m=>{
+    //   let modeBadge='';
+    //   if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+    //   else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
+    //   else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+    //   else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+    //   return`<tr>
+    //     <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
+    //     <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
+    //     <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
+    //     <td>${escapeHtml(m.title||"—")}</td>
+    //     <td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}</td>
+    //     <td>${modeBadge}</td>
+    //     <td class="td-actions">
+    //       <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+    //       <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
+    //       <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
+    //       ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
+    //       <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
+    //       <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
+    //     </td>
+    //   </tr>`;
+    // }).join("");
+
+
     tbody.innerHTML = mappings.map(m=>{
-      let modeBadge='';
-      if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
-      else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
-      else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
-      else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
-      return`<tr>
-        <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
-        <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
-        <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
-        <td>${escapeHtml(m.title||"—")}</td>
-        <td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}</td>
-        <td>${modeBadge}</td>
-        <td class="td-actions">
-          <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
-          <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
-          <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
-          ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
-          <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
-          <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
-        </td>
-      </tr>`;
-    }).join("");
+  let modeBadge='';
+  if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+  else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
+  else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+  else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+
+  const deadBadge = m.is_dead_listing
+    ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>`
+    : "";
+
+  return`<tr style="${m.is_dead_listing ? 'background:var(--red-bg)' : ''}">
+    <td style="width:28px"><input type="checkbox" class="mapping-checkbox" data-id="${m.id}"></td>
+    <td class="td-id">${escapeHtml(m.aliexpress_id)}</td>
+    <td class="td-id">${escapeHtml(m.shopify_product_id)}</td>
+    <td>${escapeHtml(m.title||"—")}</td>
+    <td>${m.track_price?'<span class="badge b-green">Enabled</span>':'<span class="badge b-gray">Disabled</span>'}${deadBadge}</td>
+    <td>${modeBadge}</td>
+    <td class="td-actions">
+      <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+      <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
+      <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
+      ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
+      <button class="btn btn-icon sm" title="Check listing status" onclick="checkMappingListingStatus(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-radar" style="font-size:13px"></i></button>
+      ${m.is_dead_listing?`<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openMappingRemapModal(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>`:""}
+      <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
+      <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
+    </td>
+  </tr>`;
+}).join("");
 
     document.querySelectorAll('.mapping-checkbox').forEach(cb=>{cb.removeEventListener('change',updateMappingSelectedCount);cb.addEventListener('change',updateMappingSelectedCount);});
     updateMappingSelectedCount();
@@ -2620,6 +2686,133 @@ async function safeJson(response) {
   }
 }
 
+async function checkMappingListingStatus(mappingId, aliexpressId){
+  showToast(`Checking listing ${aliexpressId}…`, "info");
+  try{
+    const r = await fetch(`${API}/mappings/${mappingId}/check-listing`);
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    if(d.is_dead_listing){
+      showToast(`Dead listing detected for ${aliexpressId} — stock zeroed, use Remap to fix`, "err");
+      openMappingRemapModal(mappingId, aliexpressId);
+    } else {
+      showToast(`Listing ${aliexpressId} is active ✅`, "ok");
+    }
+    await loadMappings(mappingPage);
+  } catch(e){
+    showToast("Check failed: " + e.message, "err");
+  }
+}
+
+function openMappingRemapModal(mappingId, oldAliexpressId){
+  document.getElementById("mapping-remap-mapping-id").value = mappingId;
+  document.getElementById("mapping-remap-old-id").value = oldAliexpressId;
+  document.getElementById("mapping-remap-new-id").value = "";
+  document.getElementById("mapping-remap-modal").classList.add("open");
+}
+function closeMappingRemapModal(){
+  document.getElementById("mapping-remap-modal").classList.remove("open");
+}
+async function submitMappingRemap(){
+  const mappingId = document.getElementById("mapping-remap-mapping-id").value;
+  let newId = document.getElementById("mapping-remap-new-id").value.trim();
+  const urlMatch = newId.match(/\/item\/(\d+)\.html/);
+  if(urlMatch) newId = urlMatch[1];
+  if(!newId){ showToast("Please enter the new AliExpress ID", "err"); return; }
+
+  try{
+    const r = await fetch(`${API}/mappings/${mappingId}/remap-listing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_aliexpress_id: newId }),
+    });
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(`Remapped to ${newId} — prices and inventory updated ✅`, "ok");
+    closeMappingRemapModal();
+    await loadMappings(mappingPage);
+  } catch(e){
+    showToast("Remap failed: " + e.message, "err");
+  }
+}
+
+async function runMappingDeadScan() {
+  const btn    = document.getElementById("btn-mapping-dead-scan");
+  const result = document.getElementById("mapping-dead-scan-result");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Scanning… (may take a few minutes)`;
+  result.innerHTML = "";
+  try {
+    const r = await fetch(`${API}/admin/scan-dead-mappings`, { method: "POST" });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    result.innerHTML = `
+      <div class="badge b-green"><i class="ti ti-circle-check"></i> ${d.message}</div>
+      <div style="margin-top:8px;font-size:12px;color:var(--t3)">
+        ${d.note} Click "View Dead Mappings" after a minute.
+      </div>`;
+    showToast(d.message, "ok");
+  } catch(e) {
+    result.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Scan failed: " + e.message, "err");
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<i class="ti ti-radar"></i> Scan Mappings for Dead Listings`;
+}
+
+async function loadDeadMappings() {
+  const wrap = document.getElementById("mapping-dead-listings-wrap");
+  wrap.style.display = "";
+  wrap.innerHTML = `<i class="ti ti-loader-2 spin"></i> Loading…`;
+  try {
+    const r = await fetch(`${API}/dead-mappings`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+
+    if (!d.count) {
+      wrap.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> No dead mappings found</div>`;
+      return;
+    }
+
+    const rows = d.mappings.map(m => `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;
+        background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;margin-bottom:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${m.title || "—"}
+          </div>
+          <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">
+            Dead ID: ${m.aliexpress_id}
+          </div>
+          <div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:2px">
+            Shopify: ${m.shopify_product_id || "—"}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:flex-end">
+          <div style="display:flex;gap:6px">
+            <a href="${m.aliexpress_url}" target="_blank">
+              <button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button>
+            </a>
+            ${m.shopify_url
+              ? `<a href="${m.shopify_url}" target="_blank"><button class="btn btn-xs"><i class="ti ti-brand-shopify"></i></button></a>`
+              : ""}
+          </div>
+          <button class="btn btn-danger btn-xs" onclick="openMappingRemapModal(${m.id}, '${m.aliexpress_id}')">
+            <i class="ti ti-arrows-exchange"></i> Remap Now
+          </button>
+        </div>
+      </div>`).join("");
+
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span class="badge b-red"><i class="ti ti-alert-triangle"></i> ${d.count} mapping${d.count !== 1 ? "s" : ""} need remapping</span>
+      </div>
+      ${rows}`;
+  } catch(e) {
+    wrap.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+  }
+}
+
 </script>
 
 
@@ -2667,6 +2860,34 @@ async function safeJson(response) {
   </div>
 </div>
 </remap_modal>
+
+<div class="overlay" id="mapping-remap-modal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-hd">
+      <h3><i class="ti ti-arrows-exchange" style="color:var(--red)"></i> Remap Mapping to New ID</h3>
+      <button class="modal-x" onclick="closeMappingRemapModal()">✕</button>
+    </div>
+    <div class="modal-bd">
+      <input type="hidden" id="mapping-remap-mapping-id">
+      <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--red)">
+        <i class="ti ti-alert-triangle"></i>
+        <strong> Dead listing detected.</strong> This mapping's AliExpress ID returns no prices.
+      </div>
+      <div class="fg" style="margin-bottom:14px">
+        <label>Current (dead) AliExpress ID</label>
+        <input type="text" id="mapping-remap-old-id" readonly style="background:#f8fafc;color:var(--t3);font-family:var(--mono);font-size:12px">
+      </div>
+      <div class="fg">
+        <label>New AliExpress ID or Product URL</label>
+        <input type="text" id="mapping-remap-new-id" placeholder="e.g. 3256809945399812" style="font-family:var(--mono);font-size:13px">
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn btn-sm" onclick="closeMappingRemapModal()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="submitMappingRemap()"><i class="ti ti-arrows-exchange"></i> Remap</button>
+    </div>
+  </div>
+</div>
  
 </body>
 </html>

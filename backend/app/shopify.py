@@ -1067,3 +1067,5 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 
     print(f"[DeadStock] Zeroed inventory for {success_count}/{len(variants)} variant(s) of product {shopify_product_id}")
     return success_count > 0
+
+
