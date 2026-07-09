@@ -4073,3 +4073,27 @@ def get_dead_mappings(db: Session = Depends(get_db)):
             for m in mappings
         ],
     }
+
+
+@app.post("/dashboard/variants/{variant_id}/toggle-lock")
+def toggle_variant_lock(variant_id: int):
+    from .shopify import is_variant_locked, set_variant_lock
+    currently_locked = is_variant_locked(variant_id)
+    new_state = not currently_locked
+    success = set_variant_lock(variant_id, new_state)
+    if not success:
+        raise HTTPException(502, "Failed to update variant lock")
+    return {"variant_id": variant_id, "locked": new_state}
+
+
+@app.get("/dashboard/products/{product_id}/variant-locks")
+def get_variant_locks(product_id: int, db: Session = Depends(get_db)):
+    """Return the set of locked variant IDs for a product, so the modal can show lock icons."""
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        return {"locked_variant_ids": []}
+    from .shopify import get_locked_variant_ids
+    locked = get_locked_variant_ids(product.shopify_product_id)
+    return {"locked_variant_ids": list(locked)}
