@@ -67,6 +67,9 @@ class ProductMapping(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_dead_listing = Column(Boolean, default=False, nullable=False)   # NEW
+    custom_title = Column(String(500), nullable=True)
+    custom_description = Column(Text, nullable=True)
+    custom_rating = Column(Float, nullable=True)
 
 # models.py (add after ImportedProduct)
 

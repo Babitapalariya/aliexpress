@@ -3714,33 +3714,138 @@ def get_dead_listings(db: Session = Depends(get_db)):
 # GET /dashboard/products/lookup?q=...
 # ─────────────────────────────────────────────
  
+# @app.get("/dashboard/products/lookup")
+# def lookup_product(
+#     q: str = Query(..., description="AliExpress ID (old or new), Shopify ID, or title keyword"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Find an imported product by:
+#     - Current aliexpress_id (exact or partial)
+#     - Old aliexpress_id stored in replacement_aliexpress_id (exact or partial)
+#     - Shopify product ID
+#     - Title keyword (partial match)
+ 
+#     Returns all matches with match reason so you can identify the right one.
+#     """
+#     q = q.strip()
+#     if not q:
+#         raise HTTPException(400, "Search query q is required")
+ 
+#     results  = []
+#     seen_ids = set()
+ 
+#     def add(p, reason: str):
+#         if p.id in seen_ids:
+#             return
+#         seen_ids.add(p.id)
+#         results.append({
+#             "id":                        p.id,
+#             "aliexpress_id":             p.aliexpress_id,
+#             "replacement_aliexpress_id": p.replacement_aliexpress_id,
+#             "title":                     p.custom_title or p.original_title,
+#             "main_image":                p.main_image,
+#             "price":                     p.custom_price or p.original_price,
+#             "currency":                  p.currency,
+#             "shopify_product_id":        p.shopify_product_id,
+#             "shopify_status":            p.shopify_status,
+#             "is_dead_listing":           p.is_dead_listing,
+#             "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+#             "match_reason":              reason,
+#             "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
+#             "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+#                                          if p.shopify_product_id else None,
+#         })
+ 
+#     # 1. Exact current aliexpress_id
+#     for p in db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == q).all():
+#         add(p, "Exact AliExpress ID match (current ID)")
+ 
+#     # 2. Exact old aliexpress_id (stored after remap)
+#     for p in db.query(ImportedProduct).filter(
+#         ImportedProduct.replacement_aliexpress_id == q
+#     ).all():
+#         add(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
+ 
+#     # 3. Shopify product ID
+#     for p in db.query(ImportedProduct).filter(
+#         ImportedProduct.shopify_product_id == q
+#     ).all():
+#         add(p, "Shopify product ID match")
+ 
+#     # 4. Partial current aliexpress_id
+#     for p in db.query(ImportedProduct).filter(
+#         ImportedProduct.aliexpress_id.ilike(f"%{q}%")
+#     ).all():
+#         add(p, "Partial AliExpress ID match (current ID)")
+ 
+#     # 5. Partial old aliexpress_id
+#     for p in db.query(ImportedProduct).filter(
+#         ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
+#     ).all():
+#         add(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
+ 
+#     # 6. Title keyword match
+#     term = f"%{q}%"
+#     for p in db.query(ImportedProduct).filter(
+#         (ImportedProduct.original_title.ilike(term)) |
+#         (ImportedProduct.custom_title.ilike(term))
+#     ).all():
+#         add(p, "Title keyword match")
+ 
+#     if not results:
+#         return {
+#             "found":   False,
+#             "count":   0,
+#             "results": [],
+#             "message": (
+#                 f"No product found matching '{q}'. "
+#                 f"If this was an AliExpress ID that was relisted under a new ID, "
+#                 f"go to Settings → Dead Listing Scanner to find and remap it. "
+#                 f"Or try searching by the product title keyword."
+#             ),
+#         }
+ 
+#     return {
+#         "found":   True,
+#         "count":   len(results),
+#         "results": results,
+#         "message": f"Found {len(results)} product(s) matching '{q}'",
+#     }
+
+
+
 @app.get("/dashboard/products/lookup")
 def lookup_product(
     q: str = Query(..., description="AliExpress ID (old or new), Shopify ID, or title keyword"),
     db: Session = Depends(get_db)
 ):
     """
-    Find an imported product by:
-    - Current aliexpress_id (exact or partial)
-    - Old aliexpress_id stored in replacement_aliexpress_id (exact or partial)
-    - Shopify product ID
-    - Title keyword (partial match)
- 
-    Returns all matches with match reason so you can identify the right one.
+    Find a product by:
+    - Current aliexpress_id (exact or partial) — ImportedProduct
+    - Old aliexpress_id stored in replacement_aliexpress_id (exact or partial) — ImportedProduct
+    - Shopify product ID — ImportedProduct
+    - Title keyword (partial match) — ImportedProduct
+    - AliExpress ID / Shopify ID / title — ProductMapping (mapped, not directly imported)
+
+    Returns all matches with match reason and a "source" field ("imported" or "mapping")
+    so the frontend can route actions (edit, sync, increase) to the right endpoint set.
     """
     q = q.strip()
     if not q:
         raise HTTPException(400, "Search query q is required")
- 
-    results  = []
-    seen_ids = set()
- 
-    def add(p, reason: str):
-        if p.id in seen_ids:
+
+    results = []
+    seen_imported_ids = set()
+    seen_mapping_ids = set()
+
+    def add_imported(p, reason: str):
+        if p.id in seen_imported_ids:
             return
-        seen_ids.add(p.id)
+        seen_imported_ids.add(p.id)
         results.append({
             "id":                        p.id,
+            "source":                    "imported",
             "aliexpress_id":             p.aliexpress_id,
             "replacement_aliexpress_id": p.replacement_aliexpress_id,
             "title":                     p.custom_title or p.original_title,
@@ -3756,43 +3861,91 @@ def lookup_product(
             "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
                                          if p.shopify_product_id else None,
         })
- 
+
+    def add_mapping(m, reason: str):
+        if m.id in seen_mapping_ids:
+            return
+        seen_mapping_ids.add(m.id)
+        results.append({
+            "id":                        m.id,
+            "source":                    "mapping",
+            "aliexpress_id":             m.aliexpress_id,
+            "replacement_aliexpress_id": None,
+            "title":                     getattr(m, "custom_title", None) or m.shopify_product_title,
+            "main_image":                None,
+            "price":                     None,
+            "currency":                  None,
+            "shopify_product_id":        m.shopify_product_id,
+            "shopify_status":            None,
+            "is_dead_listing":           m.is_dead_listing,
+            "imported_at":               m.created_at.isoformat() if m.created_at else None,
+            "match_reason":              reason,
+            "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
+            "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
+                                         if m.shopify_product_id else None,
+        })
+
+    # ── ImportedProduct matches ──
+
     # 1. Exact current aliexpress_id
     for p in db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == q).all():
-        add(p, "Exact AliExpress ID match (current ID)")
- 
+        add_imported(p, "Exact AliExpress ID match (current ID)")
+
     # 2. Exact old aliexpress_id (stored after remap)
     for p in db.query(ImportedProduct).filter(
         ImportedProduct.replacement_aliexpress_id == q
     ).all():
-        add(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
- 
+        add_imported(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
+
     # 3. Shopify product ID
     for p in db.query(ImportedProduct).filter(
         ImportedProduct.shopify_product_id == q
     ).all():
-        add(p, "Shopify product ID match")
- 
+        add_imported(p, "Shopify product ID match")
+
     # 4. Partial current aliexpress_id
     for p in db.query(ImportedProduct).filter(
         ImportedProduct.aliexpress_id.ilike(f"%{q}%")
     ).all():
-        add(p, "Partial AliExpress ID match (current ID)")
- 
+        add_imported(p, "Partial AliExpress ID match (current ID)")
+
     # 5. Partial old aliexpress_id
     for p in db.query(ImportedProduct).filter(
         ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
     ).all():
-        add(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
- 
+        add_imported(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
+
     # 6. Title keyword match
     term = f"%{q}%"
     for p in db.query(ImportedProduct).filter(
         (ImportedProduct.original_title.ilike(term)) |
         (ImportedProduct.custom_title.ilike(term))
     ).all():
-        add(p, "Title keyword match")
- 
+        add_imported(p, "Title keyword match")
+
+    # ── ProductMapping matches ──
+
+    # 7. Exact aliexpress_id
+    for m in db.query(ProductMapping).filter(ProductMapping.aliexpress_id == q).all():
+        add_mapping(m, "Exact AliExpress ID match (mapping)")
+
+    # 8. Exact shopify_product_id
+    for m in db.query(ProductMapping).filter(ProductMapping.shopify_product_id == q).all():
+        add_mapping(m, "Shopify product ID match (mapping)")
+
+    # 9. Partial aliexpress_id
+    for m in db.query(ProductMapping).filter(
+        ProductMapping.aliexpress_id.ilike(f"%{q}%")
+    ).all():
+        add_mapping(m, "Partial AliExpress ID match (mapping)")
+
+    # 10. Title keyword match (shopify_product_title + custom_title if present)
+    mapping_title_filter = ProductMapping.shopify_product_title.ilike(term)
+    if hasattr(ProductMapping, "custom_title"):
+        mapping_title_filter = mapping_title_filter | ProductMapping.custom_title.ilike(term)
+    for m in db.query(ProductMapping).filter(mapping_title_filter).all():
+        add_mapping(m, "Title keyword match (mapping)")
+
     if not results:
         return {
             "found":   False,
@@ -3805,15 +3958,13 @@ def lookup_product(
                 f"Or try searching by the product title keyword."
             ),
         }
- 
+
     return {
         "found":   True,
         "count":   len(results),
         "results": results,
         "message": f"Found {len(results)} product(s) matching '{q}'",
     }
-
-
 
 @app.post("/admin/backfill-product-skus")
 def backfill_product_skus(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -4075,25 +4226,212 @@ def get_dead_mappings(db: Session = Depends(get_db)):
     }
 
 
-@app.post("/dashboard/variants/{variant_id}/toggle-lock")
-def toggle_variant_lock(variant_id: int):
+@app.post("/dashboard/variants/{variant_id}/toggle-lock/{lock_type}")
+def toggle_variant_lock(variant_id: int, lock_type: str):
+    if lock_type not in ("price", "inventory", "image"):
+        raise HTTPException(400, "lock_type must be one of: price, inventory, image")
     from .shopify import is_variant_locked, set_variant_lock
-    currently_locked = is_variant_locked(variant_id)
+    currently_locked = is_variant_locked(variant_id, lock_type)
     new_state = not currently_locked
-    success = set_variant_lock(variant_id, new_state)
-    if not success:
+    if not set_variant_lock(variant_id, lock_type, new_state):
         raise HTTPException(502, "Failed to update variant lock")
-    return {"variant_id": variant_id, "locked": new_state}
+    return {"variant_id": variant_id, "lock_type": lock_type, "locked": new_state}
 
 
 @app.get("/dashboard/products/{product_id}/variant-locks")
 def get_variant_locks(product_id: int, db: Session = Depends(get_db)):
-    """Return the set of locked variant IDs for a product, so the modal can show lock icons."""
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
     if not product.shopify_product_id:
-        return {"locked_variant_ids": []}
-    from .shopify import get_locked_variant_ids
-    locked = get_locked_variant_ids(product.shopify_product_id)
-    return {"locked_variant_ids": list(locked)}
+        return {"locks": {}}
+    from .shopify import get_variant_lock_map
+    return {"locks": get_variant_lock_map(product.shopify_product_id)}
+
+
+@app.get("/mappings/{mapping_id}/variant-locks")
+def get_mapping_variant_locks(mapping_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    from .shopify import get_variant_lock_map
+    return {"locks": get_variant_lock_map(mapping.shopify_product_id)}
+
+def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: dict) -> int:
+    """inventory_updates: {variant_id:int -> qty:int}. Returns count updated."""
+    from .shopify import _base, _h
+    vres = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+    if vres.status_code != 200:
+        return 0
+    shopify_variants = vres.json().get("product", {}).get("variants", [])
+    variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
+
+    loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+    locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
+    if not locations:
+        return 0
+    primary_location_id = locations[0]["id"]
+    other_location_ids = [loc["id"] for loc in locations[1:]]
+
+    updated = 0
+    for vid, qty in inventory_updates.items():
+        inventory_item_id = variant_inv_item_map.get(vid)
+        if not inventory_item_id:
+            continue
+        try:
+            set_res = requests.post(f"{_base()}/inventory_levels/set.json",
+                json={"location_id": primary_location_id, "inventory_item_id": inventory_item_id, "available": qty},
+                headers=_h(), timeout=20)
+            ok = set_res.status_code == 200
+            for other_loc_id in other_location_ids:
+                try:
+                    requests.post(f"{_base()}/inventory_levels/set.json",
+                        json={"location_id": other_loc_id, "inventory_item_id": inventory_item_id, "available": 0},
+                        headers=_h(), timeout=20)
+                except Exception as e:
+                    print(f"[Inventory] Error zeroing location {other_loc_id}: {e}")
+            if ok:
+                updated += 1
+        except Exception as e:
+            print(f"[Inventory] Error for variant {vid}: {e}")
+    return updated
+
+
+@app.get("/mappings/{mapping_id}/variants")
+def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    from .shopify import _base, _h
+    res = requests.get(f"{_base()}/products/{mapping.shopify_product_id}.json",
+        params={"fields": "id,title,variants,options"}, headers=_h(), timeout=15)
+    if res.status_code != 200:
+        raise HTTPException(502, res.text)
+    shopify_product = res.json().get("product", {})
+    variants = shopify_product.get("variants", [])
+    result = []
+    for v in variants:
+        label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
+        result.append({
+            "variant_id": v["id"],
+            "label": " / ".join(label_parts) if label_parts else "Default",
+            "sku": v.get("sku"),
+            "price": v.get("price"),
+            "compare_at_price": v.get("compare_at_price"),
+            "inventory_quantity": v.get("inventory_quantity"),
+        })
+    return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
+
+
+@app.post("/mappings/{mapping_id}/update-variant-prices")
+def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    variants_payload = payload.get("variants", [])
+    if not variants_payload:
+        raise HTTPException(400, "No variants provided")
+
+    from .shopify import _base, _h
+    updated_variants = []
+    for v in variants_payload:
+        vid, price = v.get("variant_id"), v.get("price")
+        if vid is None or price is None:
+            continue
+        try:
+            updated_variants.append({"id": int(vid), "price": str(float(price))})
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Invalid price for variant {vid}")
+    if not updated_variants:
+        raise HTTPException(400, "No valid variant updates provided")
+
+    price_success = 0
+    for uv in updated_variants:
+        try:
+            res = requests.put(f"{_base()}/variants/{uv['id']}.json",
+                json={"variant": {"id": uv["id"], "price": uv["price"]}}, headers=_h(), timeout=20)
+            res.raise_for_status()
+            price_success += 1
+        except Exception as e:
+            print(f"[MappingVariantEdit] Price update failed for variant {uv['id']}: {e}")
+    if price_success == 0:
+        raise HTTPException(502, "Shopify variant price update failed for all variants")
+
+    inventory_updates = {}
+    for v in variants_payload:
+        vid, qty = v.get("variant_id"), v.get("inventory_quantity")
+        if vid is not None and qty is not None:
+            try:
+                inventory_updates[int(vid)] = int(qty)
+            except (ValueError, TypeError):
+                continue
+    inventory_updated_count = _set_variant_inventory_levels(mapping.shopify_product_id, inventory_updates) if inventory_updates else 0
+
+    mapping.price_mode = "manual"
+    mapping.price_increase = 0.0
+    db.commit()
+
+    msg = f"Updated {len(updated_variants)} variant price(s) (manual mode)"
+    if inventory_updates:
+        msg += f" · {inventory_updated_count}/{len(inventory_updates)} inventory level(s) updated"
+    return {"message": msg, "price_mode": "manual", "updated": len(updated_variants), "inventory_updated": inventory_updated_count}
+
+
+@app.get("/mappings/{mapping_id}/details")
+def get_mapping_details(mapping_id: int, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    try:
+        live_data = get_product(mapping.aliexpress_id, db)
+    except Exception as e:
+        return {"aliexpress_id": mapping.aliexpress_id, "fetch_error": str(e),
+                "shipping_cost": "Calculated at checkout", "shipping_method": "Standard Shipping",
+                "shipping_days": "", "total_stock": None, "stock_available": None,
+                "sku_inventory": [], "orders": None}
+    shipping = live_data.get("shipping_info", {})
+    return {
+        "aliexpress_id": mapping.aliexpress_id,
+        "shipping_cost": shipping.get("cost") or "Calculated at checkout",
+        "shipping_method": shipping.get("method") or "Standard Shipping",
+        "shipping_days": shipping.get("days") or "",
+        "total_stock": live_data.get("total_stock"),
+        "stock_available": live_data.get("stock_available"),
+        "stock_source": live_data.get("stock_source"),
+        "stock_note": live_data.get("stock_note"),
+        "sku_inventory": live_data.get("sku_inventory") or [],
+        "orders": live_data.get("orders"),
+        "fetch_error": None,
+    }
+
+
+@app.put("/mappings/{mapping_id}")
+def update_mapping(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+    if "custom_title" in payload:
+        mapping.custom_title = payload["custom_title"] or None
+    if "custom_description" in payload:
+        mapping.custom_description = payload["custom_description"] or None
+    if "custom_rating" in payload:
+        try:
+            mapping.custom_rating = float(payload["custom_rating"]) if payload["custom_rating"] else None
+        except (ValueError, TypeError):
+            mapping.custom_rating = None
+    db.commit()
+    db.refresh(mapping)
+
+    shopify_synced = False
+    if mapping.shopify_product_id:
+        try:
+            from .shopify import update_shopify_product
+            update_shopify_product(mapping.shopify_product_id, {
+                "title": mapping.custom_title,
+                "body_html": mapping.custom_description,
+                "rating": mapping.custom_rating,
+            })
+            shopify_synced = True
+        except Exception as e:
+            print(f"[MappingEdit] Shopify sync failed: {e}")
+    return {"message": "Mapping updated", "shopify_synced": shopify_synced}

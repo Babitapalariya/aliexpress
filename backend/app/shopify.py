@@ -9,10 +9,17 @@ import requests
 from fastapi import HTTPException
 from .config import get_settings
 
+import threading
+
 settings = get_settings()
 
 _cached_token = None
 _token_expires_at = 0
+
+_rate_lock = threading.Lock()
+_last_call_time = 0.0
+MIN_INTERVAL = 0.55  # ~1.8 req/sec, safely under Shopify's 2/sec sustained limit
+
 
 # ─────────────────────────────────────────────
 # TOKEN
@@ -245,7 +252,7 @@ def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list,
     if not aliexpress_skus or not shopify_variants:
         return 0
 
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id)
+    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
     url_to_image_id: dict[str, int] = {}
     attached = 0
 
@@ -373,7 +380,7 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
         print(f"[Backfill][Image] Fetch variants failed: {e}")
         return {"attached": 0, "skipped": 0, "total_variants": 0}
 
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id)
+    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
 
     # Skip variants that already have an image OR are locked
     needs_image = [
@@ -775,7 +782,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         return "failed"
 
     # Fetch locked variants once — skip these entirely during auto-sync
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id)
+    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "price")
     if locked_variant_ids:
         print(f"[UPDATE] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
 
@@ -783,10 +790,9 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
     for variant in shopify_variants:
         vid = variant["id"]
         try:
-            mf_res = requests.get(
-                f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "aliexpress", "key": "sku_id"},
-                headers=_h(), timeout=10,
+            mf_res = _shopify_request(
+                "GET", f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
             )
             if mf_res.status_code == 200:
                 mfs = mf_res.json().get("metafields", [])
@@ -831,8 +837,13 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
     # Build a list of (variant_id, new_price) for variants that actually need updating
     to_update = []
     any_match_found = False
+    skipped_locked = 0
 
     for i, variant in enumerate(shopify_variants):
+        if variant["id"] in locked_variant_ids:
+            skipped_locked += 1
+            continue  # price-locked — auto-sync must not touch this variant's price
+
         new_price = None
         ae_sku_id = variant_ae_map.get(variant["id"])
 
@@ -851,6 +862,9 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
             any_match_found = True
             if abs(float(variant["price"]) - new_price) > 0.01:
                 to_update.append((variant["id"], new_price, variant.get("option1", "?"), variant["price"]))
+
+    if skipped_locked:
+        print(f"[UPDATE] Skipped {skipped_locked} price-locked variant(s) for product {shopify_product_id}")
 
     if not any_match_found:
         print("[UPDATE] No price changes (no metafield/label/positional match found)")
@@ -880,8 +894,6 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
 
     print(f"[UPDATE] Success, {success_count}/{len(to_update)} variants updated")
     return "updated"
-
-
 
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
@@ -1167,7 +1179,7 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         return False
 
     # ── Skip variants the client has manually locked ──
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id)
+    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "inventory")
     if locked_variant_ids:
         print(f"[Inventory] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
 
@@ -1195,17 +1207,16 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     for variant in shopify_variants:
         vid = variant["id"]
         try:
-            mf_res = requests.get(
-                f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "aliexpress", "key": "sku_id"},
-                headers=_h(), timeout=10,
+            mf_res = _shopify_request(
+                "GET", f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
             )
             if mf_res.status_code == 200:
                 mfs = mf_res.json().get("metafields", [])
                 if mfs:
                     variant_ae_map[vid] = mfs[0].get("value")
         except Exception as e:
-            print(f"[Inventory] Metafield error for variant {vid}: {e}")
+            print(f"[UPDATE] Metafield error for variant {vid}: {e}")  # (or [Inventory] in the other function)
 
     matched_via_metafield = any(v["id"] in variant_ae_map for v in shopify_variants)
 
@@ -1387,82 +1398,112 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 # VARIANT LOCK (manual override protection)
 # ─────────────────────────────────────────────
 
-def is_variant_locked(variant_id: int) -> bool:
-    """Check if a variant has been manually locked against auto-sync."""
+LOCK_TYPES = ("price", "inventory", "image")
+
+def get_variant_lock_map(shopify_product_id: str) -> dict:
+    """Fetch every variant's lock flags in one pass.
+    Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}"""
+    lock_map = {}
     try:
-        res = requests.get(
-            f"{_base()}/variants/{variant_id}/metafields.json",
-            params={"namespace": "sync", "key": "locked"},
-            headers=_h(), timeout=10,
+        res = _shopify_request(
+            "GET", f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"}, headers=_h(),
+        )
+        res.raise_for_status()
+        variants = res.json().get("product", {}).get("variants", [])
+    except Exception as e:
+        print(f"[Lock] Failed to fetch variants for {shopify_product_id}: {e}")
+        return lock_map
+
+    for v in variants:
+        vid = v["id"]
+        flags = {"price": False, "inventory": False, "image": False}
+        try:
+            mf_res = _shopify_request(
+                "GET", f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "sync"}, headers=_h(),
+            )
+            if mf_res.status_code == 200:
+                for mf in mf_res.json().get("metafields", []):
+                    key = mf.get("key", "")
+                    if key.endswith("_locked") and mf.get("value") == "true":
+                        lt = key.replace("_locked", "")
+                        if lt in flags:
+                            flags[lt] = True
+            else:
+                print(f"[Lock] Metafield fetch failed for variant {vid}: HTTP {mf_res.status_code}")
+        except Exception as e:
+            print(f"[Lock] Metafield fetch failed for variant {vid}: {e}")
+        lock_map[vid] = flags
+    return lock_map
+
+
+def get_locked_variant_ids(shopify_product_id: str, lock_type: str) -> set:
+    return {vid for vid, flags in get_variant_lock_map(shopify_product_id).items() if flags.get(lock_type)}
+
+
+def is_variant_locked(variant_id: int, lock_type: str) -> bool:
+    try:
+        res = _shopify_request(
+            "GET", f"{_base()}/variants/{variant_id}/metafields.json",
+            params={"namespace": "sync", "key": f"{lock_type}_locked"}, headers=_h(),
         )
         if res.status_code != 200:
             return False
         mfs = res.json().get("metafields", [])
         return bool(mfs) and mfs[0].get("value") == "true"
     except Exception as e:
-        print(f"[Lock] Check failed for variant {variant_id}: {e}")
+        print(f"[Lock] Check failed for variant {variant_id} ({lock_type}): {e}")
         return False
 
 
-def get_locked_variant_ids(shopify_product_id: str) -> set:
-    """
-    Fetch all variants of a product and return the set of variant IDs
-    that are locked (manually customized — skip during auto-sync).
-    """
-    locked = set()
+def set_variant_lock(variant_id: int, lock_type: str, locked: bool) -> bool:
+    if lock_type not in LOCK_TYPES:
+        return False
+    key = f"{lock_type}_locked"
     try:
-        res = requests.get(
-            f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"},
-            headers=_h(), timeout=15,
-        )
-        res.raise_for_status()
-        variants = res.json().get("product", {}).get("variants", [])
-    except Exception as e:
-        print(f"[Lock] Failed to fetch variants for {shopify_product_id}: {e}")
-        return locked
-
-    for v in variants:
-        try:
-            mf_res = requests.get(
-                f"{_base()}/variants/{v['id']}/metafields.json",
-                params={"namespace": "sync", "key": "locked"},
-                headers=_h(), timeout=10,
-            )
-            if mf_res.status_code == 200:
-                mfs = mf_res.json().get("metafields", [])
-                if mfs and mfs[0].get("value") == "true":
-                    locked.add(v["id"])
-        except Exception as e:
-            print(f"[Lock] Metafield check failed for variant {v['id']}: {e}")
-
-    return locked
-
-
-def set_variant_lock(variant_id: int, locked: bool) -> bool:
-    """Lock or unlock a single variant against auto price/image/inventory sync."""
-    try:
-        res = requests.get(
-            f"{_base()}/variants/{variant_id}/metafields.json",
-            params={"namespace": "sync", "key": "locked"},
-            headers=_h(), timeout=10,
+        res = _shopify_request(
+            "GET", f"{_base()}/variants/{variant_id}/metafields.json",
+            params={"namespace": "sync", "key": key}, headers=_h(),
         )
         existing = res.json().get("metafields", []) if res.status_code == 200 else []
-        payload = {
-            "metafield": {
-                "namespace": "sync",
-                "key": "locked",
-                "value": "true" if locked else "false",
-                "type": "single_line_text_field",
-            }
-        }
+        payload = {"metafield": {"namespace": "sync", "key": key, "value": "true" if locked else "false", "type": "single_line_text_field"}}
         if existing:
-            r2 = requests.put(f"{_base()}/metafields/{existing[0]['id']}.json", json=payload, headers=_h(), timeout=15)
+            r2 = _shopify_request("PUT", f"{_base()}/metafields/{existing[0]['id']}.json", json=payload, headers=_h())
         else:
-            r2 = requests.post(f"{_base()}/variants/{variant_id}/metafields.json", json=payload, headers=_h(), timeout=15)
+            r2 = _shopify_request("POST", f"{_base()}/variants/{variant_id}/metafields.json", json=payload, headers=_h())
         r2.raise_for_status()
-        print(f"[Lock] Variant {variant_id} {'locked' if locked else 'unlocked'}")
+        print(f"[Lock] Variant {variant_id} {lock_type} {'locked' if locked else 'unlocked'}")
         return True
     except Exception as e:
-        print(f"[Lock] Failed to set lock for variant {variant_id}: {e}")
+        print(f"[Lock] Failed to set {lock_type} lock for variant {variant_id}: {e}")
         return False
+
+
+def _throttle():
+    global _last_call_time
+    with _rate_lock:
+        now = time.time()
+        wait = MIN_INTERVAL - (now - _last_call_time)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_time = time.time()
+
+
+def _shopify_request(method: str, url: str, max_retries: int = 5, **kwargs) -> requests.Response:
+    kwargs.setdefault("timeout", 20)
+    for attempt in range(max_retries):
+        _throttle()
+        res = requests.request(method, url, **kwargs)
+        if res.status_code != 429:
+            return res
+        retry_after = res.headers.get("Retry-After")
+        try:
+            delay = float(retry_after) if retry_after else 1.0
+        except (ValueError, TypeError):
+            delay = 1.0
+        delay = max(delay, 0.5) * (attempt + 1)
+        print(f"[Shopify][RateLimit] 429 on {method} {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
+        time.sleep(delay)
+    print(f"[Shopify][RateLimit] Giving up after {max_retries} retries: {method} {url}")
+    return res
