@@ -74,6 +74,7 @@ class ProductMapping(Base):
 # models.py (add after ImportedProduct)
 
  
+#pending imports
 class PendingImport(Base):
     __tablename__ = "pending_imports"
 

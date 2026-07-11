@@ -3593,6 +3593,7 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
     }
  
  
+ 
 # ─────────────────────────────────────────────
 # ENDPOINT: Scan ALL products for dead listings
 # POST /admin/scan-dead-listings
