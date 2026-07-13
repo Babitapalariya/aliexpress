@@ -1327,7 +1327,6 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
 
 
 
-
 def set_product_out_of_stock(shopify_product_id: str) -> bool:
     """
     Zero out inventory for ALL variants of a Shopify product across ALL locations,
@@ -1339,15 +1338,16 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 
     Skips variants that are inventory-locked (manually protected from auto-sync).
     Does NOT touch price or images.
+
+    Uses _shopify_request() for rate-limit safety during bulk scans.
     """
     if not settings.SHOPIFY_STORE:
         return False
 
     try:
-        res = requests.get(
-            f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"},
-            headers=_h(), timeout=15,
+        res = _shopify_request(
+            "GET", f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"}, headers=_h(), timeout=15,
         )
         res.raise_for_status()
         variants = res.json().get("product", {}).get("variants", [])
@@ -1359,7 +1359,7 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
         return False
 
     try:
-        loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+        loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
         loc_res.raise_for_status()
         locations = loc_res.json().get("locations", [])
     except Exception as e:
@@ -1390,11 +1390,11 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 
         variant_ok = True
 
-        # 1. Zero out stock at every location
+        # 1. Zero out stock at every location (throttled + auto-retry on 429)
         for loc in locations:
             try:
-                res2 = requests.post(
-                    f"{_base()}/inventory_levels/set.json",
+                res2 = _shopify_request(
+                    "POST", f"{_base()}/inventory_levels/set.json",
                     json={
                         "location_id": loc["id"],
                         "inventory_item_id": inventory_item_id,
@@ -1413,8 +1413,8 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
         # 2. Force inventory_policy to "deny" so 0 stock actually blocks purchase
         #    and the storefront shows "Out of stock" instead of staying buyable.
         try:
-            policy_res = requests.put(
-                f"{_base()}/variants/{variant['id']}.json",
+            policy_res = _shopify_request(
+                "PUT", f"{_base()}/variants/{variant['id']}.json",
                 json={"variant": {"id": variant["id"], "inventory_policy": "deny"}},
                 headers=_h(), timeout=20,
             )
@@ -1437,6 +1437,8 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 
     print(f"[DeadStock] Zeroed inventory + set deny-policy for {success_count}/{len(variants)} variant(s) of product {shopify_product_id}")
     return success_count > 0
+
+
 
 # ─────────────────────────────────────────────
 # VARIANT LOCK (manual override protection)
