@@ -1330,10 +1330,15 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
 
 def set_product_out_of_stock(shopify_product_id: str) -> bool:
     """
-    Zero out inventory for ALL variants of a Shopify product across ALL locations.
+    Zero out inventory for ALL variants of a Shopify product across ALL locations,
+    AND set inventory_policy to "deny" so Shopify actually shows/enforces
+    "Out of stock" instead of silently allowing continued sales at 0 qty.
+
     Used when an AliExpress listing is confirmed dead (no prices) and hasn't been
     remapped yet — we don't want to keep selling something we can no longer source.
-    Does NOT touch price, images, or any other variant fields.
+
+    Skips variants that are inventory-locked (manually protected from auto-sync).
+    Does NOT touch price or images.
     """
     if not settings.SHOPIFY_STORE:
         return False
@@ -1365,12 +1370,27 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
         print(f"[DeadStock] No Shopify locations found")
         return False
 
+    # Skip variants the client has manually locked against inventory changes
+    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "inventory")
+    if locked_variant_ids:
+        print(f"[DeadStock] {len(locked_variant_ids)} variant(s) inventory-locked — will be skipped: {locked_variant_ids}")
+
     success_count = 0
+    skipped_locked = 0
+    policy_failures = 0
+
     for variant in variants:
+        if variant["id"] in locked_variant_ids:
+            skipped_locked += 1
+            continue
+
         inventory_item_id = variant.get("inventory_item_id")
         if not inventory_item_id:
             continue
+
         variant_ok = True
+
+        # 1. Zero out stock at every location
         for loc in locations:
             try:
                 res2 = requests.post(
@@ -1389,12 +1409,34 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
             except Exception as e:
                 variant_ok = False
                 print(f"[DeadStock] Error zeroing variant {variant['id']} @ location {loc['id']}: {e}")
+
+        # 2. Force inventory_policy to "deny" so 0 stock actually blocks purchase
+        #    and the storefront shows "Out of stock" instead of staying buyable.
+        try:
+            policy_res = requests.put(
+                f"{_base()}/variants/{variant['id']}.json",
+                json={"variant": {"id": variant["id"], "inventory_policy": "deny"}},
+                headers=_h(), timeout=20,
+            )
+            if policy_res.status_code != 200:
+                variant_ok = False
+                policy_failures += 1
+                print(f"[DeadStock] Failed to set inventory_policy=deny for variant {variant['id']}: {policy_res.text}")
+        except Exception as e:
+            variant_ok = False
+            policy_failures += 1
+            print(f"[DeadStock] Error setting inventory_policy for variant {variant['id']}: {e}")
+
         if variant_ok:
             success_count += 1
 
-    print(f"[DeadStock] Zeroed inventory for {success_count}/{len(variants)} variant(s) of product {shopify_product_id}")
-    return success_count > 0
+    if skipped_locked:
+        print(f"[DeadStock] Skipped {skipped_locked} inventory-locked variant(s) for product {shopify_product_id}")
+    if policy_failures:
+        print(f"[DeadStock] {policy_failures} variant(s) had inventory_policy update failures")
 
+    print(f"[DeadStock] Zeroed inventory + set deny-policy for {success_count}/{len(variants)} variant(s) of product {shopify_product_id}")
+    return success_count > 0
 
 # ─────────────────────────────────────────────
 # VARIANT LOCK (manual override protection)
