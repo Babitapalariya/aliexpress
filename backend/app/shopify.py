@@ -186,67 +186,6 @@ def _upload_image_to_shopify(shopify_product_id: str, image_url: str, alt: str =
         return None
 
 
-# def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
-#     """
-#     For each AliExpress SKU that has an "image" URL, upload it to Shopify
-#     and link it to the matching variant.
-
-#     aliexpress_skus  — list of dicts from get_product() with keys: sku_id, label, image, ...
-#     shopify_variants — list of Shopify variant dicts (with "id" and "image_id")
-
-#     Returns the count of variants that had an image successfully attached.
-#     """
-#     if not aliexpress_skus or not shopify_variants:
-#         return 0
-
-#     # Build a URL → Shopify image_id cache to avoid uploading the same image twice
-#     # (multiple SKUs can share the same colour swatch image)
-#     url_to_image_id: dict[str, int] = {}
-
-#     # Build AliExpress SKU index by position (same order as Shopify variants)
-#     attached = 0
-
-#     for i, shopify_variant in enumerate(shopify_variants):
-#         if i >= len(aliexpress_skus):
-#             break
-
-#         ae_sku = aliexpress_skus[i]
-#         img_url = ae_sku.get("image")
-
-#         if not img_url:
-#             continue
-
-#         # Upload or reuse
-#         if img_url not in url_to_image_id:
-#             image_id = _upload_image_to_shopify(
-#                 shopify_product_id,
-#                 img_url,
-#                 alt=ae_sku.get("label", ""),
-#             )
-#             if image_id:
-#                 url_to_image_id[img_url] = image_id
-#             else:
-#                 continue
-#         else:
-#             image_id = url_to_image_id[img_url]
-
-#         # Link image to variant
-#         variant_id = shopify_variant["id"]
-#         try:
-#             res = requests.put(
-#                 f"{_base()}/variants/{variant_id}.json",
-#                 json={"variant": {"id": variant_id, "image_id": image_id}},
-#                 headers=_h(),
-#                 timeout=15,
-#             )
-#             res.raise_for_status()
-#             attached += 1
-#             print(f"[Shopify][Image] Variant {variant_id} ← image {image_id} ({ae_sku.get('label','')})")
-#         except Exception as e:
-#             print(f"[Shopify][Image] Variant link failed for {variant_id}: {e}")
-
-#     return attached
-
 
 def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
     if not aliexpress_skus or not shopify_variants:

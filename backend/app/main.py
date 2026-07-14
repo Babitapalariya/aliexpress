@@ -517,33 +517,6 @@ def list_products(
     return {"products": result, "total": total, "page": page, "pages": pages}
 
 
-# @app.get("/dashboard/products/{product_id}")
-# def get_single_product(product_id: int, db: Session = Depends(get_db)):
-#     p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
-#     if not p:
-#         raise HTTPException(status_code=404, detail="Product not found")
-#     return {
-#         "id": p.id,
-#         "aliexpress_id": p.aliexpress_id,
-#         "title": p.custom_title or p.original_title,
-#         "original_title": p.original_title,
-#         "price": p.custom_price or p.original_price,
-#         "currency": p.currency,
-#         "main_image": p.main_image,
-#         "store_name": p.store_name,
-#         "avg_rating": p.custom_rating or p.avg_rating,
-#         "sku_count": p.sku_count,
-#         "shopify_status": p.shopify_status,
-#         "shopify_product_id": p.shopify_product_id,
-#         "imported_at": p.imported_at.isoformat() if p.imported_at else None,
-#         "custom_title": p.custom_title,
-#         "custom_price": p.custom_price,
-#         "custom_rating": p.custom_rating,
-#         "custom_description": p.custom_description,
-#         "track_price": p.track_price,
-#     }
-
-
 
 
 @app.put("/dashboard/products/{product_id}")
@@ -894,61 +867,6 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
             "price_increase": mapping.price_increase
         }
     }
-
-# @app.get("/mappings/list")
-# def list_mappings(db: Session = Depends(get_db)):
-#     mappings = db.query(ProductMapping).all()
-#     return [{
-#         "id": m.id,
-#         "aliexpress_id": m.aliexpress_id,
-#         "shopify_product_id": m.shopify_product_id,
-#         "title": m.shopify_product_title,
-#         "track_price": m.track_price,
-#         "price_mode": m.price_mode,
-#         "price_increase": m.price_increase
-#     } for m in mappings]
-
-
-# @app.get("/mappings/list")
-# def list_mappings(
-#     page: int = Query(1, ge=1),
-#     page_size: int = Query(5, ge=1, le=100),
-#     search: str = Query(None, description="Search by AliExpress ID, Shopify ID, or title"),
-#     db: Session = Depends(get_db)
-# ):
-#     query = db.query(ProductMapping)
-
-#     if search:
-#         search_term = f"%{search}%"
-#         query = query.filter(
-#             (ProductMapping.aliexpress_id.ilike(search_term)) |
-#             (ProductMapping.shopify_product_id.ilike(search_term)) |
-#             (ProductMapping.shopify_product_title.ilike(search_term))
-#         )
-
-#     total = query.count()
-#     pages = (total + page_size - 1) // page_size if total > 0 else 1
-#     offset = (page - 1) * page_size
-
-#     mappings = query.order_by(ProductMapping.created_at.desc())\
-#         .offset(offset)\
-#         .limit(page_size)\
-#         .all()
-
-#     return {
-#         "mappings": [{
-#             "id": m.id,
-#             "aliexpress_id": m.aliexpress_id,
-#             "shopify_product_id": m.shopify_product_id,
-#             "title": m.shopify_product_title,
-#             "track_price": m.track_price,
-#             "price_mode": m.price_mode,
-#             "price_increase": m.price_increase
-#         } for m in mappings],
-#         "total": total,
-#         "page": page,
-#         "pages": pages
-#     }
 
 
 
