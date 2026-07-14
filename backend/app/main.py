@@ -951,6 +951,7 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
 #     }
 
 
+
 @app.get("/mappings/list")
 def list_mappings(
     page: int = Query(1, ge=1),
@@ -982,16 +983,56 @@ def list_mappings(
             "id": m.id,
             "aliexpress_id": m.aliexpress_id,
             "shopify_product_id": m.shopify_product_id,
-            "title": m.shopify_product_title,
+            "title": m.custom_title or m.shopify_product_title,
+            "shopify_product_title": m.shopify_product_title,
             "track_price": m.track_price,
             "price_mode": m.price_mode,
             "price_increase": m.price_increase,
-            "is_dead_listing": m.is_dead_listing,   # NEW
+            "is_dead_listing": m.is_dead_listing,
+            "custom_title": m.custom_title,
+            "custom_description": m.custom_description,
+            "custom_rating": m.custom_rating,
         } for m in mappings],
         "total": total,
         "page": page,
         "pages": pages
     }
+
+@app.post("/mappings/{mapping_id}/sync-inventory")
+def sync_mapping_inventory(mapping_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch fresh AliExpress SKU stock and push it to Shopify inventory levels
+    for the linked mapping. Mirrors /dashboard/products/{id}/sync-inventory
+    but for Product Mappings.
+    """
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Mapping not found")
+
+    from .shopify import update_shopify_product_inventory_with_skus
+    from .aliexpress import get_product as ali_get_product
+
+    try:
+        raw = ali_get_product(mapping.aliexpress_id, db)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch AliExpress data: {e}")
+
+    skus = raw.get("skus", [])
+    if not skus:
+        raise HTTPException(500, "No SKUs found in AliExpress product")
+
+    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus)
+
+    return {
+        "message": (
+            "Inventory pushed to Shopify successfully"
+            if inventory_updated
+            else "No inventory changes detected (already up to date, or AliExpress doesn't report stock for this product)"
+        ),
+        "inventory_updated": inventory_updated,
+        "total_stock": raw.get("total_stock"),
+    }
+
 
 @app.delete("/mappings/{mapping_id}")
 def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
