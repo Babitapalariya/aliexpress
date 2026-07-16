@@ -8,6 +8,7 @@ import time
 import requests
 from fastapi import HTTPException
 from .config import get_settings
+import time as _time
 
 import threading
 
@@ -1383,44 +1384,154 @@ def set_product_out_of_stock(shopify_product_id: str) -> bool:
 # VARIANT LOCK (manual override protection)
 # ─────────────────────────────────────────────
 
+# LOCK_TYPES = ("price", "inventory", "image")
+
+# def get_variant_lock_map(shopify_product_id: str) -> dict:
+#     """Fetch every variant's lock flags in one pass.
+#     Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}"""
+#     lock_map = {}
+#     try:
+#         res = _shopify_request(
+#             "GET", f"{_base()}/products/{shopify_product_id}.json",
+#             params={"fields": "id,variants"}, headers=_h(),
+#         )
+#         res.raise_for_status()
+#         variants = res.json().get("product", {}).get("variants", [])
+#     except Exception as e:
+#         print(f"[Lock] Failed to fetch variants for {shopify_product_id}: {e}")
+#         return lock_map
+
+#     for v in variants:
+#         vid = v["id"]
+#         flags = {"price": False, "inventory": False, "image": False}
+#         try:
+#             mf_res = _shopify_request(
+#                 "GET", f"{_base()}/variants/{vid}/metafields.json",
+#                 params={"namespace": "sync"}, headers=_h(),
+#             )
+#             if mf_res.status_code == 200:
+#                 for mf in mf_res.json().get("metafields", []):
+#                     key = mf.get("key", "")
+#                     if key.endswith("_locked") and mf.get("value") == "true":
+#                         lt = key.replace("_locked", "")
+#                         if lt in flags:
+#                             flags[lt] = True
+#             else:
+#                 print(f"[Lock] Metafield fetch failed for variant {vid}: HTTP {mf_res.status_code}")
+#         except Exception as e:
+#             print(f"[Lock] Metafield fetch failed for variant {vid}: {e}")
+#         lock_map[vid] = flags
+#     return lock_map
+ 
+
+_lock_cache: dict[str, tuple[float, dict]] = {}
+_LOCK_CACHE_TTL = 60  # seconds
+
 LOCK_TYPES = ("price", "inventory", "image")
 
-def get_variant_lock_map(shopify_product_id: str) -> dict:
-    """Fetch every variant's lock flags in one pass.
-    Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}"""
+# def get_variant_lock_map(shopify_product_id: str, use_cache: bool = True) -> dict:
+#     """Fetch every variant's lock flags in one pass.
+#     Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}
+#     Cached for _LOCK_CACHE_TTL seconds to avoid N sequential Shopify calls
+#     on every modal open — lock status changes infrequently."""
+#     if use_cache:
+#         cached = _lock_cache.get(shopify_product_id)
+#         if cached and (_time.time() - cached[0]) < _LOCK_CACHE_TTL:
+#             return cached[1]
+
+#     lock_map = {}
+#     try:
+#         res = _shopify_request(
+#             "GET", f"{_base()}/products/{shopify_product_id}.json",
+#             params={"fields": "id,variants"}, headers=_h(),
+#         )
+#         res.raise_for_status()
+#         variants = res.json().get("product", {}).get("variants", [])
+#     except Exception as e:
+#         print(f"[Lock] Failed to fetch variants for {shopify_product_id}: {e}")
+#         return lock_map
+
+#     for v in variants:
+#         vid = v["id"]
+#         flags = {"price": False, "inventory": False, "image": False}
+#         try:
+#             mf_res = _shopify_request(
+#                 "GET", f"{_base()}/variants/{vid}/metafields.json",
+#                 params={"namespace": "sync"}, headers=_h(),
+#             )
+#             if mf_res.status_code == 200:
+#                 for mf in mf_res.json().get("metafields", []):
+#                     key = mf.get("key", "")
+#                     if key.endswith("_locked") and mf.get("value") == "true":
+#                         lt = key.replace("_locked", "")
+#                         if lt in flags:
+#                             flags[lt] = True
+#             else:
+#                 print(f"[Lock] Metafield fetch failed for variant {vid}: HTTP {mf_res.status_code}")
+#         except Exception as e:
+#             print(f"[Lock] Metafield fetch failed for variant {vid}: {e}")
+#         lock_map[vid] = flags
+
+#     _lock_cache[shopify_product_id] = (_time.time(), lock_map)
+#     return lock_map
+
+def get_variant_lock_map(shopify_product_id: str, use_cache: bool = True) -> dict:
+    """
+    Fetch every variant's lock flags in ONE GraphQL call (instead of 1 + N
+    sequential REST calls). Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}
+    Cached for _LOCK_CACHE_TTL seconds.
+    """
+    if use_cache:
+        cached = _lock_cache.get(shopify_product_id)
+        if cached and (_time.time() - cached[0]) < _LOCK_CACHE_TTL:
+            return cached[1]
+
     lock_map = {}
+    query = """
+    query($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) {
+          edges {
+            node {
+              id
+              metafields(namespace: "sync", first: 10) {
+                edges { node { key value } }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
     try:
-        res = _shopify_request(
-            "GET", f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"}, headers=_h(),
-        )
-        res.raise_for_status()
-        variants = res.json().get("product", {}).get("variants", [])
+        data = _graphql(query, {"id": _product_gid(shopify_product_id)})
+        product = data.get("product") or {}
+        edges = product.get("variants", {}).get("edges", [])
+        for edge in edges:
+            node = edge["node"]
+            vid = int(_numeric_id_from_gid(node["id"]))
+            flags = {"price": False, "inventory": False, "image": False}
+            for mf_edge in node.get("metafields", {}).get("edges", []):
+                mf = mf_edge["node"]
+                key = mf.get("key", "")
+                if key.endswith("_locked") and mf.get("value") == "true":
+                    lt = key.replace("_locked", "")
+                    if lt in flags:
+                        flags[lt] = True
+            lock_map[vid] = flags
     except Exception as e:
-        print(f"[Lock] Failed to fetch variants for {shopify_product_id}: {e}")
+        print(f"[Lock] GraphQL fetch failed for {shopify_product_id}: {e}")
         return lock_map
 
-    for v in variants:
-        vid = v["id"]
-        flags = {"price": False, "inventory": False, "image": False}
-        try:
-            mf_res = _shopify_request(
-                "GET", f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "sync"}, headers=_h(),
-            )
-            if mf_res.status_code == 200:
-                for mf in mf_res.json().get("metafields", []):
-                    key = mf.get("key", "")
-                    if key.endswith("_locked") and mf.get("value") == "true":
-                        lt = key.replace("_locked", "")
-                        if lt in flags:
-                            flags[lt] = True
-            else:
-                print(f"[Lock] Metafield fetch failed for variant {vid}: HTTP {mf_res.status_code}")
-        except Exception as e:
-            print(f"[Lock] Metafield fetch failed for variant {vid}: {e}")
-        lock_map[vid] = flags
+    _lock_cache[shopify_product_id] = (_time.time(), lock_map)
     return lock_map
+
+
+def _invalidate_lock_cache(shopify_product_id: str):
+    _lock_cache.pop(shopify_product_id, None)
+
+
+
 
 
 def get_locked_variant_ids(shopify_product_id: str, lock_type: str) -> set:
@@ -1464,7 +1575,6 @@ def set_variant_lock(variant_id: int, lock_type: str, locked: bool) -> bool:
         print(f"[Lock] Failed to set {lock_type} lock for variant {variant_id}: {e}")
         return False
 
-
 def _throttle():
     global _last_call_time
     with _rate_lock:
@@ -1492,3 +1602,143 @@ def _shopify_request(method: str, url: str, max_retries: int = 5, **kwargs) -> r
         time.sleep(delay)
     print(f"[Shopify][RateLimit] Giving up after {max_retries} retries: {method} {url}")
     return res
+
+def _fetch_inventory_levels_bulk(inventory_item_ids: list) -> dict:
+    """
+    Returns {inventory_item_id: {location_id: available}} using Shopify's
+    batch inventory_levels endpoint — ONE call covers many items across
+    ALL their locations, instead of one call per item per location.
+    Shopify allows up to 50 inventory_item_ids per request.
+    """
+    if not inventory_item_ids:
+        return {}
+    levels_map = {}
+    CHUNK = 50
+    for i in range(0, len(inventory_item_ids), CHUNK):
+        chunk = inventory_item_ids[i:i + CHUNK]
+        ids_param = ",".join(str(x) for x in chunk)
+        try:
+            res = _shopify_request(
+                "GET", f"{_base()}/inventory_levels.json",
+                params={"inventory_item_ids": ids_param, "limit": 250},
+                headers=_h(), timeout=20,
+            )
+            if res.status_code == 200:
+                for lvl in res.json().get("inventory_levels", []):
+                    iid = lvl["inventory_item_id"]
+                    levels_map.setdefault(iid, {})[lvl["location_id"]] = lvl.get("available", 0)
+            else:
+                print(f"[Inventory] Bulk levels fetch failed: HTTP {res.status_code}")
+        except Exception as e:
+            print(f"[Inventory] Bulk levels fetch error: {e}")
+    return levels_map
+
+def _graphql_url() -> str:
+    shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
+    return f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/graphql.json"
+
+
+def _graphql(query: str, variables: dict = None) -> dict:
+    """Single throttled/retried POST to Shopify's GraphQL Admin API."""
+    payload = {"query": query, "variables": variables or {}}
+    res = _shopify_request("POST", _graphql_url(), json=payload, headers=_h(), timeout=30)
+    res.raise_for_status()
+    data = res.json()
+    if "errors" in data:
+        raise HTTPException(502, f"Shopify GraphQL error: {data['errors']}")
+    return data.get("data", {})
+
+
+def _variant_gid(variant_id) -> str:
+    return f"gid://shopify/ProductVariant/{variant_id}"
+
+def _product_gid(product_id) -> str:
+    return f"gid://shopify/Product/{product_id}"
+
+def _inventory_item_gid(item_id) -> str:
+    return f"gid://shopify/InventoryItem/{item_id}"
+
+def _location_gid(location_id) -> str:
+    return f"gid://shopify/Location/{location_id}"
+
+def _numeric_id_from_gid(gid: str) -> str:
+    return gid.rsplit("/", 1)[-1]
+
+def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) -> dict:
+    """
+    variant_prices: [{"variant_id": 123, "price": "19.99"}, ...]
+    Updates ALL variant prices in ONE GraphQL mutation instead of N sequential REST PUTs.
+    Returns {"success": bool, "updated": int, "errors": list}
+    """
+    if not variant_prices:
+        return {"success": True, "updated": 0, "errors": []}
+
+    mutation = """
+    mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+        productVariants { id price }
+        userErrors { field message }
+      }
+    }
+    """
+    variants_input = [
+        {"id": _variant_gid(v["variant_id"]), "price": str(v["price"])}
+        for v in variant_prices
+    ]
+    try:
+        data = _graphql(mutation, {
+            "productId": _product_gid(shopify_product_id),
+            "variants": variants_input,
+        })
+        result = data.get("productVariantsBulkUpdate", {})
+        errors = result.get("userErrors", [])
+        updated = len(result.get("productVariants", []))
+        if errors:
+            print(f"[BulkPrice] userErrors: {errors}")
+        return {"success": updated > 0, "updated": updated, "errors": errors}
+    except Exception as e:
+        print(f"[BulkPrice] Mutation failed: {e}")
+        return {"success": False, "updated": 0, "errors": [str(e)]}
+
+
+def bulk_set_inventory_quantities(quantities: list) -> dict:
+    """
+    quantities: [{"inventory_item_id": 111, "location_id": 222, "quantity": 5}, ...]
+    Sets inventory across MANY item/location pairs in ONE GraphQL mutation,
+    instead of N REST calls per variant per location.
+    Returns {"success": bool, "errors": list}
+    """
+    if not quantities:
+        return {"success": True, "errors": []}
+
+    mutation = """
+    mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+      inventorySetQuantities(input: $input) {
+        userErrors { field message }
+      }
+    }
+    """
+    input_quantities = [
+        {
+            "inventoryItemId": _inventory_item_gid(q["inventory_item_id"]),
+            "locationId": _location_gid(q["location_id"]),
+            "quantity": q["quantity"],
+        }
+        for q in quantities
+    ]
+    try:
+        data = _graphql(mutation, {
+            "input": {
+                "name": "available",
+                "reason": "correction",
+                "ignoreCompareQuantity": True,
+                "quantities": input_quantities,
+            }
+        })
+        errors = data.get("inventorySetQuantities", {}).get("userErrors", [])
+        if errors:
+            print(f"[BulkInventory] userErrors: {errors}")
+        return {"success": not errors, "errors": errors}
+    except Exception as e:
+        print(f"[BulkInventory] Mutation failed: {e}")
+        return {"success": False, "errors": [str(e)]}

@@ -574,6 +574,58 @@ def list_products(
 
 
 
+# @app.put("/dashboard/products/{product_id}")
+# def update_product(product_id: int, payload: dict, db: Session = Depends(get_db)):
+#     p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not p:
+#         raise HTTPException(status_code=404, detail="Product not found")
+
+#     if "custom_title" in payload:
+#         p.custom_title = payload["custom_title"] or None
+#     if "custom_price" in payload:
+#         p.custom_price = payload["custom_price"] or None
+#     if "custom_rating" in payload:
+#         try:
+#             val = float(payload["custom_rating"]) if payload["custom_rating"] else None
+#             p.custom_rating = val
+#         except:
+#             p.custom_rating = None
+#     if "custom_description" in payload:
+#         p.custom_description = payload["custom_description"] or None
+#     if "track_price" in payload:
+#         p.track_price = bool(payload["track_price"])
+
+#     db.commit()
+#     db.refresh(p)
+
+#     shopify_synced = False
+#     if p.shopify_product_id:
+#         try:
+#             from .shopify import update_shopify_product
+#             update_shopify_product(p.shopify_product_id, {
+#                 "title": p.custom_title or p.original_title,
+#                 "price": p.custom_price or p.original_price,
+#                 "body_html": p.custom_description or p.original_description or "",
+#                 "rating": p.custom_rating or p.avg_rating,
+#             })
+#             shopify_synced = True
+#         except Exception as e:
+#             print(f"Shopify sync failed: {e}")
+#             shopify_synced = False
+#     else:
+#         shopify_synced = None
+
+#     return {
+#         "message": "Product updated",
+#         "shopify_synced": shopify_synced,
+#         "product": {
+#             "id": p.id,
+#             "title": p.custom_title or p.original_title,
+#             "price": p.custom_price or p.original_price,
+#         }
+#     }
+
+
 @app.put("/dashboard/products/{product_id}")
 def update_product(product_id: int, payload: dict, db: Session = Depends(get_db)):
     p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
@@ -602,9 +654,15 @@ def update_product(product_id: int, payload: dict, db: Session = Depends(get_db)
     if p.shopify_product_id:
         try:
             from .shopify import update_shopify_product
+            # NOTE: "price" is intentionally omitted here. Per-variant pricing
+            # is handled separately by /update-variant-prices right after this
+            # call from the frontend modal. Including "price" here used to
+            # force a full GET + sequential PUT over every variant, setting
+            # them all to one flat price — which was then immediately
+            # overwritten by the correct per-variant prices, doubling the
+            # number of Shopify API round-trips on every save.
             update_shopify_product(p.shopify_product_id, {
                 "title": p.custom_title or p.original_title,
-                "price": p.custom_price or p.original_price,
                 "body_html": p.custom_description or p.original_description or "",
                 "rating": p.custom_rating or p.avg_rating,
             })
@@ -624,6 +682,7 @@ def update_product(product_id: int, payload: dict, db: Session = Depends(get_db)
             "price": p.custom_price or p.original_price,
         }
     }
+
 
 
 @app.delete("/dashboard/products/{product_id}")
@@ -2199,17 +2258,162 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
 # Use this when the user edits each variant's price separately in the modal
 # ─────────────────────────────────────────────
 
+# @app.post("/dashboard/products/{product_id}/update-variant-prices")
+# def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(get_db)):
+#     """
+#     payload: {
+#         "variants": [
+#             {"variant_id": 123456, "price": "19.99", "inventory_quantity": 10},
+#             {"variant_id": 123457, "price": "21.99", "inventory_quantity": 0}
+#         ]
+#     }
+#     inventory_quantity is optional per-variant — if omitted, inventory is left untouched.
+#     """
+#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not product:
+#         raise HTTPException(404, "Product not found")
+#     if not product.shopify_product_id:
+#         raise HTTPException(400, "Product has no Shopify ID linked")
+
+#     variants_payload = payload.get("variants", [])
+#     if not variants_payload:
+#         raise HTTPException(400, "No variants provided")
+
+#     from .shopify import _base, _h
+
+#     # ── 1. Update prices ──
+#     # ── 1. Update prices — per-variant PUT so image_id/inventory links survive ──
+     
+
+#     updated_variants = []
+#     for v in variants_payload:
+#         vid = v.get("variant_id")
+#         price = v.get("price")
+#         if vid is None or price is None:
+#             continue
+#         try:
+#             updated_variants.append({"id": int(vid), "price": str(float(price))})
+#         except (ValueError, TypeError):
+#             raise HTTPException(400, f"Invalid price for variant {vid}")
+
+#     if not updated_variants:
+#         raise HTTPException(400, "No valid variant updates provided")
+
+#     price_success = 0
+#     for uv in updated_variants:
+#         try:
+#             res = requests.put(
+#                 f"{_base()}/variants/{uv['id']}.json",
+#                 json={"variant": {"id": uv["id"], "price": uv["price"]}},
+#                 headers=_h(), timeout=20,
+#             )
+#             res.raise_for_status()
+#             price_success += 1
+#         except Exception as e:
+#             print(f"[VariantEdit] Price update failed for variant {uv['id']}: {e}")
+
+#     if price_success == 0:
+#         raise HTTPException(502, "Shopify variant price update failed for all variants")
+
+#     # ── 2. Update inventory (multi-location safe) ──
+#     inventory_updates = {}
+#     for v in variants_payload:
+#         vid = v.get("variant_id")
+#         qty = v.get("inventory_quantity")
+#         if vid is not None and qty is not None:
+#             try:
+#                 inventory_updates[int(vid)] = int(qty)
+#             except (ValueError, TypeError):
+#                 continue
+
+#     inventory_updated_count = 0
+#     if inventory_updates:
+#         vres = requests.get(
+#             f"{_base()}/products/{product.shopify_product_id}.json",
+#             params={"fields": "id,variants"},
+#             headers=_h(), timeout=15,
+#         )
+#         if vres.status_code == 200:
+#             shopify_variants = vres.json().get("product", {}).get("variants", [])
+#             variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
+
+#             # Fetch ALL locations — not just the first — to avoid double counting
+#             loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+#             locations = []
+#             if loc_res.status_code == 200:
+#                 locations = loc_res.json().get("locations", [])
+
+#             if locations:
+#                 primary_location_id = locations[0]["id"]
+#                 other_location_ids = [loc["id"] for loc in locations[1:]]
+
+#                 for vid, qty in inventory_updates.items():
+#                     inventory_item_id = variant_inv_item_map.get(vid)
+#                     if not inventory_item_id:
+#                         continue
+#                     try:
+#                         # Set target quantity at the primary location
+#                         set_res = requests.post(
+#                             f"{_base()}/inventory_levels/set.json",
+#                             json={
+#                                 "location_id": primary_location_id,
+#                                 "inventory_item_id": inventory_item_id,
+#                                 "available": qty,
+#                             },
+#                             headers=_h(), timeout=20,
+#                         )
+#                         ok = set_res.status_code == 200
+
+#                         # Zero out every other location so totals don't double up
+#                         for other_loc_id in other_location_ids:
+#                             try:
+#                                 requests.post(
+#                                     f"{_base()}/inventory_levels/set.json",
+#                                     json={
+#                                         "location_id": other_loc_id,
+#                                         "inventory_item_id": inventory_item_id,
+#                                         "available": 0,
+#                                     },
+#                                     headers=_h(), timeout=20,
+#                                 )
+#                             except Exception as e:
+#                                 print(f"[VariantEdit] Error zeroing location {other_loc_id}: {e}")
+
+#                         if ok:
+#                             inventory_updated_count += 1
+#                             print(f"[VariantEdit] Inventory set for variant {vid}: {qty} "
+#                                   f"@ location {primary_location_id}"
+#                                   f"{', zeroed others' if other_location_ids else ''}")
+#                         else:
+#                             print(f"[VariantEdit] Inventory set failed for variant {vid}: {set_res.text}")
+#                     except Exception as e:
+#                         print(f"[VariantEdit] Inventory error for variant {vid}: {e}")
+#             else:
+#                 print("[VariantEdit] No Shopify location found — skipping inventory update")
+#         else:
+#             print(f"[VariantEdit] Failed to fetch variants for inventory update: {vres.text}")
+
+#     # Switch to manual mode since the user explicitly set prices per-variant
+#     product.price_mode = "manual"
+#     product.price_increase = 0.0
+#     if updated_variants:
+#         product.custom_price = updated_variants[0]["price"]
+#     db.commit()
+
+#     msg = f"Updated {len(updated_variants)} variant price(s) (manual mode)"
+#     if inventory_updates:
+#         msg += f" · {inventory_updated_count}/{len(inventory_updates)} inventory level(s) updated"
+
+#     return {
+#         "message": msg,
+#         "price_mode": "manual",
+#         "updated": len(updated_variants),
+#         "inventory_updated": inventory_updated_count,
+#     }
+
+
 @app.post("/dashboard/products/{product_id}/update-variant-prices")
 def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(get_db)):
-    """
-    payload: {
-        "variants": [
-            {"variant_id": 123456, "price": "19.99", "inventory_quantity": 10},
-            {"variant_id": 123457, "price": "21.99", "inventory_quantity": 0}
-        ]
-    }
-    inventory_quantity is optional per-variant — if omitted, inventory is left untouched.
-    """
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
@@ -2220,43 +2424,32 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     if not variants_payload:
         raise HTTPException(400, "No variants provided")
 
-    from .shopify import _base, _h
+    from .shopify import (
+        _base, _h, _shopify_request,
+        bulk_update_variant_prices, bulk_set_inventory_quantities,
+        _invalidate_lock_cache,
+    )
 
-    # ── 1. Update prices ──
-    # ── 1. Update prices — per-variant PUT so image_id/inventory links survive ──
-     
-
-    updated_variants = []
+    # ── 1. Prices — ONE GraphQL mutation for all variants ──
+    price_updates = []
     for v in variants_payload:
         vid = v.get("variant_id")
         price = v.get("price")
         if vid is None or price is None:
             continue
         try:
-            updated_variants.append({"id": int(vid), "price": str(float(price))})
+            price_updates.append({"variant_id": int(vid), "price": str(float(price))})
         except (ValueError, TypeError):
             raise HTTPException(400, f"Invalid price for variant {vid}")
 
-    if not updated_variants:
+    if not price_updates:
         raise HTTPException(400, "No valid variant updates provided")
 
-    price_success = 0
-    for uv in updated_variants:
-        try:
-            res = requests.put(
-                f"{_base()}/variants/{uv['id']}.json",
-                json={"variant": {"id": uv["id"], "price": uv["price"]}},
-                headers=_h(), timeout=20,
-            )
-            res.raise_for_status()
-            price_success += 1
-        except Exception as e:
-            print(f"[VariantEdit] Price update failed for variant {uv['id']}: {e}")
+    price_result = bulk_update_variant_prices(product.shopify_product_id, price_updates)
+    if not price_result["success"]:
+        raise HTTPException(502, f"Shopify variant price update failed: {price_result['errors']}")
 
-    if price_success == 0:
-        raise HTTPException(502, "Shopify variant price update failed for all variants")
-
-    # ── 2. Update inventory (multi-location safe) ──
+    # ── 2. Inventory — ONE GraphQL mutation across all variants + locations ──
     inventory_updates = {}
     for v in variants_payload:
         vid = v.get("variant_id")
@@ -2269,88 +2462,66 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
 
     inventory_updated_count = 0
     if inventory_updates:
-        vres = requests.get(
-            f"{_base()}/products/{product.shopify_product_id}.json",
-            params={"fields": "id,variants"},
-            headers=_h(), timeout=15,
+        vres = _shopify_request(
+            "GET", f"{_base()}/products/{product.shopify_product_id}.json",
+            params={"fields": "id,variants"}, headers=_h(), timeout=15,
         )
         if vres.status_code == 200:
             shopify_variants = vres.json().get("product", {}).get("variants", [])
             variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
 
-            # Fetch ALL locations — not just the first — to avoid double counting
-            loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
-            locations = []
-            if loc_res.status_code == 200:
-                locations = loc_res.json().get("locations", [])
+            loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
+            locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
 
             if locations:
                 primary_location_id = locations[0]["id"]
                 other_location_ids = [loc["id"] for loc in locations[1:]]
 
+                # Build ALL quantity entries (primary = qty, others = 0) for ONE mutation
+                bulk_quantities = []
                 for vid, qty in inventory_updates.items():
-                    inventory_item_id = variant_inv_item_map.get(vid)
-                    if not inventory_item_id:
+                    inv_item_id = variant_inv_item_map.get(vid)
+                    if not inv_item_id:
                         continue
-                    try:
-                        # Set target quantity at the primary location
-                        set_res = requests.post(
-                            f"{_base()}/inventory_levels/set.json",
-                            json={
-                                "location_id": primary_location_id,
-                                "inventory_item_id": inventory_item_id,
-                                "available": qty,
-                            },
-                            headers=_h(), timeout=20,
-                        )
-                        ok = set_res.status_code == 200
+                    bulk_quantities.append({
+                        "inventory_item_id": inv_item_id,
+                        "location_id": primary_location_id,
+                        "quantity": qty,
+                    })
+                    for other_loc_id in other_location_ids:
+                        bulk_quantities.append({
+                            "inventory_item_id": inv_item_id,
+                            "location_id": other_loc_id,
+                            "quantity": 0,
+                        })
 
-                        # Zero out every other location so totals don't double up
-                        for other_loc_id in other_location_ids:
-                            try:
-                                requests.post(
-                                    f"{_base()}/inventory_levels/set.json",
-                                    json={
-                                        "location_id": other_loc_id,
-                                        "inventory_item_id": inventory_item_id,
-                                        "available": 0,
-                                    },
-                                    headers=_h(), timeout=20,
-                                )
-                            except Exception as e:
-                                print(f"[VariantEdit] Error zeroing location {other_loc_id}: {e}")
-
-                        if ok:
-                            inventory_updated_count += 1
-                            print(f"[VariantEdit] Inventory set for variant {vid}: {qty} "
-                                  f"@ location {primary_location_id}"
-                                  f"{', zeroed others' if other_location_ids else ''}")
-                        else:
-                            print(f"[VariantEdit] Inventory set failed for variant {vid}: {set_res.text}")
-                    except Exception as e:
-                        print(f"[VariantEdit] Inventory error for variant {vid}: {e}")
+                inv_result = bulk_set_inventory_quantities(bulk_quantities)
+                if inv_result["success"]:
+                    inventory_updated_count = len(inventory_updates)
+                else:
+                    print(f"[VariantEdit] Bulk inventory errors: {inv_result['errors']}")
             else:
                 print("[VariantEdit] No Shopify location found — skipping inventory update")
         else:
             print(f"[VariantEdit] Failed to fetch variants for inventory update: {vres.text}")
 
-    # Switch to manual mode since the user explicitly set prices per-variant
     product.price_mode = "manual"
     product.price_increase = 0.0
-    if updated_variants:
-        product.custom_price = updated_variants[0]["price"]
+    if price_updates:
+        product.custom_price = price_updates[0]["price"]
     db.commit()
 
-    msg = f"Updated {len(updated_variants)} variant price(s) (manual mode)"
+    msg = f"Updated {len(price_updates)} variant price(s) (manual mode)"
     if inventory_updates:
         msg += f" · {inventory_updated_count}/{len(inventory_updates)} inventory level(s) updated"
 
     return {
         "message": msg,
         "price_mode": "manual",
-        "updated": len(updated_variants),
+        "updated": len(price_updates),
         "inventory_updated": inventory_updated_count,
     }
+
 
 
 def _job_listener(event):
@@ -4347,16 +4518,40 @@ def get_dead_mappings(db: Session = Depends(get_db)):
 
 
 @app.post("/dashboard/variants/{variant_id}/toggle-lock/{lock_type}")
-def toggle_variant_lock(variant_id: int, lock_type: str):
+def toggle_variant_lock(
+    variant_id: int,
+    lock_type: str,
+    product_id: int = Query(None),
+    mapping_id: int = Query(None),
+    db: Session = Depends(get_db),
+):
     if lock_type not in ("price", "inventory", "image"):
         raise HTTPException(400, "lock_type must be one of: price, inventory, image")
-    from .shopify import is_variant_locked, set_variant_lock
+    from .shopify import is_variant_locked, set_variant_lock, _invalidate_lock_cache
+
     currently_locked = is_variant_locked(variant_id, lock_type)
     new_state = not currently_locked
     if not set_variant_lock(variant_id, lock_type, new_state):
         raise HTTPException(502, "Failed to update variant lock")
-    return {"variant_id": variant_id, "lock_type": lock_type, "locked": new_state}
 
+    # Invalidate the lock cache for the parent product/mapping using data we
+    # already have locally — no extra Shopify API call needed, and this is
+    # 100% reliable (the previous version tried to look this up via an extra
+    # Shopify GET, which silently failed and left the cache stale).
+    shopify_id = None
+    if product_id:
+        p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+        if p:
+            shopify_id = p.shopify_product_id
+    elif mapping_id:
+        m = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+        if m:
+            shopify_id = m.shopify_product_id
+
+    if shopify_id:
+        _invalidate_lock_cache(shopify_id)
+
+    return {"variant_id": variant_id, "lock_type": lock_type, "locked": new_state}
 
 @app.get("/dashboard/products/{product_id}/variant-locks")
 def get_variant_locks(product_id: int, db: Session = Depends(get_db)):
@@ -4377,16 +4572,56 @@ def get_mapping_variant_locks(mapping_id: int, db: Session = Depends(get_db)):
     from .shopify import get_variant_lock_map
     return {"locks": get_variant_lock_map(mapping.shopify_product_id)}
 
+# def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: dict) -> int:
+#     """inventory_updates: {variant_id:int -> qty:int}. Returns count updated."""
+#     from .shopify import _base, _h
+#     vres = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+#     if vres.status_code != 200:
+#         return 0
+#     shopify_variants = vres.json().get("product", {}).get("variants", [])
+#     variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
+
+#     loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+#     locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
+#     if not locations:
+#         return 0
+#     primary_location_id = locations[0]["id"]
+#     other_location_ids = [loc["id"] for loc in locations[1:]]
+
+#     updated = 0
+#     for vid, qty in inventory_updates.items():
+#         inventory_item_id = variant_inv_item_map.get(vid)
+#         if not inventory_item_id:
+#             continue
+#         try:
+#             set_res = requests.post(f"{_base()}/inventory_levels/set.json",
+#                 json={"location_id": primary_location_id, "inventory_item_id": inventory_item_id, "available": qty},
+#                 headers=_h(), timeout=20)
+#             ok = set_res.status_code == 200
+#             for other_loc_id in other_location_ids:
+#                 try:
+#                     requests.post(f"{_base()}/inventory_levels/set.json",
+#                         json={"location_id": other_loc_id, "inventory_item_id": inventory_item_id, "available": 0},
+#                         headers=_h(), timeout=20)
+#                 except Exception as e:
+#                     print(f"[Inventory] Error zeroing location {other_loc_id}: {e}")
+#             if ok:
+#                 updated += 1
+#         except Exception as e:
+#             print(f"[Inventory] Error for variant {vid}: {e}")
+#     return updated
+
 def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: dict) -> int:
     """inventory_updates: {variant_id:int -> qty:int}. Returns count updated."""
-    from .shopify import _base, _h
-    vres = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h(), timeout=15)
+    from .shopify import _base, _h, _shopify_request
+    vres = _shopify_request("GET", f"{_base()}/products/{shopify_product_id}.json",
+        params={"fields": "id,variants"}, headers=_h(), timeout=15)
     if vres.status_code != 200:
         return 0
     shopify_variants = vres.json().get("product", {}).get("variants", [])
     variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
 
-    loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
+    loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
     locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
     if not locations:
         return 0
@@ -4399,13 +4634,13 @@ def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: di
         if not inventory_item_id:
             continue
         try:
-            set_res = requests.post(f"{_base()}/inventory_levels/set.json",
+            set_res = _shopify_request("POST", f"{_base()}/inventory_levels/set.json",
                 json={"location_id": primary_location_id, "inventory_item_id": inventory_item_id, "available": qty},
                 headers=_h(), timeout=20)
             ok = set_res.status_code == 200
             for other_loc_id in other_location_ids:
                 try:
-                    requests.post(f"{_base()}/inventory_levels/set.json",
+                    _shopify_request("POST", f"{_base()}/inventory_levels/set.json",
                         json={"location_id": other_loc_id, "inventory_item_id": inventory_item_id, "available": 0},
                         headers=_h(), timeout=20)
                 except Exception as e:

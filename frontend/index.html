@@ -756,15 +756,31 @@
   
 
   // ── TOAST ──
-  function showToast(msg,type=""){
-    const el=document.getElementById("toast");
-    const icons={ok:"ti-circle-check",err:"ti-alert-circle",info:"ti-info-circle"};
-    const colors={ok:"#10b981",err:"#ef4444",info:"#6366f1"};
-    el.style.borderLeft=type?`3px solid ${colors[type]}`:"none";
-    el.innerHTML=`<i class="ti ${icons[type]||'ti-info-circle'}" style="font-size:16px;color:${colors[type]||'#94a3b8'};flex-shrink:0"></i><span>${msg}</span>`;
-    el.classList.add("show"); clearTimeout(el._t);
-    el._t=setTimeout(()=>el.classList.remove("show"),4000);
+  // function showToast(msg,type=""){
+  //   const el=document.getElementById("toast");
+  //   const icons={ok:"ti-circle-check",err:"ti-alert-circle",info:"ti-info-circle"};
+  //   const colors={ok:"#10b981",err:"#ef4444",info:"#6366f1"};
+  //   el.style.borderLeft=type?`3px solid ${colors[type]}`:"none";
+  //   el.innerHTML=`<i class="ti ${icons[type]||'ti-info-circle'}" style="font-size:16px;color:${colors[type]||'#94a3b8'};flex-shrink:0"></i><span>${msg}</span>`;
+  //   el.classList.add("show"); clearTimeout(el._t);
+  //   el._t=setTimeout(()=>el.classList.remove("show"),4000);
+  // }
+
+  // ── TOAST ──
+function showToast(msg, type="", persistent=false){
+  const el=document.getElementById("toast");
+  const icons={ok:"ti-circle-check",err:"ti-alert-circle",info:"ti-info-circle",loading:"ti-loader-2"};
+  const colors={ok:"#10b981",err:"#ef4444",info:"#6366f1",loading:"#6366f1"};
+  const spinClass = type === "loading" ? "spin" : "";
+  el.style.borderLeft = type ? `3px solid ${colors[type]}` : "none";
+  el.innerHTML = `<i class="ti ${icons[type]||'ti-info-circle'} ${spinClass}" style="font-size:16px;color:${colors[type]||'#94a3b8'};flex-shrink:0"></i><span>${msg}</span>`;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  if (!persistent){
+    el._t = setTimeout(()=>el.classList.remove("show"), 4000);
   }
+  // persistent=true means it stays until explicitly replaced by another showToast() call
+}
 
   // ── LOGIN ──
   function setStep(n){
@@ -1009,11 +1025,35 @@
     else { hideLookupPanel(); _searchTimer = setTimeout(() => loadProducts(1), 350); }
   }
 
-  async function syncProductPrice(productId){
-    showToast("Syncing price from AliExpress...","info");
-    try{const r=await fetch(`${API}/dashboard/products/${productId}/sync-price`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Sync failed");}const d=await r.json();showToast(d.message,"ok");loadProducts(prodPage);loadStats();}
-    catch(e){showToast("Sync error: "+e.message,"err");}
+  // async function syncProductPrice(productId){
+  //   showToast("Syncing price from AliExpress...","info");
+  //   try{const r=await fetch(`${API}/dashboard/products/${productId}/sync-price`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Sync failed");}const d=await r.json();showToast(d.message,"ok");loadProducts(prodPage);loadStats();}
+  //   catch(e){showToast("Sync error: "+e.message,"err");}
+  // }
+
+async function syncProductPrice(productId){
+  const btn = document.querySelector(`button[onclick="syncProductPrice(${productId})"]`);
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin" style="font-size:13px"></i>`;
   }
+  showToast("Syncing price from AliExpress… please wait","loading",true);
+  try{
+    const r=await fetch(`${API}/dashboard/products/${productId}/sync-price`,{method:"POST"});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||"Sync failed");}
+    const d=await r.json();
+    showToast(d.message,"ok");
+    loadProducts(prodPage);
+    loadStats();
+  }
+  catch(e){showToast("Sync error: "+e.message,"err");}
+  finally{
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
   async function delProduct(id){
     if(!confirm("Remove from database?\n(Product stays in Shopify)"))return;
     try{const r=await fetch(`${API}/dashboard/products/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(`HTTP ${r.status}`);showToast("Removed from database","ok");loadProducts(prodPage);loadStats();}
@@ -1128,27 +1168,56 @@
     loadVariantsForModal(p.id);
     refreshProductDetails();
   }
-  async function saveModal(){
-    const id=document.getElementById("m-dbid").value;
-    const btn=document.getElementById("btn-save-modal");
-    btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Saving…`;
-    const body={custom_title:document.getElementById("m-title").value.trim()||null,custom_rating:document.getElementById("m-rating").value.trim()||null,custom_description:document.getElementById("m-desc").value.trim()||null};
-    try{
-      const r=await fetch(`${API}/dashboard/products/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-      if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
-      const d=await r.json();
-      const variantPrices=getEditedVariantPrices();
-      let priceMsg="";
-      if(variantPrices.length>0){
-        const pr=await fetch(`${API}/dashboard/products/${id}/update-variant-prices`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({variants:variantPrices})});
-        if(!pr.ok){const pb=await pr.json().catch(()=>({}));throw new Error(pb?.detail||"Variant price update failed");}
-        const pd=await pr.json();priceMsg=" · "+pd.message;
-      }
-      closeModal();showToast((d.shopify_synced?"Saved & synced to Shopify!":"Saved to database")+priceMsg,d.shopify_synced?"ok":"info");
-      loadProducts(prodPage);loadStats();
-    }catch(e){showToast("Save failed: "+e.message,"err");}
+  // async function saveModal(){
+  //   const id=document.getElementById("m-dbid").value;
+  //   const btn=document.getElementById("btn-save-modal");
+  //   btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Saving…`;
+  //   const body={custom_title:document.getElementById("m-title").value.trim()||null,custom_rating:document.getElementById("m-rating").value.trim()||null,custom_description:document.getElementById("m-desc").value.trim()||null};
+  //   try{
+  //     const r=await fetch(`${API}/dashboard/products/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  //     if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
+  //     const d=await r.json();
+  //     const variantPrices=getEditedVariantPrices();
+  //     let priceMsg="";
+  //     if(variantPrices.length>0){
+  //       const pr=await fetch(`${API}/dashboard/products/${id}/update-variant-prices`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({variants:variantPrices})});
+  //       if(!pr.ok){const pb=await pr.json().catch(()=>({}));throw new Error(pb?.detail||"Variant price update failed");}
+  //       const pd=await pr.json();priceMsg=" · "+pd.message;
+  //     }
+  //     closeModal();showToast((d.shopify_synced?"Saved & synced to Shopify!":"Saved to database")+priceMsg,d.shopify_synced?"ok":"info");
+  //     loadProducts(prodPage);loadStats();
+  //   }catch(e){showToast("Save failed: "+e.message,"err");}
+  //   btn.disabled=false;btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
+  // }
+
+
+ async function saveModal(){
+  const id=document.getElementById("m-dbid").value;
+  const btn=document.getElementById("btn-save-modal");
+  btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Saving… please wait`;
+  showToast("Saving changes… please wait","loading",true);
+  const body={custom_title:document.getElementById("m-title").value.trim()||null,custom_rating:document.getElementById("m-rating").value.trim()||null,custom_description:document.getElementById("m-desc").value.trim()||null};
+  try{
+    const r=await fetch(`${API}/dashboard/products/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
+    const d=await r.json();
+    const variantPrices=getEditedVariantPrices();
+    let priceMsg="";
+    if(variantPrices.length>0){
+      btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Updating variant prices… please wait`;
+      showToast("Updating variant prices… please wait","loading",true);
+      const pr=await fetch(`${API}/dashboard/products/${id}/update-variant-prices`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({variants:variantPrices})});
+      if(!pr.ok){const pb=await pr.json().catch(()=>({}));throw new Error(pb?.detail||"Variant price update failed");}
+      const pd=await pr.json();priceMsg=" · "+pd.message;
+    }
+    closeModal();showToast((d.shopify_synced?"Saved & synced to Shopify!":"Saved to database")+priceMsg,d.shopify_synced?"ok":"info");
+    loadProducts(prodPage);loadStats();
+  }catch(e){showToast("Save failed: "+e.message,"err");}
+  finally{
     btn.disabled=false;btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
   }
+}
+
 
   // async function loadVariantsForModal(productId) {
   //   const wrap = document.getElementById("m-variants-wrap");
@@ -1353,18 +1422,42 @@
     });
   }
 
-  async function syncInventoryFromModal() {
-    const productId = document.getElementById("m-dbid").value;
-    if (!productId) return;
-    showToast("Pulling live stock from AliExpress…", "info");
-    try {
-      const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
-      const d = await r.json();
-      showToast(d.message, "ok");
-      await loadVariantsForModal(productId);
-    } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
+  // async function syncInventoryFromModal() {
+  //   const productId = document.getElementById("m-dbid").value;
+  //   if (!productId) return;
+  //   showToast("Pulling live stock from AliExpress…", "info");
+  //   try {
+  //     const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+  //     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+  //     const d = await r.json();
+  //     showToast(d.message, "ok");
+  //     await loadVariantsForModal(productId);
+  //   } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
+  // }
+
+async function syncInventoryFromModal() {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  const btn = document.querySelector('button[onclick="syncInventoryFromModal()"]');
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Pulling…`;
   }
+  showToast("Pulling live stock from AliExpress… please wait", "loading", true);
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+    const d = await r.json();
+    showToast(d.message, "ok");
+    await loadVariantsForModal(productId);
+  } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
 
   async function refreshProductDetails(){
     const productId=document.getElementById("m-dbid").value, aliexpressId=document.getElementById("m-aeid").value;
@@ -1589,17 +1682,38 @@
 
 
 
-  async function syncMappingImages(mappingId){
-    showToast("Syncing SKU images from AliExpress…", "info");
-    try{
-      const r = await fetch(`${API}/mappings/${mappingId}/sync-images`, { method: "POST" });
-      const d = await safeJson(r);
-      if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      showToast(d.message, "ok");
-    } catch(e){
-      showToast("Image sync error: " + e.message, "err");
-    }
+  // async function syncMappingImages(mappingId){
+  //   showToast("Syncing SKU images from AliExpress…", "info");
+  //   try{
+  //     const r = await fetch(`${API}/mappings/${mappingId}/sync-images`, { method: "POST" });
+  //     const d = await safeJson(r);
+  //     if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+  //     showToast(d.message, "ok");
+  //   } catch(e){
+  //     showToast("Image sync error: " + e.message, "err");
+  //   }
+  // }
+
+async function syncMappingImages(mappingId){
+  const btn = document.querySelector(`button[onclick="syncMappingImages(${mappingId})"]`);
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin" style="font-size:13px"></i>`;
   }
+  showToast("Syncing SKU images from AliExpress… please wait", "loading", true);
+  try{
+    const r = await fetch(`${API}/mappings/${mappingId}/sync-images`, { method: "POST" });
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(d.message, "ok");
+  } catch(e){
+    showToast("Image sync error: " + e.message, "err");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
 
   function updateMappingSelectedCount(){const c=document.querySelectorAll('.mapping-checkbox:checked').length;const s=document.getElementById('mapping-selected-count');if(s)s.innerText=`${c} selected`;}
   function extractIdFromUrl(url,type){if(!url)return"";if(type==="aliexpress"){const m=url.match(/\/item\/(\d+)\.html/);return m?m[1]:url.trim();}if(type==="shopify"){const m=url.match(/\/products\/(\d+)/);return m?m[1]:url.trim();}return url.trim();}
@@ -1613,16 +1727,38 @@
     catch(e){showToast("Error: "+e.message,"err");}
   }
   async function deleteMapping(id){if(!confirm("Delete mapping?"))return;try{const r=await fetch(`${API}/mappings/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(await r.text());showToast("Deleted","ok");await loadMappings(mappingPage);}catch(e){showToast("Delete failed: "+e.message,"err");}}
-  async function syncMappedPrice(aliexpressId){
-    try{
-      showToast("Syncing...","info");
-      const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
-      const d = await safeJson(r);
-      if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      showToast(d.message || "Prices updated", "ok");
-      await loadMappings(mappingPage);
-    } catch(e){ showToast("Sync error: " + e.message, "err"); }
+  // async function syncMappedPrice(aliexpressId){
+  //   try{
+  //     showToast("Syncing...","info");
+  //     const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
+  //     const d = await safeJson(r);
+  //     if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+  //     showToast(d.message || "Prices updated", "ok");
+  //     await loadMappings(mappingPage);
+  //   } catch(e){ showToast("Sync error: " + e.message, "err"); }
+  // }
+
+async function syncMappedPrice(aliexpressId){
+  const btn = document.querySelector(`button[onclick="syncMappedPrice('${aliexpressId}')"]`);
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Syncing…`;
   }
+  showToast("Syncing price from AliExpress… please wait","loading",true);
+  try{
+    const r = await fetch(`${API}/mappings/sync-price?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
+    const d = await safeJson(r);
+    if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(d.message || "Prices updated", "ok");
+    await loadMappings(mappingPage);
+  } catch(e){ showToast("Sync error: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
+
   async function toggleTrackMapping(id){try{const r=await fetch(`${API}/mappings/${id}/toggle-track`,{method:"POST"});if(!r.ok)throw new Error(await r.text());showToast("Tracking toggled","ok");await loadMappings(mappingPage);}catch(e){showToast("Toggle failed: "+e.message,"err");}}
   async function syncAllMapped(){try{showToast("Starting background sync...","info");const r=await fetch(`${API}/mappings/sync-all`,{method:"POST"});if(!r.ok)throw new Error(await r.text());const d=await r.json();showToast(d.message,"ok");}catch(e){showToast("Sync all failed: "+e.message,"err");}}
   function closePriceModal(){document.getElementById("price-modal").classList.remove("open");}
@@ -1718,15 +1854,35 @@
   }
 
   // ── SYNC PRODUCT IMAGES ──
-  async function syncProductImages(productId) {
-    showToast("Syncing SKU images from AliExpress…", "info");
-    try {
-      const r = await fetch(`${API}/dashboard/products/${productId}/sync-images`, { method: "POST" });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Image sync failed"); }
-      const d = await r.json();
-      showToast(d.message, "ok");
-    } catch(e) { showToast("Image sync error: " + e.message, "err"); }
+  // async function syncProductImages(productId) {
+  //   showToast("Syncing SKU images from AliExpress…", "info");
+  //   try {
+  //     const r = await fetch(`${API}/dashboard/products/${productId}/sync-images`, { method: "POST" });
+  //     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Image sync failed"); }
+  //     const d = await r.json();
+  //     showToast(d.message, "ok");
+  //   } catch(e) { showToast("Image sync error: " + e.message, "err"); }
+  // }
+
+async function syncProductImages(productId) {
+  const btn = document.querySelector(`button[onclick="syncProductImages(${productId})"]`);
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin" style="font-size:13px"></i>`;
   }
+  showToast("Syncing SKU images from AliExpress… please wait", "loading", true);
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-images`, { method: "POST" });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Image sync failed"); }
+    const d = await r.json();
+    showToast(d.message, "ok");
+  } catch(e) { showToast("Image sync error: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
 
   // ── BACKFILL SKU IMAGES ──
   async function runBackfillSkuImages() {
@@ -1750,19 +1906,44 @@
   }
 
   // ── PUSH INVENTORY TO SHOPIFY ──
-  async function pushInventoryToShopify() {
-    const productId = document.getElementById("m-dbid").value;
-    if (!productId) return;
-    showToast("Pushing live AliExpress stock to Shopify…", "info");
-    try {
-      const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
-      const d = await r.json();
-      showToast(d.message, d.inventory_updated ? "ok" : "info");
-      refreshProductDetails();
-      loadVariantsForModal(productId);
-    } catch (e) { showToast("Push failed: " + e.message, "err"); }
+  // async function pushInventoryToShopify() {
+  //   const productId = document.getElementById("m-dbid").value;
+  //   if (!productId) return;
+  //   showToast("Pushing live AliExpress stock to Shopify…", "info");
+  //   try {
+  //     const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+  //     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+  //     const d = await r.json();
+  //     showToast(d.message, d.inventory_updated ? "ok" : "info");
+  //     refreshProductDetails();
+  //     loadVariantsForModal(productId);
+  //   } catch (e) { showToast("Push failed: " + e.message, "err"); }
+  // }
+
+
+async function pushInventoryToShopify() {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  const btn = document.querySelector('button[onclick="pushInventoryToShopify()"]');
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Pushing…`;
   }
+  showToast("Pushing live AliExpress stock to Shopify… please wait", "loading", true);
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+    const d = await r.json();
+    showToast(d.message, d.inventory_updated ? "ok" : "info");
+    refreshProductDetails();
+    loadVariantsForModal(productId);
+  } catch (e) { showToast("Push failed: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
+}
 
   // ── BACKFILL VENDOR ──
   async function runBackfillVendor() {
@@ -2240,14 +2421,14 @@ async function toggleVariantLockType(btn, variantId, lockType) {
   const origHtml = btn.innerHTML;
   btn.innerHTML = `<i class="ti ti-loader-2 spin" style="font-size:10px"></i>`;
   try {
-    const r = await fetch(`${API}/dashboard/variants/${variantId}/toggle-lock/${lockType}`, { method: "POST" });
+    const productId = document.getElementById("m-dbid").value;
+    const r = await fetch(`${API}/dashboard/variants/${variantId}/toggle-lock/${lockType}?product_id=${productId}`, { method: "POST" });
     const d = await safeJson(r);
     if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
     showToast(
       `${lockType[0].toUpperCase() + lockType.slice(1)} ${d.locked ? "locked" : "unlocked"} for this variant`,
       "ok"
     );
-    const productId = document.getElementById("m-dbid").value;
     await loadVariantsForModal(productId);
   } catch (e) {
     showToast("Lock toggle failed: " + e.message, "err");
@@ -2262,11 +2443,11 @@ async function toggleMappingVariantLockType(btn, variantId, lockType) {
   const origHtml = btn.innerHTML;
   btn.innerHTML = `<i class="ti ti-loader-2 spin" style="font-size:10px"></i>`;
   try {
-    const r = await fetch(`${API}/dashboard/variants/${variantId}/toggle-lock/${lockType}`, { method: "POST" });
+    const mappingId = document.getElementById("mm-dbid").value;
+    const r = await fetch(`${API}/dashboard/variants/${variantId}/toggle-lock/${lockType}?mapping_id=${mappingId}`, { method: "POST" });
     const d = await safeJson(r);
     if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
     showToast(`${lockType[0].toUpperCase() + lockType.slice(1)} ${d.locked ? "locked" : "unlocked"}`, "ok");
-    const mappingId = document.getElementById("mm-dbid").value;
     await loadVariantsForMappingModal(mappingId);
   } catch (e) {
     showToast("Lock toggle failed: " + e.message, "err");
@@ -2292,10 +2473,39 @@ function openMappingModal(m){
 function closeMappingModal(){ document.getElementById("mapping-edit-overlay").classList.remove("open"); }
 document.getElementById("mapping-edit-overlay").addEventListener("click", function(e){ if(e.target===this) closeMappingModal(); });
 
+// async function saveMappingModal(){
+//   const id = document.getElementById("mm-dbid").value;
+//   const btn = document.getElementById("btn-save-mapping-modal");
+//   btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving…`;
+//   const body = {
+//     custom_title: document.getElementById("mm-title").value.trim() || null,
+//     custom_rating: document.getElementById("mm-rating").value.trim() || null,
+//     custom_description: document.getElementById("mm-desc").value.trim() || null
+//   };
+//   try{
+//     const r = await fetch(`${API}/mappings/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+//     if(!r.ok){ const b = await r.json().catch(()=>({})); throw new Error(b?.detail || `HTTP ${r.status}`); }
+//     const d = await r.json();
+//     const variantPrices = getEditedMappingVariantPrices();
+//     let priceMsg = "";
+//     if(variantPrices.length > 0){
+//       const pr = await fetch(`${API}/mappings/${id}/update-variant-prices`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ variants: variantPrices }) });
+//       if(!pr.ok){ const pb = await pr.json().catch(()=>({})); throw new Error(pb?.detail || "Variant price update failed"); }
+//       const pd = await pr.json(); priceMsg = " · " + pd.message;
+//     }
+//     closeMappingModal();
+//     showToast((d.shopify_synced ? "Saved & synced to Shopify!" : "Saved to database") + priceMsg, d.shopify_synced ? "ok" : "info");
+//     loadMappings(mappingPage);
+//   } catch(e){ showToast("Save failed: " + e.message, "err"); }
+//   btn.disabled = false; btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
+// }
+
+
 async function saveMappingModal(){
   const id = document.getElementById("mm-dbid").value;
   const btn = document.getElementById("btn-save-mapping-modal");
-  btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving…`;
+  btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving… please wait`;
+  showToast("Saving changes… please wait","loading",true);
   const body = {
     custom_title: document.getElementById("mm-title").value.trim() || null,
     custom_rating: document.getElementById("mm-rating").value.trim() || null,
@@ -2308,6 +2518,8 @@ async function saveMappingModal(){
     const variantPrices = getEditedMappingVariantPrices();
     let priceMsg = "";
     if(variantPrices.length > 0){
+      btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Updating variant prices… please wait`;
+      showToast("Updating variant prices… please wait","loading",true);
       const pr = await fetch(`${API}/mappings/${id}/update-variant-prices`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ variants: variantPrices }) });
       if(!pr.ok){ const pb = await pr.json().catch(()=>({})); throw new Error(pb?.detail || "Variant price update failed"); }
       const pd = await pr.json(); priceMsg = " · " + pd.message;
@@ -2316,7 +2528,9 @@ async function saveMappingModal(){
     showToast((d.shopify_synced ? "Saved & synced to Shopify!" : "Saved to database") + priceMsg, d.shopify_synced ? "ok" : "info");
     loadMappings(mappingPage);
   } catch(e){ showToast("Save failed: " + e.message, "err"); }
-  btn.disabled = false; btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
+  finally{
+    btn.disabled = false; btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
+  }
 }
 
 async function loadVariantsForMappingModal(mappingId) {
@@ -2482,10 +2696,31 @@ async function refreshMappingDetails(){
   }
 }
 
+// async function pushMappingInventoryToShopify() {
+//   const mappingId = document.getElementById("mm-dbid").value;
+//   if (!mappingId) return;
+//   showToast("Pushing live AliExpress stock to Shopify…", "info");
+//   try {
+//     const r = await fetch(`${API}/mappings/${mappingId}/sync-inventory`, { method: "POST" });
+//     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+//     const d = await r.json();
+//     showToast(d.message, d.inventory_updated ? "ok" : "info");
+//     refreshMappingDetails();
+//     loadVariantsForMappingModal(mappingId);
+//   } catch (e) { showToast("Push failed: " + e.message, "err"); }
+// }
+
 async function pushMappingInventoryToShopify() {
   const mappingId = document.getElementById("mm-dbid").value;
   if (!mappingId) return;
-  showToast("Pushing live AliExpress stock to Shopify…", "info");
+  const btn = document.querySelector('button[onclick="pushMappingInventoryToShopify()"]');
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Pushing…`;
+  }
+  showToast("Pushing live AliExpress stock to Shopify… please wait", "loading", true);
   try {
     const r = await fetch(`${API}/mappings/${mappingId}/sync-inventory`, { method: "POST" });
     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
@@ -2494,12 +2729,35 @@ async function pushMappingInventoryToShopify() {
     refreshMappingDetails();
     loadVariantsForMappingModal(mappingId);
   } catch (e) { showToast("Push failed: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
 }
+
+// async function syncMappingInventoryFromModal() {
+//   const mappingId = document.getElementById("mm-dbid").value;
+//   if (!mappingId) return;
+//   showToast("Pulling live stock from AliExpress…", "info");
+//   try {
+//     const r = await fetch(`${API}/mappings/${mappingId}/sync-inventory`, { method: "POST" });
+//     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
+//     const d = await r.json();
+//     showToast(d.message, "ok");
+//     await loadVariantsForMappingModal(mappingId);
+//   } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
+// }
 
 async function syncMappingInventoryFromModal() {
   const mappingId = document.getElementById("mm-dbid").value;
   if (!mappingId) return;
-  showToast("Pulling live stock from AliExpress…", "info");
+  const btn = document.querySelector('button[onclick="syncMappingInventoryFromModal()"]');
+  let origHtml = null;
+  if (btn) {
+    origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Pulling…`;
+  }
+  showToast("Pulling live stock from AliExpress… please wait", "loading", true);
   try {
     const r = await fetch(`${API}/mappings/${mappingId}/sync-inventory`, { method: "POST" });
     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
@@ -2507,6 +2765,9 @@ async function syncMappingInventoryFromModal() {
     showToast(d.message, "ok");
     await loadVariantsForMappingModal(mappingId);
   } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
 }
 
 </script>
