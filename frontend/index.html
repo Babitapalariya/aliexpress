@@ -2352,7 +2352,7 @@ async function pushInventoryToShopify() {
     btn.innerHTML = `<i class="ti ti-radar"></i> Scan Mappings for Dead Listings`;
   }
 
-  async function loadDeadMappings() {
+ /*  async function loadDeadMappings() {
     const wrap = document.getElementById("mapping-dead-listings-wrap");
     wrap.style.display = "";
     wrap.innerHTML = `<i class="ti ti-loader-2 spin"></i> Loading…`;
@@ -2378,11 +2378,42 @@ async function pushInventoryToShopify() {
         </div>`).join("");
       wrap.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="badge b-red"><i class="ti ti-alert-triangle"></i> ${d.count} mapping${d.count !== 1 ? "s" : ""} need remapping</span></div>${rows}`;
     } catch(e) { wrap.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`; }
-  }const LOCK_TYPE_META = {
+  } */
+
+async function loadDeadMappings() {
+  const wrap = document.getElementById("mapping-dead-listings-wrap");
+  wrap.style.display = "";
+  wrap.innerHTML = `<i class="ti ti-loader-2 spin"></i> Loading…`;
+  try {
+    const r = await fetch(`${API}/dead-mappings`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (!d.count) { wrap.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> No dead mappings found</div>`; return; }
+    const rows = d.mappings.map(m => `
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;margin-bottom:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.title || "—"}</div>
+          <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${m.aliexpress_id}</div>
+          <div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:2px">Shopify: ${m.shopify_product_id || "—"}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <a href="${m.aliexpress_url}" target="_blank"><button class="btn btn-xs" style="white-space:nowrap"><i class="ti ti-external-link"></i> AliExpress</button></a>
+          ${m.shopify_url ? `<a href="${m.shopify_url}" target="_blank"><button class="btn btn-xs btn-icon" title="View in Shopify"><i class="ti ti-brand-shopify"></i></button></a>` : ""}
+          <button class="btn btn-danger btn-xs" style="white-space:nowrap" onclick="openMappingRemapModal(${m.id}, '${m.aliexpress_id}')"><i class="ti ti-arrows-exchange"></i> Remap Now</button>
+        </div>
+      </div>`).join("");
+    wrap.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="badge b-red"><i class="ti ti-alert-triangle"></i> ${d.count} mapping${d.count !== 1 ? "s" : ""} need remapping</span></div>${rows}`;
+  } catch(e) { wrap.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`; }
+}
+  
+  
+  const LOCK_TYPE_META = {
   price:     { icon: "ti-currency-dollar", label: "Price" },
   inventory: { icon: "ti-box",             label: "Inventory" },
   image:     { icon: "ti-photo",           label: "Image" },
 };
+
+
 
 function buildLockIcons(variantId, flags) {
   return Object.keys(LOCK_TYPE_META).map(type => {
