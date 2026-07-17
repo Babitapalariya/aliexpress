@@ -1905,20 +1905,7 @@ async function syncProductImages(productId) {
     btn.innerHTML = `<i class="ti ti-photo-scan"></i> Scan & Attach SKU Images`;
   }
 
-  // ── PUSH INVENTORY TO SHOPIFY ──
-  // async function pushInventoryToShopify() {
-  //   const productId = document.getElementById("m-dbid").value;
-  //   if (!productId) return;
-  //   showToast("Pushing live AliExpress stock to Shopify…", "info");
-  //   try {
-  //     const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
-  //     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
-  //     const d = await r.json();
-  //     showToast(d.message, d.inventory_updated ? "ok" : "info");
-  //     refreshProductDetails();
-  //     loadVariantsForModal(productId);
-  //   } catch (e) { showToast("Push failed: " + e.message, "err"); }
-  // }
+ 
 
 
 async function pushInventoryToShopify() {
@@ -2473,32 +2460,6 @@ function openMappingModal(m){
 function closeMappingModal(){ document.getElementById("mapping-edit-overlay").classList.remove("open"); }
 document.getElementById("mapping-edit-overlay").addEventListener("click", function(e){ if(e.target===this) closeMappingModal(); });
 
-// async function saveMappingModal(){
-//   const id = document.getElementById("mm-dbid").value;
-//   const btn = document.getElementById("btn-save-mapping-modal");
-//   btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Saving…`;
-//   const body = {
-//     custom_title: document.getElementById("mm-title").value.trim() || null,
-//     custom_rating: document.getElementById("mm-rating").value.trim() || null,
-//     custom_description: document.getElementById("mm-desc").value.trim() || null
-//   };
-//   try{
-//     const r = await fetch(`${API}/mappings/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
-//     if(!r.ok){ const b = await r.json().catch(()=>({})); throw new Error(b?.detail || `HTTP ${r.status}`); }
-//     const d = await r.json();
-//     const variantPrices = getEditedMappingVariantPrices();
-//     let priceMsg = "";
-//     if(variantPrices.length > 0){
-//       const pr = await fetch(`${API}/mappings/${id}/update-variant-prices`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ variants: variantPrices }) });
-//       if(!pr.ok){ const pb = await pr.json().catch(()=>({})); throw new Error(pb?.detail || "Variant price update failed"); }
-//       const pd = await pr.json(); priceMsg = " · " + pd.message;
-//     }
-//     closeMappingModal();
-//     showToast((d.shopify_synced ? "Saved & synced to Shopify!" : "Saved to database") + priceMsg, d.shopify_synced ? "ok" : "info");
-//     loadMappings(mappingPage);
-//   } catch(e){ showToast("Save failed: " + e.message, "err"); }
-//   btn.disabled = false; btn.innerHTML = `<i class="ti ti-device-floppy"></i> Save Changes`;
-// }
 
 
 async function saveMappingModal(){
