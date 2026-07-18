@@ -1167,28 +1167,7 @@ async function syncProductPrice(productId){
     _productSkus = p.skus || [];
     loadVariantsForModal(p.id);
     refreshProductDetails();
-  }
-  // async function saveModal(){
-  //   const id=document.getElementById("m-dbid").value;
-  //   const btn=document.getElementById("btn-save-modal");
-  //   btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Saving…`;
-  //   const body={custom_title:document.getElementById("m-title").value.trim()||null,custom_rating:document.getElementById("m-rating").value.trim()||null,custom_description:document.getElementById("m-desc").value.trim()||null};
-  //   try{
-  //     const r=await fetch(`${API}/dashboard/products/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  //     if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}
-  //     const d=await r.json();
-  //     const variantPrices=getEditedVariantPrices();
-  //     let priceMsg="";
-  //     if(variantPrices.length>0){
-  //       const pr=await fetch(`${API}/dashboard/products/${id}/update-variant-prices`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({variants:variantPrices})});
-  //       if(!pr.ok){const pb=await pr.json().catch(()=>({}));throw new Error(pb?.detail||"Variant price update failed");}
-  //       const pd=await pr.json();priceMsg=" · "+pd.message;
-  //     }
-  //     closeModal();showToast((d.shopify_synced?"Saved & synced to Shopify!":"Saved to database")+priceMsg,d.shopify_synced?"ok":"info");
-  //     loadProducts(prodPage);loadStats();
-  //   }catch(e){showToast("Save failed: "+e.message,"err");}
-  //   btn.disabled=false;btn.innerHTML=`<i class="ti ti-device-floppy"></i> Save Changes`;
-  // }
+  } 
 
 
  async function saveModal(){
@@ -1422,19 +1401,7 @@ async function syncProductPrice(productId){
     });
   }
 
-  // async function syncInventoryFromModal() {
-  //   const productId = document.getElementById("m-dbid").value;
-  //   if (!productId) return;
-  //   showToast("Pulling live stock from AliExpress…", "info");
-  //   try {
-  //     const r = await fetch(`${API}/dashboard/products/${productId}/sync-inventory`, { method: "POST" });
-  //     if (!r.ok) { const e = await r.json(); throw new Error(e.detail || "Inventory sync failed"); }
-  //     const d = await r.json();
-  //     showToast(d.message, "ok");
-  //     await loadVariantsForModal(productId);
-  //   } catch (e) { showToast("Inventory sync error: " + e.message, "err"); }
-  // }
-
+ 
 async function syncInventoryFromModal() {
   const productId = document.getElementById("m-dbid").value;
   if (!productId) return;
