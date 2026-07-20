@@ -535,6 +535,7 @@ def list_products(
            (ImportedProduct.custom_title.ilike(search_term)) |
            (ImportedProduct.aliexpress_id.ilike(search_term)) |
            (ImportedProduct.replacement_aliexpress_id.ilike(search_term))
+           (ImportedProduct.shopify_product_id.ilike(search_term)) 
        )
     total = query.count()
     pages = math.ceil(total / page_size) if total > 0 else 1
@@ -4130,6 +4131,53 @@ def lookup_product(
     seen_imported_ids = set()
     seen_mapping_ids = set()
 
+    # def add_imported(p, reason: str):
+    #     if p.id in seen_imported_ids:
+    #         return
+    #     seen_imported_ids.add(p.id)
+    #     results.append({
+    #         "id":                        p.id,
+    #         "source":                    "imported",
+    #         "aliexpress_id":             p.aliexpress_id,
+    #         "replacement_aliexpress_id": p.replacement_aliexpress_id,
+    #         "title":                     p.custom_title or p.original_title,
+    #         "main_image":                p.main_image,
+    #         "price":                     p.custom_price or p.original_price,
+    #         "currency":                  p.currency,
+    #         "shopify_product_id":        p.shopify_product_id,
+    #         "shopify_status":            p.shopify_status,
+    #         "is_dead_listing":           p.is_dead_listing,
+    #         "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+    #         "match_reason":              reason,
+    #         "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
+    #         "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+    #                                      if p.shopify_product_id else None,
+    #     })
+
+    # def add_mapping(m, reason: str):
+    #     if m.id in seen_mapping_ids:
+    #         return
+    #     seen_mapping_ids.add(m.id)
+    #     results.append({
+    #         "id":                        m.id,
+    #         "source":                    "mapping",
+    #         "aliexpress_id":             m.aliexpress_id,
+    #         "replacement_aliexpress_id": None,
+    #         "title":                     getattr(m, "custom_title", None) or m.shopify_product_title,
+    #         "main_image":                None,
+    #         "price":                     None,
+    #         "currency":                  None,
+    #         "shopify_product_id":        m.shopify_product_id,
+    #         "shopify_status":            None,
+    #         "is_dead_listing":           m.is_dead_listing,
+    #         "imported_at":               m.created_at.isoformat() if m.created_at else None,
+    #         "match_reason":              reason,
+    #         "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
+    #         "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
+    #                                      if m.shopify_product_id else None,
+    #     })
+
+
     def add_imported(p, reason: str):
         if p.id in seen_imported_ids:
             return
@@ -4150,7 +4198,18 @@ def lookup_product(
             "match_reason":              reason,
             "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
             "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
-                                         if p.shopify_product_id else None,
+                                        if p.shopify_product_id else None,
+            # NEW — these were missing, causing blank columns in the UI
+            "price_mode":                p.price_mode,
+            "price_increase":            p.price_increase,
+            "track_price":               p.track_price,
+            "sku_count":                 p.sku_count,
+            "rating":                    p.custom_rating or p.avg_rating,
+            "avg_rating":                p.avg_rating,
+            "custom_rating":             p.custom_rating,
+            "custom_title":              p.custom_title,
+            "custom_price":              p.custom_price,
+            "custom_description":       p.custom_description,
         })
 
     def add_mapping(m, reason: str):
@@ -4173,9 +4232,19 @@ def lookup_product(
             "match_reason":              reason,
             "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
             "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
-                                         if m.shopify_product_id else None,
+                                        if m.shopify_product_id else None,
+            # NEW
+            "price_mode":                m.price_mode,
+            "price_increase":            m.price_increase,
+            "track_price":               m.track_price,
+            "sku_count":                 None,
+            "rating":                    getattr(m, "custom_rating", None),
+            "avg_rating":                None,
+            "custom_rating":             getattr(m, "custom_rating", None),
+            "custom_title":              getattr(m, "custom_title", None),
+            "custom_price":              None,
+            "custom_description":       getattr(m, "custom_description", None),
         })
-
     # ── ImportedProduct matches ──
 
     # 1. Exact current aliexpress_id

@@ -430,7 +430,10 @@
         <div class="pg-header"><div class="pg-header-left"><h2>Imported Products</h2><p>All products imported to Shopify.</p></div><button class="btn btn-primary btn-sm" onclick="goPage('import',null)"><i class="ti ti-plus"></i> Import More</button></div>
         <div class="card">
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-indigo"><i class="ti ti-packages"></i></div><div><div class="card-title">All Products</div><div class="card-sub" id="prod-count-sub">Loading…</div></div></div>
-            <div class="toolbar"><div class="search-box"><i class="ti ti-search"></i><input type="text" id="prod-search" placeholder="Search by title or ID…" oninput="searchDebounce()"/></div><button class="btn btn-sm" onclick="loadProducts()"><i class="ti ti-refresh"></i></button></div>
+            <div class="toolbar"><div class="search-box"><i class="ti ti-search"></i><input type="text" id="prod-search" placeholder="Search by title or ID…" oninput="searchDebounce()"/></div>
+            <!-- <button class="btn btn-sm" onclick="loadProducts()"><i class="ti ti-refresh"></i></button> -->
+            <button class="btn btn-sm" onclick="refreshCurrentSearch()"><i class="ti ti-refresh"></i></button>
+  </div>
           </div>
           <div class="toolbar" style="padding:12px 22px;gap:8px">
             <button class="btn btn-primary btn-sm" onclick="openBulkIncreaseModal()"><i class="ti ti-plus"></i> Bulk Increase Price</button>
@@ -1966,13 +1969,29 @@ async function pushInventoryToShopify() {
         const reasonBadge = isOldId ? `<span class="badge b-orange" style="margin-top:3px;font-size:10px"><i class="ti ti-history"></i> Old ID match</span>` : isDead ? `<span class="badge b-red" style="margin-top:3px;font-size:10px"><i class="ti ti-alert-triangle"></i> Dead listing</span>` : `<span class="badge b-green" style="margin-top:3px;font-size:10px"><i class="ti ti-circle-check"></i> ID match</span>`;
         const oldIdNote = p.replacement_aliexpress_id ? `<div style="font-size:10px;color:var(--orange);margin-top:2px;font-family:var(--mono)">Old ID: ${p.replacement_aliexpress_id}</div>` : "";
         const pj = escJson(p);
+        let modeBadge = "";
+        if (!p.track_price)
+          modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+        else if (p.price_mode === "increase")
+          modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+        else if (p.price_mode === "manual")
+          modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+        else
+          modeBadge = `<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+
         return `<tr style="${isDead ? 'background:var(--red-bg)' : isOldId ? 'background:var(--orange-bg)' : ''}">
           <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
           <td>${imgEl}</td>
           <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name || ""}</div><div style="margin-top:3px">${reasonBadge}</div>${oldIdNote}</td>
           <td><span class="td-id">${p.aliexpress_id}</span></td>
           <td><span class="td-price">${cur} ${price}</span></td>
-          <td>—</td><td>—</td><td>—</td>
+
+
+          <td>${modeBadge}</td>
+          <td style="font-size:12px;color:var(--t2)">${p.rating ? `<span style="color:var(--orange)">★</span> ${parseFloat(p.rating).toFixed(1)}` : "—"}</td>
+          <td style="text-align:center">${p.sku_count ?? "—"}</td>
+
+
           <td>${statusBadge}${deadBadge}</td>
           <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
           <td><div class="td-actions">
@@ -2727,6 +2746,13 @@ async function syncMappingInventoryFromModal() {
   finally {
     if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
   }
+}
+
+function refreshCurrentSearch() {
+  const q = document.getElementById("prod-search").value.trim();
+  if (!q) { loadProducts(prodPage); return; }
+  if (/^\d+$/.test(q)) { doSmartLookup(q); }
+  else { loadProducts(1); }
 }
 
 </script>
