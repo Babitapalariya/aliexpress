@@ -1409,27 +1409,6 @@ def update_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(g
     return {"message": f"Price updated to {new_price} (manual mode)", "product_id": mapping.shopify_product_id, "price_mode": "manual"}
 
 
-# @app.post("/mappings/{mapping_id}/increase-price")
-# def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
-#     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
-#     if not mapping:
-#         raise HTTPException(404, "Mapping not found")
-    
-#     increase_by = payload.get("increase_by")
-#     if increase_by is None:
-#         raise HTTPException(400, "increase_by amount is required")
-#     try:
-#         increase_by = float(increase_by)
-#     except ValueError:
-#         raise HTTPException(400, "Invalid amount format")
-    
-#     from .shopify import increase_shopify_product_price
-#     success = increase_shopify_product_price(mapping.shopify_product_id, increase_by)
-#     if not success:
-#         raise HTTPException(502, "Failed to increase Shopify product prices")
-    
-#     return {"message": f"Increased all variants by ${increase_by:.2f}", "product_id": mapping.shopify_product_id}
-
 
 
 
@@ -1509,7 +1488,8 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
 
     # Accumulate the markup on top of whatever has already been applied
     previous_increase = mapping.price_increase or 0.0
-    total_increase = previous_increase + increase_by
+   # total_increase = previous_increase + increase_by
+    total_increase =  increase_by
     mapping.price_mode = "increase"
     mapping.price_increase = total_increase
 
