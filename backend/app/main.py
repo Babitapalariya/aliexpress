@@ -3341,12 +3341,38 @@ def backfill_sku_images_endpoint(
 # Lets the frontend trigger a per-product image sync from the table
 # ══════════════════════════════════════════════════════════
 
+# @app.post("/dashboard/products/{product_id}/sync-images")
+# def sync_product_images(product_id: int, db: Session = Depends(get_db)):
+#     """
+#     Fetch fresh AliExpress SKU data for this product and attach any
+#     missing variant images to the linked Shopify product.
+#     """
+#     from .shopify import backfill_sku_images
+#     from .aliexpress import get_product as ali_get_product
+
+#     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+#     if not product:
+#         raise HTTPException(404, "Product not found")
+#     if not product.shopify_product_id:
+#         raise HTTPException(400, "Product has no Shopify ID linked")
+
+#     try:
+#         raw  = ali_get_product(product.aliexpress_id, db)
+#         skus = raw.get("skus", [])
+#     except Exception as e:
+#         raise HTTPException(500, f"Failed to fetch AliExpress data: {e}")
+
+#     result = backfill_sku_images(product.shopify_product_id, skus)
+#     return {
+#         "message": (
+#             f"Attached {result['attached']} image(s). "
+#             f"{result['skipped']} variant(s) already had images."
+#         ),
+#         **result,
+#     }
+
 @app.post("/dashboard/products/{product_id}/sync-images")
 def sync_product_images(product_id: int, db: Session = Depends(get_db)):
-    """
-    Fetch fresh AliExpress SKU data for this product and attach any
-    missing variant images to the linked Shopify product.
-    """
     from .shopify import backfill_sku_images
     from .aliexpress import get_product as ali_get_product
 
@@ -3363,6 +3389,16 @@ def sync_product_images(product_id: int, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Failed to fetch AliExpress data: {e}")
 
     result = backfill_sku_images(product.shopify_product_id, skus)
+
+    # NEW — keep local DB in sync so the admin table actually shows the change
+    if raw.get("main_image"):
+        product.main_image = raw["main_image"]
+    if raw.get("all_images"):
+        product.all_images = raw["all_images"]
+    if skus:
+        product.skus = skus
+    db.commit()
+
     return {
         "message": (
             f"Attached {result['attached']} image(s). "
