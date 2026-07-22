@@ -390,18 +390,21 @@ def start_scheduler():
             trigger=IntervalTrigger(hours=1),
             id="price_sync_job",
             replace_existing=True,
+            misfire_grace_time=3600,  
         )
         scheduler.add_job(
             sync_all_mapped_products_background,
             trigger=IntervalTrigger(hours=1),
             id="mapped_price_sync_job",
             replace_existing=True,
+            misfire_grace_time=3600,
         )
         scheduler.add_job(
             process_pending_imports,
             trigger=IntervalTrigger(minutes=30),
             id="pending_import_job",
             replace_existing=True,
+            misfire_grace_time=1800,
         )
 
         scheduler.start()
