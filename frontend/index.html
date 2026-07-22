@@ -597,6 +597,36 @@
               <div id="mapping-dead-listings-wrap" style="display:none;margin-top:16px"></div>
             </div>
           </div>
+
+
+          <!-- Database Backup -->
+              <div class="card">
+                <div class="card-header">
+                  <div class="card-header-left">
+                    <div class="card-icon" style="background:var(--blue-bg)"><i class="ti ti-database-export" style="color:var(--blue);font-size:18px"></i></div>
+                    <div><div class="card-title">Database Backup</div><div class="card-sub">Download a full snapshot of your database</div></div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <p style="font-size:13px;color:var(--t2);margin-bottom:16px">
+                    Downloads a complete backup of all imported products, mappings, and pending imports.
+                    You'll be asked for your admin backup key before each download.
+                  </p>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                    <button class="btn btn-primary" onclick="downloadDatabase('sql')" id="btn-download-sql">
+                      <i class="ti ti-file-database"></i> Download .SQL Backup
+                    </button>
+                    <button class="btn" onclick="downloadDatabase('json')" id="btn-download-json">
+                      <i class="ti ti-file-code"></i> Download .JSON Backup
+                    </button>
+                  </div>
+                  <div id="db-download-result" class="settings-result"></div>
+                </div>
+              </div>
+
+
+
+
         </div>
       </div>
 
@@ -2753,6 +2783,60 @@ function refreshCurrentSearch() {
   if (!q) { loadProducts(prodPage); return; }
   if (/^\d+$/.test(q)) { doSmartLookup(q); }
   else { loadProducts(1); }
+}
+
+// ── DATABASE BACKUP ──
+let _dbBackupKey = null; // remembered for this session so you don't retype every time
+
+async function downloadDatabase(format) {
+  // format: "sql" or "json"
+  if (!_dbBackupKey) {
+    const key = prompt("Enter your database backup key:");
+    if (!key) return;
+    _dbBackupKey = key;
+  }
+
+  const endpoint = format === "sql" ? "download-database-sql" : "download-database-json";
+  const url = `${API}/admin/${endpoint}?key=${encodeURIComponent(_dbBackupKey)}`;
+  const resultEl = document.getElementById("db-download-result");
+  const btn = document.getElementById(format === "sql" ? "btn-download-sql" : "btn-download-json");
+
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ti ti-loader-2 spin"></i> Preparing…`;
+  resultEl.innerHTML = "";
+
+  try {
+    // Fetch first so we can detect a wrong key (403) before triggering a download
+    const r = await fetch(url);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      if (r.status === 403) _dbBackupKey = null; // forget bad key, ask again next time
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const blob = await r.blob();
+    const disposition = r.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : `database_backup.${format}`;
+
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+
+    resultEl.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> Downloaded ${filename}</div>`;
+    showToast(`Database backup downloaded (${format.toUpperCase()})`, "ok");
+  } catch (e) {
+    resultEl.innerHTML = `<div class="badge b-red"><i class="ti ti-alert-circle"></i> ${e.message}</div>`;
+    showToast("Backup download failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
 }
 
 </script>
