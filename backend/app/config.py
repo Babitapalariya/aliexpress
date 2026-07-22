@@ -25,6 +25,8 @@ class Settings:
 
     # ── Database ────────────────────────────────
     MYSQL_URL = os.getenv("MYSQL_URL", "mysql+pymysql://root:password@localhost/aliexpress_shopify")
+    # config.py — add this line inside the Settings class
+    DB_DUMP_SECRET = os.getenv("DB_DUMP_SECRET", "")   # set a strong random value in .env
 
 
 @lru_cache

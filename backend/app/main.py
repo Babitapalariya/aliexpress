@@ -32,11 +32,13 @@ from .aliexpress import get_product, get_shipping_info
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from sqlalchemy.sql import func as sqlfunc
 from .database import SessionLocal
-
+from .db_export import router as db_export_router
 
 
 settings = get_settings()
 Base.metadata.create_all(bind=engine)
+
+
 
 scheduler = None
 
@@ -444,6 +446,8 @@ app = FastAPI(title="AliShopify Backend")
 # )
 
 app.include_router(auth_router)
+
+app.include_router(db_export_router)
 
 #app.include_router(auth_router, prefix="/api")
 
