@@ -485,9 +485,9 @@
           <div class="card-header"><div class="card-header-left"><div class="card-icon ci-blue"><i class="ti ti-link"></i></div><div><div class="card-title">Add New Mapping</div><div class="card-sub">Enter AliExpress and Shopify IDs/URLs</div></div></div></div>
           <div class="card-body">
             <div class="form-grid">
-              <div class="fg"><label>AliExpress Product ID or URL</label><input type="text" id="map-aliexpress" placeholder="e.g., 1005001234567890"/></div>
-              <div class="fg"><label>Shopify Product ID or Admin URL</label><input type="text" id="map-shopify" placeholder="e.g., 1234567890"/></div>
-              <div class="fg full"><label>Product Title (optional)</label><input type="text" id="map-title" placeholder="e.g., Blue Widget"/></div>
+              <div class="fg"><label>AliExpress Product ID or URL</label><input type="text" id="map-aliexpress"/></div>
+              <div class="fg"><label>Shopify Product ID or Admin URL</label><input type="text" id="map-shopify"/></div>
+              <div class="fg full"><label>Product Title (optional)</label><input type="text" id="map-title"/></div>
             </div>
             <div style="margin-top:16px"><button class="btn btn-primary" onclick="addMapping()"><i class="ti ti-plus"></i> Add Mapping</button></div>
           </div>
@@ -774,8 +774,8 @@
   // ALL JAVASCRIPT
   // ============================
 
-  //const API = "http://127.0.0.1:8001/api";
-  const API = "https://aliexpress.retradviews.com/api";
+  const API = "http://127.0.0.1:8001/api";
+  //const API = "https://aliexpress.retradviews.com/api";
 
   let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
   let _pendingFilter='all', _allPendingData=[], currentVariants=[];
@@ -1666,7 +1666,8 @@ async function syncInventoryFromModal() {
           ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
           <button class="btn btn-icon sm" title="Check listing status" onclick="checkMappingListingStatus(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-radar" style="font-size:13px"></i></button>
           ${m.is_dead_listing?`<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openMappingRemapModal(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>`:""}
-          <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
+          ${m.shopify_product_id?`<a href="https://admin.shopify.com/products/${m.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
+           <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
           <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
         </td>
       </tr>`;

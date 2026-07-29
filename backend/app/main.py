@@ -1774,10 +1774,12 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
     except ValueError:
         raise HTTPException(400, "Invalid amount")
 
-    previous_increase = product.price_increase or 0.0
-    total_increase = previous_increase + increase_by
+    # NOTE: Each "Increase Price" click SETS the markup to this amount,
+    # replacing any previous increase — it does NOT stack on top of prior
+    # increases. So +$5 then +$2 results in a final markup of +$2 above
+    # the AliExpress base price, not +$7.
     product.price_mode = "increase"
-    product.price_increase = total_increase
+    product.price_increase = increase_by
     product.custom_price = None
 
     try:
@@ -1792,7 +1794,7 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
     for sku in skus:
         base_price = sku.get("sale_price") or sku.get("price")
         if base_price is not None:
-            new_price = float(base_price) + total_increase
+            new_price = float(base_price) + increase_by
             sku["sale_price"] = str(new_price)
             sku["price"] = str(new_price)
 
@@ -1807,12 +1809,11 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
     db.commit()
 
     return {
-        "message": f"Increased by ${increase_by:.2f} (total markup now ${total_increase:.2f} above AliExpress base)",
+        "message": f"Price set to AliExpress base + ${increase_by:.2f} markup",
         "price_mode": "increase",
-        "price_increase": total_increase,
+        "price_increase": increase_by,
         "updated_variants": len(skus),
     }
-
 
 @app.post("/admin/backfill-sku-metafields")
 def backfill_sku_metafields(db: Session = Depends(get_db)):
