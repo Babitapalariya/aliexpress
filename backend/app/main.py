@@ -4136,219 +4136,150 @@ def lookup_product(
     q: str = Query(..., description="AliExpress ID (old or new), Shopify ID, or title keyword"),
     db: Session = Depends(get_db)
 ):
-    """
-    Find a product by:
-    - Current aliexpress_id (exact or partial) — ImportedProduct
-    - Old aliexpress_id stored in replacement_aliexpress_id (exact or partial) — ImportedProduct
-    - Shopify product ID — ImportedProduct
-    - Title keyword (partial match) — ImportedProduct
-    - AliExpress ID / Shopify ID / title — ProductMapping (mapped, not directly imported)
+    try:
+        q = q.strip()
+        if not q:
+            raise HTTPException(400, "Search query q is required")
 
-    Returns all matches with match reason and a "source" field ("imported" or "mapping")
-    so the frontend can route actions (edit, sync, increase) to the right endpoint set.
-    """
-    q = q.strip()
-    if not q:
-        raise HTTPException(400, "Search query q is required")
+        results = []
+        seen_imported_ids = set()
+        seen_mapping_ids = set()
 
-    results = []
-    seen_imported_ids = set()
-    seen_mapping_ids = set()
-
-    # def add_imported(p, reason: str):
-    #     if p.id in seen_imported_ids:
-    #         return
-    #     seen_imported_ids.add(p.id)
-    #     results.append({
-    #         "id":                        p.id,
-    #         "source":                    "imported",
-    #         "aliexpress_id":             p.aliexpress_id,
-    #         "replacement_aliexpress_id": p.replacement_aliexpress_id,
-    #         "title":                     p.custom_title or p.original_title,
-    #         "main_image":                p.main_image,
-    #         "price":                     p.custom_price or p.original_price,
-    #         "currency":                  p.currency,
-    #         "shopify_product_id":        p.shopify_product_id,
-    #         "shopify_status":            p.shopify_status,
-    #         "is_dead_listing":           p.is_dead_listing,
-    #         "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
-    #         "match_reason":              reason,
-    #         "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
-    #         "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
-    #                                      if p.shopify_product_id else None,
-    #     })
-
-    # def add_mapping(m, reason: str):
-    #     if m.id in seen_mapping_ids:
-    #         return
-    #     seen_mapping_ids.add(m.id)
-    #     results.append({
-    #         "id":                        m.id,
-    #         "source":                    "mapping",
-    #         "aliexpress_id":             m.aliexpress_id,
-    #         "replacement_aliexpress_id": None,
-    #         "title":                     getattr(m, "custom_title", None) or m.shopify_product_title,
-    #         "main_image":                None,
-    #         "price":                     None,
-    #         "currency":                  None,
-    #         "shopify_product_id":        m.shopify_product_id,
-    #         "shopify_status":            None,
-    #         "is_dead_listing":           m.is_dead_listing,
-    #         "imported_at":               m.created_at.isoformat() if m.created_at else None,
-    #         "match_reason":              reason,
-    #         "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
-    #         "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
-    #                                      if m.shopify_product_id else None,
-    #     })
+        def add_imported(p, reason: str):
+            if p.id in seen_imported_ids:
+                return
+            seen_imported_ids.add(p.id)
+            results.append({
+                "id":                        p.id,
+                "source":                    "imported",
+                "aliexpress_id":             p.aliexpress_id,
+                "replacement_aliexpress_id": p.replacement_aliexpress_id,
+                "title":                     p.custom_title or p.original_title,
+                "main_image":                p.main_image,
+                "price":                     p.custom_price or p.original_price,
+                "currency":                  p.currency,
+                "shopify_product_id":        p.shopify_product_id,
+                "shopify_status":            p.shopify_status,
+                "is_dead_listing":           p.is_dead_listing,
+                "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
+                "match_reason":              reason,
+                "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
+                "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+                                            if p.shopify_product_id else None,
+                # Previously missing — these are why Mode/Rating/SKUs showed "—" in search results
+                "avg_rating":                p.custom_rating or p.avg_rating,
+                "rating":                    p.custom_rating or p.avg_rating,
+                "sku_count":                 p.sku_count,
+                "track_price":               p.track_price,
+                "price_mode":                p.price_mode,
+                "price_increase":            p.price_increase,
+                "store_name":                p.store_name,
+            })
 
 
-    def add_imported(p, reason: str):
-        if p.id in seen_imported_ids:
-            return
-        seen_imported_ids.add(p.id)
-        results.append({
-            "id":                        p.id,
-            "source":                    "imported",
-            "aliexpress_id":             p.aliexpress_id,
-            "replacement_aliexpress_id": p.replacement_aliexpress_id,
-            "title":                     p.custom_title or p.original_title,
-            "main_image":                p.main_image,
-            "price":                     p.custom_price or p.original_price,
-            "currency":                  p.currency,
-            "shopify_product_id":        p.shopify_product_id,
-            "shopify_status":            p.shopify_status,
-            "is_dead_listing":           p.is_dead_listing,
-            "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
-            "match_reason":              reason,
-            "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
-            "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
-                                        if p.shopify_product_id else None,
-            # NEW — these were missing, causing blank columns in the UI
-            "price_mode":                p.price_mode,
-            "price_increase":            p.price_increase,
-            "track_price":               p.track_price,
-            "sku_count":                 p.sku_count,
-            "rating":                    p.custom_rating or p.avg_rating,
-            "avg_rating":                p.avg_rating,
-            "custom_rating":             p.custom_rating,
-            "custom_title":              p.custom_title,
-            "custom_price":              p.custom_price,
-            "custom_description":       p.custom_description,
-        })
 
-    def add_mapping(m, reason: str):
-        if m.id in seen_mapping_ids:
-            return
-        seen_mapping_ids.add(m.id)
-        results.append({
-            "id":                        m.id,
-            "source":                    "mapping",
-            "aliexpress_id":             m.aliexpress_id,
-            "replacement_aliexpress_id": None,
-            "title":                     getattr(m, "custom_title", None) or m.shopify_product_title,
-            "main_image":                None,
-            "price":                     None,
-            "currency":                  None,
-            "shopify_product_id":        m.shopify_product_id,
-            "shopify_status":            None,
-            "is_dead_listing":           m.is_dead_listing,
-            "imported_at":               m.created_at.isoformat() if m.created_at else None,
-            "match_reason":              reason,
-            "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
-            "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
-                                        if m.shopify_product_id else None,
-            # NEW
-            "price_mode":                m.price_mode,
-            "price_increase":            m.price_increase,
-            "track_price":               m.track_price,
-            "sku_count":                 None,
-            "rating":                    getattr(m, "custom_rating", None),
-            "avg_rating":                None,
-            "custom_rating":             getattr(m, "custom_rating", None),
-            "custom_title":              getattr(m, "custom_title", None),
-            "custom_price":              None,
-            "custom_description":       getattr(m, "custom_description", None),
-        })
-    # ── ImportedProduct matches ──
 
-    # 1. Exact current aliexpress_id
-    for p in db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == q).all():
-        add_imported(p, "Exact AliExpress ID match (current ID)")
+        def add_mapping(m, reason: str):
+            if m.id in seen_mapping_ids:
+                return
+            seen_mapping_ids.add(m.id)
+            results.append({
+                "id":                        m.id,
+                "source":                    "mapping",
+                "aliexpress_id":             m.aliexpress_id,
+                "replacement_aliexpress_id": None,
+                "title":                     getattr(m, "custom_title", None) or m.shopify_product_title,
+                "main_image":                None,
+                "price":                     None,
+                "currency":                  None,
+                "shopify_product_id":        m.shopify_product_id,
+                "shopify_status":            None,
+                "is_dead_listing":           m.is_dead_listing,
+                "imported_at":               m.created_at.isoformat() if m.created_at else None,
+                "match_reason":              reason,
+                "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
+                "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
+                                             if m.shopify_product_id else None,
+            })
 
-    # 2. Exact old aliexpress_id (stored after remap)
-    for p in db.query(ImportedProduct).filter(
-        ImportedProduct.replacement_aliexpress_id == q
-    ).all():
-        add_imported(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
+        # ── ImportedProduct matches ──
+        for p in db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == q).all():
+            add_imported(p, "Exact AliExpress ID match (current ID)")
 
-    # 3. Shopify product ID
-    for p in db.query(ImportedProduct).filter(
-        ImportedProduct.shopify_product_id == q
-    ).all():
-        add_imported(p, "Shopify product ID match")
+        for p in db.query(ImportedProduct).filter(
+            ImportedProduct.replacement_aliexpress_id == q
+        ).all():
+            add_imported(p, f"Old AliExpress ID match — product was remapped, current ID is now {p.aliexpress_id}")
 
-    # 4. Partial current aliexpress_id
-    for p in db.query(ImportedProduct).filter(
-        ImportedProduct.aliexpress_id.ilike(f"%{q}%")
-    ).all():
-        add_imported(p, "Partial AliExpress ID match (current ID)")
+        for p in db.query(ImportedProduct).filter(
+            ImportedProduct.shopify_product_id == q
+        ).all():
+            add_imported(p, "Shopify product ID match")
 
-    # 5. Partial old aliexpress_id
-    for p in db.query(ImportedProduct).filter(
-        ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
-    ).all():
-        add_imported(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
+        for p in db.query(ImportedProduct).filter(
+            ImportedProduct.aliexpress_id.ilike(f"%{q}%")
+        ).all():
+            add_imported(p, "Partial AliExpress ID match (current ID)")
 
-    # 6. Title keyword match
-    term = f"%{q}%"
-    for p in db.query(ImportedProduct).filter(
-        (ImportedProduct.original_title.ilike(term)) |
-        (ImportedProduct.custom_title.ilike(term))
-    ).all():
-        add_imported(p, "Title keyword match")
+        for p in db.query(ImportedProduct).filter(
+            ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
+        ).all():
+            add_imported(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
 
-    # ── ProductMapping matches ──
+        term = f"%{q}%"
+        for p in db.query(ImportedProduct).filter(
+            (ImportedProduct.original_title.ilike(term)) |
+            (ImportedProduct.custom_title.ilike(term))
+        ).all():
+            add_imported(p, "Title keyword match")
 
-    # 7. Exact aliexpress_id
-    for m in db.query(ProductMapping).filter(ProductMapping.aliexpress_id == q).all():
-        add_mapping(m, "Exact AliExpress ID match (mapping)")
+        # ── ProductMapping matches ──
+        for m in db.query(ProductMapping).filter(ProductMapping.aliexpress_id == q).all():
+            add_mapping(m, "Exact AliExpress ID match (mapping)")
 
-    # 8. Exact shopify_product_id
-    for m in db.query(ProductMapping).filter(ProductMapping.shopify_product_id == q).all():
-        add_mapping(m, "Shopify product ID match (mapping)")
+        for m in db.query(ProductMapping).filter(ProductMapping.shopify_product_id == q).all():
+            add_mapping(m, "Shopify product ID match (mapping)")
 
-    # 9. Partial aliexpress_id
-    for m in db.query(ProductMapping).filter(
-        ProductMapping.aliexpress_id.ilike(f"%{q}%")
-    ).all():
-        add_mapping(m, "Partial AliExpress ID match (mapping)")
+        for m in db.query(ProductMapping).filter(
+            ProductMapping.aliexpress_id.ilike(f"%{q}%")
+        ).all():
+            add_mapping(m, "Partial AliExpress ID match (mapping)")
 
-    # 10. Title keyword match (shopify_product_title + custom_title if present)
-    mapping_title_filter = ProductMapping.shopify_product_title.ilike(term)
-    if hasattr(ProductMapping, "custom_title"):
-        mapping_title_filter = mapping_title_filter | ProductMapping.custom_title.ilike(term)
-    for m in db.query(ProductMapping).filter(mapping_title_filter).all():
-        add_mapping(m, "Title keyword match (mapping)")
+        mapping_title_filter = ProductMapping.shopify_product_title.ilike(term)
+        if hasattr(ProductMapping, "custom_title"):
+            mapping_title_filter = mapping_title_filter | ProductMapping.custom_title.ilike(term)
+        for m in db.query(ProductMapping).filter(mapping_title_filter).all():
+            add_mapping(m, "Title keyword match (mapping)")
 
-    if not results:
+        if not results:
+            return {
+                "found":   False,
+                "count":   0,
+                "results": [],
+                "message": (
+                    f"No product found matching '{q}'. "
+                    f"If this was an AliExpress ID that was relisted under a new ID, "
+                    f"go to Settings → Dead Listing Scanner to find and remap it. "
+                    f"Or try searching by the product title keyword."
+                ),
+            }
+
         return {
-            "found":   False,
-            "count":   0,
-            "results": [],
-            "message": (
-                f"No product found matching '{q}'. "
-                f"If this was an AliExpress ID that was relisted under a new ID, "
-                f"go to Settings → Dead Listing Scanner to find and remap it. "
-                f"Or try searching by the product title keyword."
-            ),
+            "found":   True,
+            "count":   len(results),
+            "results": results,
+            "message": f"Found {len(results)} product(s) matching '{q}'",
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"[Lookup][ERROR] q={q!r}: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Lookup failed: {e}")
 
-    return {
-        "found":   True,
-        "count":   len(results),
-        "results": results,
-        "message": f"Found {len(results)} product(s) matching '{q}'",
-    }
+
+
 
 @app.post("/admin/backfill-product-skus")
 def backfill_product_skus(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):

@@ -774,8 +774,8 @@
   // ALL JAVASCRIPT
   // ============================
 
-  const API = "http://127.0.0.1:8001/api";
-  //const API = "https://aliexpress.retradviews.com/api";
+  //const API = "http://127.0.0.1:8001/api";
+  const API = "https://aliexpress.retradviews.com/api";
 
   let authUrl="", fp={}, prodPage=1, prodPages=1, _searchTimer=null, mappingPage=1, mappingPages=1;
   let _pendingFilter='all', _allPendingData=[], currentVariants=[];
@@ -1795,12 +1795,34 @@ async function syncMappedPrice(aliexpressId){
   // ── IMPORTED PRODUCT INCREASE ──
   function openIncreasePriceModalImported(productId){document.getElementById("increase-product-id").value=productId;document.getElementById("increase-amount-imported").value="";document.getElementById("increase-price-modal-imported").classList.add("open");}
   function closeIncreasePriceModalImported(){document.getElementById("increase-price-modal-imported").classList.remove("open");}
+  // async function submitPriceIncreaseImported(){
+  //   const productId=document.getElementById("increase-product-id").value, amount=document.getElementById("increase-amount-imported").value.trim();
+  //   if(!amount){showToast("Enter an amount","err");return;}
+  //   try{const r=await fetch(`${API}/dashboard/products/${productId}/increase-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({increase_by:parseFloat(amount)})});if(!r.ok)throw new Error((await r.json()).detail);const d=await r.json();showToast(d.message,"ok");closeIncreasePriceModalImported();loadProducts(prodPage);}
+  //   catch(e){showToast("Error: "+e.message,"err");}
+  // }
+
   async function submitPriceIncreaseImported(){
-    const productId=document.getElementById("increase-product-id").value, amount=document.getElementById("increase-amount-imported").value.trim();
-    if(!amount){showToast("Enter an amount","err");return;}
-    try{const r=await fetch(`${API}/dashboard/products/${productId}/increase-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({increase_by:parseFloat(amount)})});if(!r.ok)throw new Error((await r.json()).detail);const d=await r.json();showToast(d.message,"ok");closeIncreasePriceModalImported();loadProducts(prodPage);}
-    catch(e){showToast("Error: "+e.message,"err");}
+  const productId=document.getElementById("increase-product-id").value, amount=document.getElementById("increase-amount-imported").value.trim();
+  if(!amount){showToast("Enter an amount","err");return;}
+  try{
+    const r=await fetch(`${API}/dashboard/products/${productId}/increase-price`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({increase_by:parseFloat(amount)})});
+    if(!r.ok)throw new Error((await r.json()).detail);
+    const d=await r.json();
+    showToast(d.message,"ok");
+    closeIncreasePriceModalImported();
+    // Re-run whichever view is currently active instead of always resetting
+    // to the plain list — prevents a stale search debounce from firing a
+    // separate lookup call right after this reload.
+    const q = document.getElementById("prod-search")?.value.trim();
+    if (q && /^\d+$/.test(q)) {
+      await doSmartLookup(q);
+    } else {
+      await loadProducts(prodPage);
+    }
   }
+  catch(e){showToast("Error: "+e.message,"err");}
+}
 
   // ── BULK INCREASE ──
   function openBulkIncreaseModal(){
@@ -1987,57 +2009,89 @@ async function pushInventoryToShopify() {
         return;
       }
       document.getElementById("prod-count-sub").textContent = `${d.count} result${d.count !== 1 ? "s" : ""} found for ID "${q}"`;
+      
+      
+      
       tb.innerHTML = d.results.map(p => {
-        const title = p.title || "—";
-        const price = p.price || "—";
-        const cur = p.currency || "USD";
-        const date = p.imported_at ? new Date(p.imported_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
-        const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
-        const statusBadge = p.shopify_status === "active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
-        const deadBadge = p.is_dead_listing ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>` : "";
-        const isOldId = p.match_reason.toLowerCase().includes("old");
-        const isDead = p.is_dead_listing;
-        const reasonBadge = isOldId ? `<span class="badge b-orange" style="margin-top:3px;font-size:10px"><i class="ti ti-history"></i> Old ID match</span>` : isDead ? `<span class="badge b-red" style="margin-top:3px;font-size:10px"><i class="ti ti-alert-triangle"></i> Dead listing</span>` : `<span class="badge b-green" style="margin-top:3px;font-size:10px"><i class="ti ti-circle-check"></i> ID match</span>`;
-        const oldIdNote = p.replacement_aliexpress_id ? `<div style="font-size:10px;color:var(--orange);margin-top:2px;font-family:var(--mono)">Old ID: ${p.replacement_aliexpress_id}</div>` : "";
-        const pj = escJson(p);
-        let modeBadge = "";
-        if (!p.track_price)
-          modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
-        else if (p.price_mode === "increase")
-          modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
-        else if (p.price_mode === "manual")
-          modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
-        else
-          modeBadge = `<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+          const title = p.title || "—";
+          const price = p.price || "—";
+          const cur = p.currency || "USD";
+          const rating = p.rating || p.avg_rating;
+          const date = p.imported_at ? new Date(p.imported_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+          const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
+          const statusBadge = p.shopify_status === "active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
+          const deadBadge = p.is_dead_listing ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>` : "";
+          const isOldId = p.match_reason.toLowerCase().includes("old");
+          const isDead = p.is_dead_listing;
+          const reasonBadge = isOldId ? `<span class="badge b-orange" style="margin-top:3px;font-size:10px"><i class="ti ti-history"></i> Old ID match</span>` : isDead ? `<span class="badge b-red" style="margin-top:3px;font-size:10px"><i class="ti ti-alert-triangle"></i> Dead listing</span>` : `<span class="badge b-green" style="margin-top:3px;font-size:10px"><i class="ti ti-circle-check"></i> ID match</span>`;
+          const oldIdNote = p.replacement_aliexpress_id ? `<div style="font-size:10px;color:var(--orange);margin-top:2px;font-family:var(--mono)">Old ID: ${p.replacement_aliexpress_id}</div>` : "";
 
-        return `<tr style="${isDead ? 'background:var(--red-bg)' : isOldId ? 'background:var(--orange-bg)' : ''}">
-          <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
-          <td>${imgEl}</td>
-          <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name || ""}</div><div style="margin-top:3px">${reasonBadge}</div>${oldIdNote}</td>
-          <td><span class="td-id">${p.aliexpress_id}</span></td>
-          <td><span class="td-price">${cur} ${price}</span></td>
+          // Mode badge — same logic as the normal Imported Products table (fullRow),
+          // now using the track_price/price_mode/price_increase fields the backend
+          // actually returns for search results.
+          let modeBadge = "";
+          if (p.source === "imported") {
+            if (!p.track_price)
+              modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
+            else if (p.price_mode === "increase")
+              modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+            else if (p.price_mode === "manual")
+              modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+            else
+              modeBadge = `<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
+          } else {
+            modeBadge = `<span class="badge b-gray">Mapping</span>`;
+          }
 
+          const ratingDisplay = rating ? `<span style="color:var(--orange)">★</span> ${parseFloat(rating).toFixed(1)}` : "—";
+          const skuDisplay = p.sku_count || "—";
 
-          <td>${modeBadge}</td>
-          <td style="font-size:12px;color:var(--t2)">${p.rating ? `<span style="color:var(--orange)">★</span> ${parseFloat(p.rating).toFixed(1)}` : "—"}</td>
-          <td style="text-align:center">${p.sku_count ?? "—"}</td>
-
-
-          <td>${statusBadge}${deadBadge}</td>
-          <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
-          <td><div class="td-actions">
-            <button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
-            <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncProductImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
-            <button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>
-            <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
-            <button class="btn btn-icon sm" title="Check listing status" onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-radar" style="font-size:13px"></i></button>
-            ${isDead ? `<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>` : ""}
-            ${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>` : ""}
-            <button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
-          </div></td>
-        </tr>`;
-      }).join("");
-      document.querySelectorAll(".product-checkbox").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+          const pj = escJson(p);
+          return `<tr style="${isDead ? 'background:var(--red-bg)' : isOldId ? 'background:var(--orange-bg)' : ''}">
+            <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
+            <td>${imgEl}</td>
+            <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name || ""}</div><div style="margin-top:3px">${reasonBadge}</div>${oldIdNote}</td>
+            <td><span class="td-id">${p.aliexpress_id}</span></td>
+            <td><span class="td-price">${cur} ${price}</span></td>
+            <td>${modeBadge}</td>
+            <td style="font-size:12px;color:var(--t2)">${ratingDisplay}</td>
+            <td style="font-size:12px;color:var(--t2);text-align:center">${skuDisplay}</td>
+            <td>${statusBadge}${deadBadge}</td>
+            <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
+            <td><div class="td-actions">
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+              }
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncProductImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>`
+              }
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModal(${p.id}, '${p.shopify_product_id}')"><i class="ti ti-plus" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>`
+              }
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-primary btn-icon sm" title="Edit" onclick='openMappingModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>`
+              }
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-icon sm" title="Check listing status" onclick="checkMappingListingStatus(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-radar" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-icon sm" title="Check listing status" onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-radar" style="font-size:13px"></i></button>`
+              }
+              ${isDead
+                ? (p.source === 'mapping'
+                    ? `<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openMappingRemapModal(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>`
+                    : `<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>`)
+                : ""}
+              ${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>` : ""}
+              ${p.source === 'imported' ? `<button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ""}
+            </div></td>
+          </tr>`;
+          }).join("");
+          document.querySelectorAll(".product-checkbox").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+      
+      
       const hasOldIdMatch = d.results.some(p => p.match_reason.toLowerCase().includes("old"));
       if (hasOldIdMatch) {
         showLookupPanel(`<div style="display:flex;align-items:center;gap:10px;padding:10px 4px;font-size:12px;color:#92400e"><i class="ti ti-history" style="color:var(--orange);font-size:16px;flex-shrink:0"></i><span>Found by <strong>old AliExpress ID</strong> — this product was remapped. The current active ID is shown in the table above.</span><button class="btn btn-xs" style="margin-left:auto;flex-shrink:0" onclick="document.getElementById('prod-search').value='';hideLookupPanel();loadProducts(1)"><i class="ti ti-x"></i> Clear</button></div>`);
