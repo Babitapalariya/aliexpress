@@ -8,6 +8,22 @@ Key findings from debug endpoint:
 - Sales count: ae_item_base_info_dto.sales_count (NOT lastest_volume)
 - Extra data: package_info_dto, ae_store_info available
 - SKU images: sku.ae_sku_property_dtos[*].sku_property_value_id_long_image (first prop with image)
+
+- SKU list filtering: the DS API returns SKU combinations across EVERY
+  ship-from/ship-to location pairing, even when only one ship_to_country is
+  requested. The product detail page only shows one combo per real variant
+  (whichever location the buyer's country resolves to), so we collapse the
+  raw SKU list down to one entry per real variant.
+- Stock quirk: stock (sku_available_stock) is tracked PER location pairing,
+  not per real variant. A real variant can have genuine stock in one
+  warehouse while its specific "ship to <country>"-tagged combo reports 0 —
+  AliExpress's own logistics will still source and ship it from wherever
+  stock actually exists. So when collapsing location combos per real
+  variant, we prefer an in-stock combo over a same-variant combo that
+  happens to show 0, rather than blindly keeping whichever combo matches
+  the requested ship_to_country. This prevents variants that are genuinely
+  orderable (and show as in-stock on the live product page) from being
+  reported as out-of-stock and zeroed out in Shopify.
 """
 
 import hashlib
@@ -129,6 +145,130 @@ def _resolve_sku_info(sku: dict) -> dict:
 # Keep the old name as an alias so nothing breaks
 def _resolve_sku_label(sku: dict) -> str:
     return _resolve_sku_info(sku)["label"]
+
+
+# ─────────────────────────────────────────────
+# Ship-from location filter + stock-aware collapsing
+# ─────────────────────────────────────────────
+
+COUNTRY_CODE_TO_NAME = {
+    "US": "United States", "GB": "United Kingdom", "CA": "Canada", "AU": "Australia",
+    "DE": "Germany", "FR": "France", "ES": "Spain", "IT": "Italy", "NL": "Netherlands",
+    "BE": "Belgium", "PL": "Poland", "SE": "Sweden", "RU": "Russian Federation",
+    "BR": "Brazil", "MX": "Mexico", "JP": "Japan", "KR": "South Korea", "SG": "Singapore",
+    "NZ": "New Zealand", "ZA": "South Africa", "AE": "United Arab Emirates",
+    "SA": "Saudi Arabia", "TR": "Turkey", "TH": "Thailand", "VN": "Vietnam",
+    "PH": "Philippines", "ID": "Indonesia", "MY": "Malaysia", "HK": "Hong Kong",
+    "TW": "Taiwan", "IL": "Israel", "UA": "Ukraine", "CZ": "Czech Republic",
+    "CL": "Chile", "CN": "China Mainland",
+}
+
+KNOWN_SHIP_LOCATIONS = {v.lower() for v in COUNTRY_CODE_TO_NAME.values()} | {
+    "china mainland", "hong kong", "macau",
+}
+
+
+def _sku_stock_int(sku: dict):
+    """Safely coerce a sku's 'stock' field to int, or None if unusable."""
+    val = sku.get("stock")
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _filter_skus_by_ship_location(skus: list, ship_to_country: str) -> list:
+    """
+    Collapses raw SKU combinations down to one entry per REAL variant.
+
+    The DS API frequently returns SKU combos across every ship-from/ship-to
+    location pairing even when only one ship_to_country was requested, so a
+    product can report far more SKUs (and different stock numbers) than the
+    buyer actually sees on the product detail page.
+
+    For each group of combos that share the same underlying variant (same
+    label with the trailing location segment removed), this picks:
+      1. The combo matching the requested ship_to_country, IF it has stock.
+      2. Otherwise, any other location's combo for that same variant that
+         has stock (AliExpress logistics can fulfil from any warehouse that
+         has it, regardless of which location combo the buyer's country
+         happens to map to).
+      3. Otherwise, the combo matching the requested ship_to_country even
+         with 0/unknown stock, so price/label/image data is still correct.
+      4. Otherwise, just the first combo in the group.
+
+    Falls back to returning the unfiltered list if no location dimension
+    is detected, or if collapsing would wipe out every SKU (safety net).
+    """
+    if not skus:
+        return skus
+
+    target_name = COUNTRY_CODE_TO_NAME.get((ship_to_country or "US").upper())
+    if not target_name:
+        return skus  # unrecognized country code — can't safely filter
+    target_name_lower = target_name.lower()
+
+    split_labels = []
+    for sku in skus:
+        label = sku.get("label") or ""
+        parts = [p.strip() for p in label.split(" / ")]
+        split_labels.append(parts)
+
+    has_location_dimension = any(
+        len(parts) >= 2 and parts[-1].lower() in KNOWN_SHIP_LOCATIONS
+        for parts in split_labels
+    )
+    if not has_location_dimension:
+        return skus  # no ship-location dimension present, nothing to collapse
+
+    # Group combos by their base (real-variant) label
+    groups = {}
+    passthrough = []  # entries with no location suffix at all
+    for sku, parts in zip(skus, split_labels):
+        if len(parts) >= 2 and parts[-1].lower() in KNOWN_SHIP_LOCATIONS:
+            base_label = " / ".join(parts[:-1]) or parts[-1]
+            groups.setdefault(base_label, []).append((sku, parts))
+        else:
+            passthrough.append(sku)
+
+    collapsed = []
+    for base_label, entries in groups.items():
+        target_entry = None
+        for sku, parts in entries:
+            if parts[-1].lower() == target_name_lower:
+                target_entry = sku
+                break
+
+        chosen = None
+
+        # 1. Target country combo, if it actually has stock
+        if target_entry is not None and (_sku_stock_int(target_entry) or 0) > 0:
+            chosen = target_entry
+
+        # 2. Any other location's combo for this same variant that has stock
+        if chosen is None:
+            for sku, _parts in entries:
+                if (_sku_stock_int(sku) or 0) > 0:
+                    chosen = sku
+                    break
+
+        # 3. Target country combo even without stock, to preserve correct
+        #    price/label/image for this ship destination
+        if chosen is None and target_entry is not None:
+            chosen = target_entry
+
+        # 4. Last resort — just take the first combo in the group
+        if chosen is None:
+            chosen = entries[0][0]
+
+        new_sku = dict(chosen)
+        new_sku["label"] = base_label
+        collapsed.append(new_sku)
+
+    result = passthrough + collapsed
+    return result if result else skus
 
 
 # ─────────────────────────────────────────────
@@ -264,7 +404,7 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
 # Product parser
 # ─────────────────────────────────────────────
 
-def _parse_product(raw: dict) -> dict:
+def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
     result = (
         raw
         .get("aliexpress_ds_product_get_response", {})
@@ -296,7 +436,7 @@ def _parse_product(raw: dict) -> dict:
             "sku_id":       sku.get("sku_id"),
             "sku_attr":     sku.get("sku_attr"),
             "label":        info["label"],
-            "image":        info["image"],           # ← NEW: per-variant image URL
+            "image":        info["image"],           # ← per-variant image URL
             "price":        sku.get("sku_price"),
             "sale_price":   sku.get("offer_sale_price"),
             "bulk_price":   sku.get("offer_bulk_sale_price"),
@@ -304,8 +444,22 @@ def _parse_product(raw: dict) -> dict:
             "currency":     sku.get("currency_code"),
         })
 
+    # Collapse SKU combinations for other ship-from warehouses down to one
+    # per real variant — the DS API returns combos for every location, but
+    # the product page only shows one combo per real variant. Where the
+    # requested-country combo shows 0 stock but another location's combo
+    # for the same variant has real stock, that in-stock combo is used
+    # instead (AliExpress logistics fulfils from wherever stock exists,
+    # not strictly the location tied to the buyer's ship-to country).
+    skus = _filter_skus_by_ship_location(skus, ship_to_country=ship_to_country)
+
+    # Keep the raw sku_list used for inventory parsing in sync with the
+    # filtered skus, so total_stock/sku_inventory reflect the collapsed set.
+    kept_ids = {s.get("sku_id") for s in skus}
+    filtered_sku_list = [s for s in sku_list if s.get("sku_id") in kept_ids]
+
     shipping  = _parse_freight(result)
-    inventory = _parse_inventory(result, sku_list)
+    inventory = _parse_inventory(result, filtered_sku_list)
 
     return {
         # Identity
@@ -330,7 +484,8 @@ def _parse_product(raw: dict) -> dict:
         "review_count":  product.get("evaluation_count"),
         "orders":        product.get("sales_count"),
 
-        # Variants / SKUs  (now includes per-variant "image" field)
+        # Variants / SKUs (collapsed to match the product detail page,
+        # stock-aware across ship-from locations, includes per-variant "image")
         "sku_count": len(skus),
         "skus":      skus,
 
@@ -399,7 +554,7 @@ def _parse_search(raw: dict) -> dict:
 # Public API
 # ─────────────────────────────────────────────
 
-def get_product(product_id: str, db: Session = None) -> dict:
+def get_product(product_id: str, db: Session = None, ship_to_country: str = "US") -> dict:
     if db is None:
         from .database import SessionLocal
         db = SessionLocal()
@@ -414,13 +569,13 @@ def get_product(product_id: str, db: Session = None) -> dict:
             app_params={
                 "product_id":      product_id,
                 "local":           "en_US",
-                "ship_to_country": "US",
+                "ship_to_country": ship_to_country,
                 "target_currency": "USD",
             },
             access_token=token.access_token,
         )
         _check_error(raw)
-        return _parse_product(raw)
+        return _parse_product(raw, ship_to_country=ship_to_country)
 
     except HTTPException:
         raise
@@ -469,7 +624,7 @@ def search_products(keyword: str, page: int = 1, page_size: int = 20, db: Sessio
 def get_shipping_info(product_id: str, country_code: str = "US", db: Session = None) -> dict:
     """Shipping is embedded in the product response — no separate endpoint exists."""
     try:
-        product = get_product(product_id, db)
+        product = get_product(product_id, db, ship_to_country=country_code)
         info = product.get("shipping_info", {})
         return {
             "shipping_cost": info.get("cost", "Calculated at checkout"),
