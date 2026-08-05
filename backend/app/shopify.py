@@ -1084,10 +1084,187 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
 
 
 
+# def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+#     """
+#     Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity,
+#     using ONE GraphQL mutation per product instead of N sequential REST calls.
+#     """
+#     if not settings.SHOPIFY_STORE:
+#         return False
+
+#     stock_by_ae_sku = {}
+#     for sku in aliexpress_skus:
+#         ae_sku_id = str(sku.get("sku_id"))
+#         stock = sku.get("stock")
+#         if ae_sku_id and ae_sku_id != "None" and stock is not None:
+#             try:
+#                 stock_by_ae_sku[ae_sku_id] = int(stock)
+#             except (ValueError, TypeError):
+#                 continue
+
+#     if not stock_by_ae_sku and not aliexpress_skus:
+#         print("[Inventory] No AE stock data to sync")
+#         return False
+
+#     try:
+#         res = _shopify_request(
+#             "GET", f"{_base()}/products/{shopify_product_id}.json",
+#             params={"fields": "id,variants"}, headers=_h(), timeout=15,
+#         )
+#         res.raise_for_status()
+#         shopify_variants = res.json().get("product", {}).get("variants", [])
+#         if not shopify_variants:
+#             return False
+#     except Exception as e:
+#         print(f"[Inventory] Fetch error: {e}")
+#         return False
+
+#     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "inventory")
+#     if locked_variant_ids:
+#         print(f"[Inventory] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
+
+#     # ── Locations — filter to ACTIVE only (fixes "location could not be found" errors) ──
+#     try:
+#         loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
+#         loc_res.raise_for_status()
+#         all_locations = loc_res.json().get("locations", [])
+#     except Exception as e:
+#         print(f"[Inventory] Failed to fetch locations: {e}")
+#         return False
+
+#     locations = [loc for loc in all_locations if loc.get("active", True)]
+#     if not locations:
+#         print("[Inventory] No active Shopify locations found")
+#         return False
+#     if len(locations) < len(all_locations):
+#         skipped_ids = [loc["id"] for loc in all_locations if not loc.get("active", True)]
+#         print(f"[Inventory] Skipping {len(all_locations) - len(locations)} inactive location(s): {skipped_ids}")
+
+#     primary_location_id = locations[0]["id"]
+#     other_location_ids = [loc["id"] for loc in locations[1:]]
+
+#     if len(locations) > 1:
+#         print(f"[Inventory] Multi-location store ({len(locations)} active). "
+#               f"Primary={primary_location_id}, zeroing others={other_location_ids}")
+
+#     variant_ae_map = {}
+#     for variant in shopify_variants:
+#         vid = variant["id"]
+#         try:
+#             mf_res = _shopify_request(
+#                 "GET", f"{_base()}/variants/{vid}/metafields.json",
+#                 params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
+#             )
+#             if mf_res.status_code == 200:
+#                 mfs = mf_res.json().get("metafields", [])
+#                 if mfs:
+#                     variant_ae_map[vid] = mfs[0].get("value")
+#         except Exception as e:
+#             print(f"[Inventory] Metafield error for variant {vid}: {e}")
+
+#     stock_by_label = {}
+#     for sku in aliexpress_skus:
+#         label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
+#         stock = sku.get("stock")
+#         if label and stock is not None:
+#             try:
+#                 stock_by_label[label] = int(stock)
+#             except (ValueError, TypeError):
+#                 continue
+
+#     def _variant_label(variant: dict) -> str:
+#         parts = [
+#             variant.get(f"option{i}")
+#             for i in (1, 2, 3)
+#             if variant.get(f"option{i}") and variant.get(f"option{i}") != "Default Title"
+#         ]
+#         return " / ".join(parts).strip().lower()
+
+#     # ── Determine target stock per variant — per-variant fallback runs regardless of metafield matches elsewhere ──
+#     skipped_locked = 0
+#     variant_targets = {}  # {inventory_item_id: new_stock}
+
+#     for i, variant in enumerate(shopify_variants):
+#         if variant["id"] in locked_variant_ids:
+#             skipped_locked += 1
+#             continue
+
+#         new_stock = None
+#         ae_sku_id = variant_ae_map.get(variant["id"])
+
+#         if ae_sku_id and ae_sku_id in stock_by_ae_sku:
+#             new_stock = stock_by_ae_sku[ae_sku_id]
+#         else:
+#             label = _variant_label(variant)
+#             if label and label in stock_by_label:
+#                 new_stock = stock_by_label[label]
+#             elif i < len(aliexpress_skus):
+#                 stock_val = aliexpress_skus[i].get("stock")
+#                 if stock_val is not None:
+#                     try:
+#                         new_stock = int(stock_val)
+#                     except (ValueError, TypeError):
+#                         new_stock = None
+
+#         if new_stock is None:
+#             continue
+
+#         inventory_item_id = variant.get("inventory_item_id")
+#         current_stock = variant.get("inventory_quantity")
+#         if not inventory_item_id:
+#             continue
+#         if current_stock == new_stock and len(locations) <= 1:
+#             continue  # already correct on a single-location store — nothing to do
+
+#         variant_targets[inventory_item_id] = new_stock
+
+#     if skipped_locked:
+#         print(f"[Inventory] Skipped {skipped_locked} locked variant(s) for product {shopify_product_id}")
+
+#     if not variant_targets:
+#         print("[Inventory] No inventory changes needed")
+#         return False
+
+#     # ── ONE bulk GraphQL mutation: primary = target, all other active locations = 0 ──
+#     bulk_quantities = []
+#     for inventory_item_id, new_stock in variant_targets.items():
+#         bulk_quantities.append({
+#             "inventory_item_id": inventory_item_id,
+#             "location_id": primary_location_id,
+#             "quantity": new_stock,
+#         })
+#         for other_loc_id in other_location_ids:
+#             bulk_quantities.append({
+#                 "inventory_item_id": inventory_item_id,
+#                 "location_id": other_loc_id,
+#                 "quantity": 0,
+#             })
+
+#     result = bulk_set_inventory_quantities(bulk_quantities)
+#     if result["success"]:
+#         print(f"[Inventory] Bulk-updated {len(variant_targets)} variant(s) for product {shopify_product_id} "
+#               f"({len(bulk_quantities)} item/location pairs in 1 API call)")
+#         return True
+#     else:
+#         print(f"[Inventory] Bulk update failed: {result['errors']}")
+#         return False
+
+
+
+
+
+
 def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
     """
-    Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity,
-    using ONE GraphQL mutation per product instead of N sequential REST calls.
+    Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
+
+    IMPORTANT: Shopify's variant.inventory_quantity is the SUM across all
+    locations. To avoid double-counting when a store has multiple locations,
+    we set the full target quantity at the PRIMARY location and zero out
+    every other location for that inventory item.
+
+    Variants that have been manually locked (client customized name/price/image)
+    are skipped entirely — auto-sync never touches their stock.
     """
     if not settings.SHOPIFY_STORE:
         return False
@@ -1107,9 +1284,10 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         return False
 
     try:
-        res = _shopify_request(
-            "GET", f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"}, headers=_h(), timeout=15,
+        res = requests.get(
+            f"{_base()}/products/{shopify_product_id}.json",
+            params={"fields": "id,variants"},
+            headers=_h(), timeout=15,
         )
         res.raise_for_status()
         shopify_variants = res.json().get("product", {}).get("variants", [])
@@ -1119,32 +1297,29 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         print(f"[Inventory] Fetch error: {e}")
         return False
 
+    # ── Skip variants the client has manually locked ──
     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "inventory")
     if locked_variant_ids:
         print(f"[Inventory] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
 
-    # ── Locations — filter to ACTIVE only (fixes "location could not be found" errors) ──
+    # ── Get ALL locations once (cache for this call) ──
     try:
-        loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
+        loc_res = requests.get(f"{_base()}/locations.json", headers=_h(), timeout=15)
         loc_res.raise_for_status()
-        all_locations = loc_res.json().get("locations", [])
+        locations = loc_res.json().get("locations", [])
     except Exception as e:
         print(f"[Inventory] Failed to fetch locations: {e}")
         return False
 
-    locations = [loc for loc in all_locations if loc.get("active", True)]
     if not locations:
-        print("[Inventory] No active Shopify locations found")
+        print("[Inventory] No Shopify locations found")
         return False
-    if len(locations) < len(all_locations):
-        skipped_ids = [loc["id"] for loc in all_locations if not loc.get("active", True)]
-        print(f"[Inventory] Skipping {len(all_locations) - len(locations)} inactive location(s): {skipped_ids}")
 
     primary_location_id = locations[0]["id"]
     other_location_ids = [loc["id"] for loc in locations[1:]]
 
     if len(locations) > 1:
-        print(f"[Inventory] Multi-location store ({len(locations)} active). "
+        print(f"[Inventory] Multi-location store detected ({len(locations)} locations). "
               f"Primary={primary_location_id}, zeroing others={other_location_ids}")
 
     variant_ae_map = {}
@@ -1180,26 +1355,33 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         ]
         return " / ".join(parts).strip().lower()
 
-    # ── Determine target stock per variant — per-variant fallback runs regardless of metafield matches elsewhere ──
+    changes = False
     skipped_locked = 0
-    variant_targets = {}  # {inventory_item_id: new_stock}
+    unmatched_variants = []
 
     for i, variant in enumerate(shopify_variants):
         if variant["id"] in locked_variant_ids:
             skipped_locked += 1
-            continue
+            continue  # manually customized — never touch inventory here
 
         new_stock = None
         ae_sku_id = variant_ae_map.get(variant["id"])
 
+        # 1. Try THIS variant's own metafield match first (most reliable)
         if ae_sku_id and ae_sku_id in stock_by_ae_sku:
             new_stock = stock_by_ae_sku[ae_sku_id]
         else:
+            # 2. Fall back to label matching for THIS variant — regardless
+            #    of whether OTHER variants matched via metafield. A missing
+            #    metafield on one variant must never block fallback matching
+            #    for that specific variant.
             label = _variant_label(variant)
             if label and label in stock_by_label:
                 new_stock = stock_by_label[label]
+            # 3. Positional fallback as last resort for THIS variant
             elif i < len(aliexpress_skus):
-                stock_val = aliexpress_skus[i].get("stock")
+                ae_sku = aliexpress_skus[i]
+                stock_val = ae_sku.get("stock")
                 if stock_val is not None:
                     try:
                         new_stock = int(stock_val)
@@ -1207,47 +1389,66 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
                         new_stock = None
 
         if new_stock is None:
+            unmatched_variants.append(variant["id"])
             continue
 
+        current_stock = variant.get("inventory_quantity")  # SUM across all locations
         inventory_item_id = variant.get("inventory_item_id")
-        current_stock = variant.get("inventory_quantity")
+
         if not inventory_item_id:
             continue
-        if current_stock == new_stock and len(locations) <= 1:
-            continue  # already correct on a single-location store — nothing to do
 
-        variant_targets[inventory_item_id] = new_stock
+        if current_stock == new_stock:
+            if len(locations) <= 1:
+                continue
+
+        try:
+            # 1. Set the FULL target quantity at the primary location
+            set_res = requests.post(
+                f"{_base()}/inventory_levels/set.json",
+                json={
+                    "location_id": primary_location_id,
+                    "inventory_item_id": inventory_item_id,
+                    "available": new_stock,
+                },
+                headers=_h(), timeout=20,
+            )
+            set_res.raise_for_status()
+
+            # 2. Zero out every OTHER location so the total isn't doubled
+            for other_loc_id in other_location_ids:
+                try:
+                    zero_res = requests.post(
+                        f"{_base()}/inventory_levels/set.json",
+                        json={
+                            "location_id": other_loc_id,
+                            "inventory_item_id": inventory_item_id,
+                            "available": 0,
+                        },
+                        headers=_h(), timeout=20,
+                    )
+                    if zero_res.status_code not in (200, 422):
+                        print(f"[Inventory] Could not zero location {other_loc_id} "
+                              f"for variant {variant['id']}: {zero_res.text}")
+                except Exception as e:
+                    print(f"[Inventory] Error zeroing location {other_loc_id}: {e}")
+
+            changes = True
+            print(f"[Inventory] Variant {variant['id']}: total {current_stock} → {new_stock} "
+                  f"(set {new_stock} @ location {primary_location_id}"
+                  f"{', zeroed others' if other_location_ids else ''})")
+        except Exception as e:
+            print(f"[Inventory] Update failed for variant {variant['id']}: {e}")
 
     if skipped_locked:
         print(f"[Inventory] Skipped {skipped_locked} locked variant(s) for product {shopify_product_id}")
+    if unmatched_variants:
+        print(f"[Inventory] {len(unmatched_variants)} variant(s) had NO stock match at all: {unmatched_variants}")
 
-    if not variant_targets:
-        print("[Inventory] No inventory changes needed")
-        return False
+    return changes
 
-    # ── ONE bulk GraphQL mutation: primary = target, all other active locations = 0 ──
-    bulk_quantities = []
-    for inventory_item_id, new_stock in variant_targets.items():
-        bulk_quantities.append({
-            "inventory_item_id": inventory_item_id,
-            "location_id": primary_location_id,
-            "quantity": new_stock,
-        })
-        for other_loc_id in other_location_ids:
-            bulk_quantities.append({
-                "inventory_item_id": inventory_item_id,
-                "location_id": other_loc_id,
-                "quantity": 0,
-            })
 
-    result = bulk_set_inventory_quantities(bulk_quantities)
-    if result["success"]:
-        print(f"[Inventory] Bulk-updated {len(variant_targets)} variant(s) for product {shopify_product_id} "
-              f"({len(bulk_quantities)} item/location pairs in 1 API call)")
-        return True
-    else:
-        print(f"[Inventory] Bulk update failed: {result['errors']}")
-        return False
+
 
 
 def set_product_out_of_stock(shopify_product_id: str) -> bool:
