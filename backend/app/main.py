@@ -33,6 +33,11 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from sqlalchemy.sql import func as sqlfunc
 from .database import SessionLocal
 from .db_export import router as db_export_router
+import math
+import time
+import re
+import traceback
+import requests
 
 
 settings = get_settings()
@@ -541,7 +546,7 @@ def list_products(
            (ImportedProduct.original_title.ilike(search_term)) |
            (ImportedProduct.custom_title.ilike(search_term)) |
            (ImportedProduct.aliexpress_id.ilike(search_term)) |
-           (ImportedProduct.replacement_aliexpress_id.ilike(search_term))
+           (ImportedProduct.replacement_aliexpress_id.ilike(search_term)) |
            (ImportedProduct.shopify_product_id.ilike(search_term)) 
        )
     total = query.count()
@@ -961,11 +966,97 @@ def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
 # PRODUCT MAPPING ENDPOINTS
 # ─────────────────────────────────────────────
 
+# @app.post("/mappings/add")
+# def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_title: str = None, db: Session = Depends(get_db)):
+#     existing = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
+#     if existing:
+#         raise HTTPException(400, "Mapping for this AliExpress ID already exists")
+#     mapping = ProductMapping(
+#         aliexpress_id=aliexpress_id,
+#         shopify_product_id=shopify_product_id,
+#         shopify_product_title=shopify_product_title,
+#         track_price=True,
+#         price_mode="auto",
+#         price_increase=0.0
+#     )
+#     db.add(mapping)
+#     db.commit()
+#     db.refresh(mapping)
+#     return {
+#         "message": "Mapping added",
+#         "mapping": {
+#             "id": mapping.id,
+#             "aliexpress_id": mapping.aliexpress_id,
+#             "shopify_product_id": mapping.shopify_product_id,
+#             "title": mapping.shopify_product_title,
+#             "track_price": mapping.track_price,
+#             "price_mode": mapping.price_mode,
+#             "price_increase": mapping.price_increase
+#         }
+#     }
+
 @app.post("/mappings/add")
 def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_title: str = None, db: Session = Depends(get_db)):
-    existing = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
-    if existing:
-        raise HTTPException(400, "Mapping for this AliExpress ID already exists")
+    aliexpress_id = (aliexpress_id or "").strip()
+    shopify_product_id = (shopify_product_id or "").strip()
+
+    if not aliexpress_id or not shopify_product_id:
+        raise HTTPException(400, "Both AliExpress ID and Shopify ID are required")
+
+    # ── Check within ProductMapping table ──
+    existing_by_ae = db.query(ProductMapping).filter(
+        ProductMapping.aliexpress_id == aliexpress_id
+    ).first()
+    existing_by_shopify = db.query(ProductMapping).filter(
+        ProductMapping.shopify_product_id == shopify_product_id
+    ).first()
+
+    if existing_by_ae and existing_by_shopify and existing_by_ae.id == existing_by_shopify.id:
+        raise HTTPException(
+            409,
+            f"This AliExpress ID is already mapped to this exact Shopify product "
+            f"(mapping id={existing_by_ae.id}). Duplicate mapping not allowed."
+        )
+    if existing_by_ae:
+        raise HTTPException(
+            409,
+            f"AliExpress ID {aliexpress_id} is already mapped to Shopify product "
+            f"{existing_by_ae.shopify_product_id} (mapping id={existing_by_ae.id}). "
+            f"Delete the existing mapping first if you want to remap it."
+        )
+    if existing_by_shopify:
+        raise HTTPException(
+            409,
+            f"Shopify product {shopify_product_id} is already mapped to AliExpress ID "
+            f"{existing_by_shopify.aliexpress_id} (mapping id={existing_by_shopify.id}). "
+            f"Delete the existing mapping first if you want to remap it."
+        )
+
+    # ── Check against ImportedProduct table (cross-table uniqueness) ──
+    existing_imported_by_ae = db.query(ImportedProduct).filter(
+        ImportedProduct.aliexpress_id == aliexpress_id
+    ).first()
+    existing_imported_by_shopify = db.query(ImportedProduct).filter(
+        ImportedProduct.shopify_product_id == shopify_product_id
+    ).first()
+
+    if existing_imported_by_ae:
+        raise HTTPException(
+            409,
+            f"AliExpress ID {aliexpress_id} is already imported as a product "
+            f"(imported product id={existing_imported_by_ae.id}, Shopify ID "
+            f"{existing_imported_by_ae.shopify_product_id}). It cannot also be added as a mapping — "
+            f"manage it from the Imported Products page instead."
+        )
+    if existing_imported_by_shopify:
+        raise HTTPException(
+            409,
+            f"Shopify product {shopify_product_id} is already linked to an imported product "
+            f"(imported product id={existing_imported_by_shopify.id}, AliExpress ID "
+            f"{existing_imported_by_shopify.aliexpress_id}). It cannot also be added as a mapping — "
+            f"manage it from the Imported Products page instead."
+        )
+
     mapping = ProductMapping(
         aliexpress_id=aliexpress_id,
         shopify_product_id=shopify_product_id,
@@ -2757,24 +2848,46 @@ def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tupl
     shopify_id = None
     shopify_status = "draft"
 
+    # if title and check_product_exists_in_shopify(title):
+    #     # Find existing Shopify product by title and link it
+    #     shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
+    #     token = get_shopify_token()
+    #     try:
+    #         res = requests.get(
+    #             f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/products.json",
+    #             params={"title": title, "limit": 1, "fields": "id,title,status"},
+    #             headers={"X-Shopify-Access-Token": token},
+    #             timeout=15
+    #         )
+    #         res.raise_for_status()
+    #         products = res.json().get("products", [])
+    #         if products:
+    #             shopify_id = str(products[0]["id"])
+    #             shopify_status = products[0].get("status", "draft")
+    #             # Update existing local record if any
+    #             if existing:
+
     if title and check_product_exists_in_shopify(title):
-        # Find existing Shopify product by title and link it
         shop = settings.SHOPIFY_STORE.replace(".myshopify.com", "").strip()
         token = get_shopify_token()
         try:
-            res = requests.get(
-                f"https://{shop}.myshopify.com/admin/api/{settings.SHOPIFY_API_VERSION}/products.json",
-                params={"title": title, "limit": 1, "fields": "id,title,status"},
-                headers={"X-Shopify-Access-Token": token},
-                timeout=15
-            )
+            res = requests.get(...)
             res.raise_for_status()
             products = res.json().get("products", [])
             if products:
                 shopify_id = str(products[0]["id"])
                 shopify_status = products[0].get("status", "draft")
-                # Update existing local record if any
+
+                # ── NEW: reject if this Shopify product is already claimed by a mapping ──
+                conflicting_mapping = db.query(ProductMapping).filter(
+                    ProductMapping.shopify_product_id == shopify_id
+                ).first()
+                if conflicting_mapping:
+                    raise HTTPException(409, f"Shopify product {shopify_id} ... already mapped ...")
+                    # ← this raise happens INSIDE the try block
+
                 if existing:
+
                     existing.shopify_product_id = shopify_id
                     existing.shopify_status = shopify_status
                     # Update other fields
