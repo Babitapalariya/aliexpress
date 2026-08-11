@@ -1993,6 +1993,8 @@ async function pushInventoryToShopify() {
     const panel = document.getElementById("lookup-panel");
     if (panel) panel.style.display = "none";
   }
+
+
   async function doSmartLookup(q) {
     const tb = document.getElementById("prod-tbody");
     tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Looking up ID ${q}…</p></div></td></tr>`;
@@ -2000,7 +2002,8 @@ async function pushInventoryToShopify() {
     document.getElementById("prod-count-sub").textContent = `Searching for ID "${q}"…`;
     document.getElementById("prod-pag").style.display = "none";
     try {
-      const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}`);
+      //const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}`);
+      const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}&source=imported`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (!d.found) {
