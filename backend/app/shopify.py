@@ -1109,24 +1109,18 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         print("[UPDATE] Price already up to date — no Shopify update needed")
         return "unchanged"
 
-    success_count = 0
-    for variant_id, new_price, option_label, old_price in to_update:
-        try:
-            r2 = requests.put(
-                f"{_base()}/variants/{variant_id}.json",
-                json={"variant": {"id": variant_id, "price": str(new_price)}},
-                headers=_h(), timeout=20,
-            )
-            r2.raise_for_status()
-            success_count += 1
-            print(f"[UPDATE] {option_label}: {old_price} → {new_price}")
-        except Exception as e:
-            print(f"[UPDATE] Failed for variant {variant_id}: {e}")
-
-    if success_count == 0:
+    # Send one GraphQL mutation instead of one REST request per variant. The
+    # REST loop easily exhausts Shopify's request bucket and leaves a product
+    # only partially updated with HTTP 429 responses.
+    result = bulk_update_variant_prices(shopify_product_id, [
+        {"variant_id": variant_id, "price": str(new_price)}
+        for variant_id, new_price, _option_label, _old_price in to_update
+    ])
+    if not result["success"]:
+        print(f"[UPDATE] Bulk price update failed: {result['errors']}")
         return "failed"
 
-    print(f"[UPDATE] Success, {success_count}/{len(to_update)} variants updated")
+    print(f"[UPDATE] Success, {result['updated']}/{len(to_update)} variants updated")
     return "updated"
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):

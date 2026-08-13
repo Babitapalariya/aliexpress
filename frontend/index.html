@@ -646,7 +646,7 @@
         <div class="fg full">
           <label>Variant Prices (USD)</label>
           <div id="m-variants-wrap" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-top:2px"><div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div></div>
-          <div style="font-size:11px;color:var(--t3);margin-top:4px">Editing prices switches to <strong>Manual</strong> mode (no auto-sync).</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:4px">Lock a variant's price to protect it; unlocked variants continue auto-syncing.</div>
         </div>
         <div class="fg"><label>Rating Override (0–5)</label><input type="text" id="m-rating" placeholder="e.g. 4.5"/></div>
         <div class="fg full"><label>Description (HTML supported)</label><textarea id="m-desc" placeholder="Custom description…"></textarea></div>
@@ -676,7 +676,7 @@
         <div class="fg full">
           <label>Variant Prices (USD)</label>
           <div id="mm-variants-wrap" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-top:2px"><div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div></div>
-          <div style="font-size:11px;color:var(--t3);margin-top:4px">Editing prices switches to <strong>Manual</strong> mode (no auto-sync).</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:4px">Lock a variant's price to protect it; unlocked variants continue auto-syncing.</div>
         </div>
         <div class="fg"><label>Rating Override (0–5)</label><input type="text" id="mm-rating" placeholder="e.g. 4.5"/></div>
         <div class="fg full"><label>Description (HTML supported)</label><textarea id="mm-desc" placeholder="Custom description…"></textarea></div>
@@ -959,7 +959,7 @@ function showToast(msg, type="", persistent=false){
       modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
     else if (p.price_mode === "increase")
       modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
-    else if (p.price_mode === "manual")
+    else if (p.price_mode === "manual" || p.price_mode === "variant_manual")
       modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
     else
       modeBadge = `<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
@@ -1646,7 +1646,7 @@ async function syncInventoryFromModal() {
       let modeBadge='';
       if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
       else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
-      else if(m.price_mode==='manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
+      else if(m.price_mode==='manual' || m.price_mode==='variant_manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
       else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
       const deadBadge = m.is_dead_listing ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>` : "";
       const editedBadge = (m.custom_title || m.custom_description || m.custom_rating) ? `<span class="badge b-indigo" style="margin-left:4px">Edited</span>` : "";
@@ -2038,7 +2038,7 @@ async function pushInventoryToShopify() {
               modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
             else if (p.price_mode === "increase")
               modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
-            else if (p.price_mode === "manual")
+            else if (p.price_mode === "manual" || p.price_mode === "variant_manual")
               modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
             else
               modeBadge = `<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;

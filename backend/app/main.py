@@ -1455,7 +1455,7 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
 
         # 2. Update Shopify variants WITHOUT any increase
         success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
-        if not success:
+        if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
 
         # 3. Update local original price
@@ -1463,15 +1463,18 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if original_price:
             product.original_price = original_price
 
-        # 4. Reset price mode to auto and clear increase
-        product.price_mode = "auto"
+        # Keep partial-manual status while variant price locks exist. The
+        # locked variants stay custom; this sync updates the unlocked ones.
+        from .shopify import get_locked_variant_ids
+        has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
+        product.price_mode = "variant_manual" if has_price_locks else "auto"
         product.price_increase = 0.0
         product.custom_price = None   # remove any manual override
         db.commit()
 
         return {
-            "message": "Price synced from AliExpress and mode reset to Auto",
-            "price_mode": "auto"
+            "message": "Unlocked variant prices synced from AliExpress",
+            "price_mode": product.price_mode
         }
 
     except HTTPException:
@@ -2585,19 +2588,21 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
         else:
             print(f"[VariantEdit] Failed to fetch variants for inventory update: {vres.text}")
 
-    product.price_mode = "manual"
+    # Per-variant customization is protected by that variant's price lock.
+    # Do not switch the whole product to manual mode, otherwise automatic
+    # sync stops before it gets a chance to update the unlocked variants.
+    product.price_mode = "variant_manual"
     product.price_increase = 0.0
-    if price_updates:
-        product.custom_price = price_updates[0]["price"]
+    product.custom_price = None
     db.commit()
 
-    msg = f"Updated {len(price_updates)} variant price(s) (manual mode)"
+    msg = f"Updated {len(price_updates)} variant price(s)"
     if inventory_updates:
         msg += f" · {inventory_updated_count}/{len(inventory_updates)} inventory level(s) updated"
 
     return {
         "message": msg,
-        "price_mode": "manual",
+        "price_mode": product.price_mode,
         "updated": len(price_updates),
         "inventory_updated": inventory_updated_count,
     }
@@ -4838,6 +4843,22 @@ def toggle_variant_lock(
     if shopify_id:
         _invalidate_lock_cache(shopify_id)
 
+    # Repair products put into product-wide manual mode by the old
+    # per-variant edit behavior. Individual price locks now provide the
+    # protection while unlocked variants continue syncing normally.
+    if lock_type == "price" and new_state:
+        if product_id:
+            p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+            if p and p.price_mode == "manual":
+                p.price_mode = "variant_manual"
+                p.custom_price = None
+                db.commit()
+        elif mapping_id:
+            m = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+            if m and m.price_mode == "manual":
+                m.price_mode = "variant_manual"
+                db.commit()
+
     return {"variant_id": variant_id, "lock_type": lock_type, "locked": new_state}
 
 @app.get("/dashboard/products/{product_id}/variant-locks")
@@ -5009,14 +5030,16 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
                 continue
     inventory_updated_count = _set_variant_inventory_levels(mapping.shopify_product_id, inventory_updates) if inventory_updates else 0
 
-    mapping.price_mode = "manual"
+    # Variant-specific locks, not product-wide manual mode, protect edited
+    # prices while allowing all unlocked variants to keep auto-syncing.
+    mapping.price_mode = "variant_manual"
     mapping.price_increase = 0.0
     db.commit()
 
-    msg = f"Updated {len(updated_variants)} variant price(s) (manual mode)"
+    msg = f"Updated {len(updated_variants)} variant price(s)"
     if inventory_updates:
         msg += f" · {inventory_updated_count}/{len(inventory_updates)} inventory level(s) updated"
-    return {"message": msg, "price_mode": "manual", "updated": len(updated_variants), "inventory_updated": inventory_updated_count}
+    return {"message": msg, "price_mode": mapping.price_mode, "updated": len(updated_variants), "inventory_updated": inventory_updated_count}
 
 
 @app.get("/mappings/{mapping_id}/details")
