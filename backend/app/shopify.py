@@ -188,27 +188,108 @@ def _upload_image_to_shopify(shopify_product_id: str, image_url: str, alt: str =
 
 
 
+# def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
+#     if not aliexpress_skus or not shopify_variants:
+#         return 0
+
+#     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
+#     url_to_image_id: dict[str, int] = {}
+#     attached = 0
+
+#     for i, shopify_variant in enumerate(shopify_variants):
+#         if shopify_variant["id"] in locked_variant_ids:
+#             continue
+#         if i >= len(aliexpress_skus):
+#             break
+
+#         ae_sku = aliexpress_skus[i]
+#         img_url = ae_sku.get("image")
+#         if not img_url:
+#             continue
+
+#         if img_url not in url_to_image_id:
+#             image_id = _upload_image_to_shopify(shopify_product_id, img_url, alt=ae_sku.get("label", ""))
+#             if image_id:
+#                 url_to_image_id[img_url] = image_id
+#             else:
+#                 continue
+#         else:
+#             image_id = url_to_image_id[img_url]
+
+#         variant_id = shopify_variant["id"]
+#         try:
+#             res = requests.put(
+#                 f"{_base()}/variants/{variant_id}.json",
+#                 json={"variant": {"id": variant_id, "image_id": image_id}},
+#                 headers=_h(),
+#                 timeout=15,
+#             )
+#             res.raise_for_status()
+#             attached += 1
+#             print(f"[Shopify][Image] Variant {variant_id} ← image {image_id} ({ae_sku.get('label','')})")
+#         except Exception as e:
+#             print(f"[Shopify][Image] Variant link failed for {variant_id}: {e}")
+
+#     return attached
+
+
+
 def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
     if not aliexpress_skus or not shopify_variants:
         return 0
 
     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
+
+    # Build sku_id -> ae_sku lookup instead of relying on array position
+    ae_sku_by_id = {str(s.get("sku_id")): s for s in aliexpress_skus if s.get("sku_id")}
+
+    # Fetch each variant's aliexpress.sku_id metafield (same source of truth
+    # your price/inventory sync already relies on)
+    variant_ae_map = {}
+    for variant in shopify_variants:
+        vid = variant["id"]
+        try:
+            mf_res = _shopify_request(
+                "GET", f"{_base()}/variants/{vid}/metafields.json",
+                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
+            )
+            if mf_res.status_code == 200:
+                mfs = mf_res.json().get("metafields", [])
+                if mfs:
+                    variant_ae_map[vid] = mfs[0].get("value")
+        except Exception as e:
+            print(f"[Shopify][Image] Metafield lookup failed for variant {vid}: {e}")
+
     url_to_image_id: dict[str, int] = {}
     attached = 0
+    unmatched = []
 
     for i, shopify_variant in enumerate(shopify_variants):
-        if shopify_variant["id"] in locked_variant_ids:
+        variant_id = shopify_variant["id"]
+        if variant_id in locked_variant_ids:
             continue
-        if i >= len(aliexpress_skus):
-            break
 
-        ae_sku = aliexpress_skus[i]
+        # 1. Match by this variant's own sku_id metafield — reliable, order-independent
+        ae_sku_id = variant_ae_map.get(variant_id)
+        ae_sku = ae_sku_by_id.get(ae_sku_id) if ae_sku_id else None
+
+        # 2. Fall back to positional match only if no metafield exists at all
+        #    (e.g. product imported before metafields were being stored)
+        if ae_sku is None and i < len(aliexpress_skus):
+            ae_sku = aliexpress_skus[i]
+
+        if ae_sku is None:
+            unmatched.append(variant_id)
+            continue
+
         img_url = ae_sku.get("image")
         if not img_url:
-            continue
+            continue  # this SKU genuinely has no image on AliExpress's side
 
         if img_url not in url_to_image_id:
-            image_id = _upload_image_to_shopify(shopify_product_id, img_url, alt=ae_sku.get("label", ""))
+            image_id = _upload_image_to_shopify(
+                shopify_product_id, img_url, alt=ae_sku.get("label", ""),
+            )
             if image_id:
                 url_to_image_id[img_url] = image_id
             else:
@@ -216,7 +297,6 @@ def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list,
         else:
             image_id = url_to_image_id[img_url]
 
-        variant_id = shopify_variant["id"]
         try:
             res = requests.put(
                 f"{_base()}/variants/{variant_id}.json",
@@ -230,7 +310,12 @@ def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list,
         except Exception as e:
             print(f"[Shopify][Image] Variant link failed for {variant_id}: {e}")
 
+    if unmatched:
+        print(f"[Shopify][Image] {len(unmatched)} variant(s) had no matching AliExpress SKU at all: {unmatched}")
+
     return attached
+
+
 
 # def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
 #     """
@@ -307,15 +392,63 @@ def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list,
 
 
 
+def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
+    """Return every variant, including products with more than 100 variants."""
+    query = """
+    query ImageSyncVariants($id: ID!, $after: String) {
+      product(id: $id) {
+        variants(first: 100, after: $after) {
+          nodes {
+            id
+            image { id }
+            skuId: metafield(namespace: "aliexpress", key: "sku_id") { value }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+    """
+    variants = []
+    after = None
+
+    while True:
+        data = _graphql(query, {
+            "id": _product_gid(shopify_product_id),
+            "after": after,
+        })
+        product = data.get("product")
+        if not product:
+            raise RuntimeError(f"Shopify product {shopify_product_id} was not found")
+
+        connection = product.get("variants") or {}
+        for node in connection.get("nodes", []):
+            image = node.get("image") or {}
+            sku_metafield = node.get("skuId") or {}
+            variants.append({
+                "id": int(_numeric_id_from_gid(node["id"])),
+                "image_id": (
+                    int(_numeric_id_from_gid(image["id"]))
+                    if image.get("id") else None
+                ),
+                "aliexpress_sku_id": (
+                    str(sku_metafield["value"])
+                    if sku_metafield.get("value") is not None else None
+                ),
+            })
+
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+        if not after:
+            raise RuntimeError("Shopify variant pagination returned no end cursor")
+
+    return variants
+
+
 def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
     try:
-        res = requests.get(
-            f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"},
-            headers=_h(), timeout=15,
-        )
-        res.raise_for_status()
-        shopify_variants = res.json().get("product", {}).get("variants", [])
+        shopify_variants = _get_all_variants_for_image_sync(shopify_product_id)
     except Exception as e:
         print(f"[Backfill][Image] Fetch variants failed: {e}")
         return {"attached": 0, "skipped": 0, "total_variants": 0}
@@ -333,17 +466,31 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
         return {"attached": 0, "skipped": already_has, "total_variants": len(shopify_variants)}
 
     url_to_image_id: dict[str, int] = {}
+    ae_sku_by_id = {
+        str(sku.get("sku_id")): sku
+        for sku in aliexpress_skus
+        if sku.get("sku_id") is not None
+    }
     attached = 0
+    unmatched = 0
 
     for i, shopify_variant in enumerate(shopify_variants):
         if shopify_variant.get("image_id"):
             continue
         if shopify_variant["id"] in locked_variant_ids:
             continue  # manually customized — skip
-        if i >= len(aliexpress_skus):
-            break
+        # Current imports store the AliExpress SKU ID on each Shopify variant.
+        # Keep positional matching only for products imported before that
+        # metafield existed.
+        ae_sku_id = shopify_variant.get("aliexpress_sku_id")
+        if ae_sku_id is not None:
+            ae_sku = ae_sku_by_id.get(ae_sku_id)
+        else:
+            ae_sku = aliexpress_skus[i] if i < len(aliexpress_skus) else None
+        if ae_sku is None:
+            unmatched += 1
+            continue
 
-        ae_sku = aliexpress_skus[i]
         img_url = ae_sku.get("image")
         if not img_url:
             continue
@@ -366,9 +513,12 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
             )
             res2.raise_for_status()
             attached += 1
-            print(f"[Backfill][Image] Variant {variant_id} ← image {image_id}")
+            print(f"[Backfill][Image] Variant {variant_id} <- image {image_id}")
         except Exception as e:
             print(f"[Backfill][Image] Link failed {variant_id}: {e}")
+
+    if unmatched:
+        print(f"[Backfill][Image] {unmatched} variant(s) had no matching AliExpress SKU")
 
     return {
         "attached": attached,
