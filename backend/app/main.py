@@ -1265,7 +1265,11 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
-        mapping.price_mode = "auto"
+        # Keep partial-manual status while any variant price lock exists.
+        # The sync above already updates every unlocked variant.
+        from .shopify import get_locked_variant_ids
+        has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
+        mapping.price_mode = "variant_manual" if has_price_locks else "auto"
         mapping.price_increase = 0.0
         db.commit()
 
@@ -1274,7 +1278,7 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
         return {
             "message": f"{price_msg} · {inv_msg}",
             "product_id": mapping.shopify_product_id,
-            "price_mode": "auto",
+            "price_mode": mapping.price_mode,
             "price_increase": 0.0,
             "inventory_updated": inventory_updated,
         }
@@ -1296,16 +1300,25 @@ def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = De
         from .database import SessionLocal
         sub_db = SessionLocal()
         try:
-            for m in mappings:
+            for mapping_id in [m.id for m in mappings]:
                 try:
-                    # Make sure token is fresh for each call? We'll rely on get_product's internal token check.
+                    m = sub_db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+                    if not m or not m.track_price or m.price_mode == "manual":
+                        continue
                     raw = get_product(m.aliexpress_id, sub_db)
-                    new_price = raw.get("sale_price") or raw.get("original_price")
-                    if new_price:
-                        update_shopify_product_price(m.shopify_product_id, float(new_price))
-                        print(f"[SyncMapped] Updated price for {m.aliexpress_id} → {new_price}")
-                    else:
-                        print(f"[SyncMapped] No price for {m.aliexpress_id}")
+                    skus = raw.get("skus", [])
+                    if not skus:
+                        print(f"[SyncMapped] No SKUs for {m.aliexpress_id}")
+                        continue
+                    if m.price_mode == "increase" and m.price_increase != 0.0:
+                        for sku in skus:
+                            price = sku.get("sale_price") or sku.get("price")
+                            if price is not None:
+                                adjusted = str(float(price) + m.price_increase)
+                                sku["sale_price"] = adjusted
+                                sku["price"] = adjusted
+                    result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
+                    print(f"[SyncMapped] Variant price result for {m.aliexpress_id}: {result}")
                 except Exception as e:
                     print(f"[SyncMapped] Error for {m.aliexpress_id}: {e}")
         finally:
