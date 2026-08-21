@@ -1471,7 +1471,21 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if not new_skus:
             raise HTTPException(500, "No SKUs found in AliExpress product")
 
-        # 2. Update Shopify variants WITHOUT any increase
+        # Manual Sync Price means "use AliExpress base price" for every
+        # unlocked variant. Remove temporary per-variant increases first;
+        # price-locked variants are left completely untouched.
+        from .shopify import (
+            get_locked_variant_ids, get_variant_price_increase_map,
+            set_variant_price_increase,
+        )
+        locked_variant_ids = get_locked_variant_ids(product.shopify_product_id, "price")
+        saved_increases = get_variant_price_increase_map(product.shopify_product_id)
+        for variant_id in saved_increases:
+            if variant_id not in locked_variant_ids:
+                if not set_variant_price_increase(variant_id, 0.0):
+                    raise HTTPException(502, f"Failed to reset increase for variant {variant_id}")
+
+        # 2. Update unlocked Shopify variants to AliExpress base prices.
         success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
         if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
@@ -1481,22 +1495,18 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if original_price:
             product.original_price = original_price
 
-        # Keep partial-manual status while variant price locks exist. The
-        # locked variants stay custom; this sync updates the unlocked ones.
-        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
-        has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
-        has_variant_increases = bool(get_variant_price_increase_map(product.shopify_product_id))
-        product.price_mode = (
-            "variant_manual" if has_price_locks
-            else "variant_increase" if has_variant_increases
-            else "auto"
-        )
+        # The product remains in Auto mode. Variant price locks are the only
+        # protection needed for prices that must not follow AliExpress.
+        product.price_mode = "auto"
         product.price_increase = 0.0
         product.custom_price = None   # remove any manual override
         db.commit()
 
         return {
-            "message": "Unlocked variant prices synced from AliExpress",
+            "message": (
+                "Unlocked variant prices synced from AliExpress"
+                + (f"; {len(locked_variant_ids)} locked variant(s) kept unchanged" if locked_variant_ids else "")
+            ),
             "price_mode": product.price_mode
         }
 
@@ -2360,6 +2370,42 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
         "title": shopify_product.get("title"),
         "variants": result,
     }
+
+
+@app.delete("/dashboard/products/{product_id}/variants/{variant_id}")
+def delete_product_variant(product_id: int, variant_id: int, db: Session = Depends(get_db)):
+    """Delete one Shopify variant without modifying its sibling variants."""
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        raise HTTPException(400, "Product has no Shopify ID linked")
+
+    from .shopify import _base, _h, _shopify_request, _invalidate_lock_cache
+
+    variants_res = _shopify_request(
+        "GET", f"{_base()}/products/{product.shopify_product_id}.json",
+        params={"fields": "id,variants"}, headers=_h(), timeout=15,
+    )
+    if variants_res.status_code != 200:
+        raise HTTPException(502, "Could not verify Shopify variants")
+
+    variants = variants_res.json().get("product", {}).get("variants", [])
+    if not any(int(v["id"]) == variant_id for v in variants):
+        raise HTTPException(404, "Variant does not belong to this product")
+    if len(variants) <= 1:
+        raise HTTPException(400, "The final product variant cannot be deleted")
+
+    delete_res = _shopify_request(
+        "DELETE", f"{_base()}/variants/{variant_id}.json",
+        headers=_h(), timeout=20,
+    )
+    if delete_res.status_code not in (200, 204):
+        detail = delete_res.text[:300] if delete_res.text else "Shopify rejected the deletion"
+        raise HTTPException(502, detail)
+
+    _invalidate_lock_cache(product.shopify_product_id)
+    return {"message": "Variant deleted", "variant_id": variant_id}
 
 
 # ─────────────────────────────────────────────

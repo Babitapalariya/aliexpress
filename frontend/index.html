@@ -774,6 +774,11 @@
   // ALL JAVASCRIPT
   // ============================
 
+  // const isLocalFrontend = !window.location.hostname || ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  // const API = isLocalFrontend
+  //   ? "http://127.0.0.1:8001/api"
+  //   : "https://aliexpress.retradviews.com/api";
+
   //const API = "http://127.0.0.1:8001/api";
   const API = "https://aliexpress.retradviews.com/api";
 
@@ -829,8 +834,8 @@ function showToast(msg, type="", persistent=false){
     btn.disabled=true; btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Getting URL…`;
     try{
       const r=await fetch(`${API}/login`);
-      if(!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d=await r.json();
+      const d=await safeJson(r);
+      if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
       if(!d.auth_url) throw new Error("No auth_url in response");
       authUrl=d.auth_url;
       document.getElementById("url-text").textContent=authUrl;
@@ -1374,6 +1379,9 @@ async function syncProductPrice(productId){
           <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
         <td style="padding:6px 8px;text-align:center;white-space:nowrap">${lockIcons}</td>
+        <td style="padding:6px 8px;text-align:center">
+          <button type="button" class="btn btn-danger btn-xs btn-icon" onclick="deleteImportedVariant(${v.variant_id})" title="Delete this undeliverable variant only"><i class="ti ti-trash"></i></button>
+        </td>
       </tr>`;
     }).join("");
 
@@ -1387,6 +1395,7 @@ async function syncProductPrice(productId){
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Increase</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
+            <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
           </tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -1401,6 +1410,26 @@ async function syncProductPrice(productId){
       </div>`;
   } catch (e) {
     wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;
+  }
+}
+
+async function deleteImportedVariant(variantId) {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  const btn = document.querySelector(`#m-variants-wrap button[onclick="deleteImportedVariant(${variantId})"]`);
+  const label = btn?.closest("tr")?.querySelector("td")?.textContent.trim() || `ID ${variantId}`;
+  if (!confirm(`Delete only the variant "${label}" from Shopify?\n\nAll other variants will remain unchanged.`)) return;
+
+  if (btn) { btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i>`; }
+  try {
+    const r = await fetch(`${API}/dashboard/products/${productId}/variants/${variantId}`, { method: "DELETE" });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(`Deleted variant: ${label}`, "ok");
+    await loadVariantsForModal(productId);
+  } catch (e) {
+    showToast("Variant delete failed: " + e.message, "err");
+    if (btn) { btn.disabled = false; btn.innerHTML = `<i class="ti ti-trash"></i>`; }
   }
 }
 
