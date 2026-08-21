@@ -1012,6 +1012,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         return "failed"
 
     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "price")
+    variant_price_increases = get_variant_price_increase_map(shopify_product_id)
     if locked_variant_ids:
         print(f"[UPDATE] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
 
@@ -1090,6 +1091,9 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
                     new_price = float(ae_price)
 
         if new_price is not None:
+            # Reapply only this variant's saved increase to the latest
+            # AliExpress base price; sibling variants remain independent.
+            new_price += variant_price_increases.get(variant["id"], 0.0)
             any_match_found = True
             if abs(float(variant["price"]) - new_price) > 0.01:
                 to_update.append((variant["id"], new_price, variant.get("option1", "?"), variant["price"]))
@@ -2016,6 +2020,59 @@ def _invalidate_lock_cache(shopify_product_id: str):
 
 def get_locked_variant_ids(shopify_product_id: str, lock_type: str) -> set:
     return {vid for vid, flags in get_variant_lock_map(shopify_product_id).items() if flags.get(lock_type)}
+
+
+def get_variant_price_increase_map(shopify_product_id: str) -> dict[int, float]:
+    """Return persistent per-variant price increases stored in Shopify."""
+    query = """
+    query($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) {
+          edges { node {
+            id
+            priceIncrease: metafield(namespace: "sync", key: "price_increase") { value }
+          } }
+        }
+      }
+    }
+    """
+    increases = {}
+    try:
+        data = _graphql(query, {"id": _product_gid(shopify_product_id)})
+        edges = (data.get("product") or {}).get("variants", {}).get("edges", [])
+        for edge in edges:
+            node = edge["node"]
+            metafield = node.get("priceIncrease")
+            if metafield:
+                amount = float(metafield.get("value") or 0)
+                if amount:
+                    increases[int(_numeric_id_from_gid(node["id"]))] = amount
+    except Exception as e:
+        print(f"[VariantIncrease] Fetch failed for product {shopify_product_id}: {e}")
+    return increases
+
+
+def set_variant_price_increase(variant_id: int, amount: float) -> bool:
+    """Persist a per-variant increase used by future AliExpress price syncs."""
+    try:
+        res = _shopify_request(
+            "GET", f"{_base()}/variants/{variant_id}/metafields.json",
+            params={"namespace": "sync", "key": "price_increase"}, headers=_h(),
+        )
+        existing = res.json().get("metafields", []) if res.status_code == 200 else []
+        payload = {"metafield": {
+            "namespace": "sync", "key": "price_increase",
+            "value": str(float(amount)), "type": "number_decimal",
+        }}
+        if existing:
+            saved = _shopify_request("PUT", f"{_base()}/metafields/{existing[0]['id']}.json", json=payload, headers=_h())
+        else:
+            saved = _shopify_request("POST", f"{_base()}/variants/{variant_id}/metafields.json", json=payload, headers=_h())
+        saved.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"[VariantIncrease] Save failed for variant {variant_id}: {e}")
+        return False
 
 
 def is_variant_locked(variant_id: int, lock_type: str) -> bool:

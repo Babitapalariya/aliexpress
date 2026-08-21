@@ -1267,9 +1267,14 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         # Keep partial-manual status while any variant price lock exists.
         # The sync above already updates every unlocked variant.
-        from .shopify import get_locked_variant_ids
+        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
         has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
-        mapping.price_mode = "variant_manual" if has_price_locks else "auto"
+        has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
+        mapping.price_mode = (
+            "variant_manual" if has_price_locks
+            else "variant_increase" if has_variant_increases
+            else "auto"
+        )
         mapping.price_increase = 0.0
         db.commit()
 
@@ -1478,9 +1483,14 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
 
         # Keep partial-manual status while variant price locks exist. The
         # locked variants stay custom; this sync updates the unlocked ones.
-        from .shopify import get_locked_variant_ids
+        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
         has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
-        product.price_mode = "variant_manual" if has_price_locks else "auto"
+        has_variant_increases = bool(get_variant_price_increase_map(product.shopify_product_id))
+        product.price_mode = (
+            "variant_manual" if has_price_locks
+            else "variant_increase" if has_variant_increases
+            else "auto"
+        )
         product.price_increase = 0.0
         product.custom_price = None   # remove any manual override
         db.commit()
@@ -2327,6 +2337,8 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
 
+    from .shopify import get_variant_price_increase_map
+    price_increases = get_variant_price_increase_map(product.shopify_product_id)
     result = []
     for v in variants:
         # Build a readable label from option1/2/3
@@ -2340,6 +2352,7 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
+            "price_increase": price_increases.get(v["id"], 0.0),
         })
 
     return {
@@ -2523,7 +2536,8 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     from .shopify import (
         _base, _h, _shopify_request,
         bulk_update_variant_prices, bulk_set_inventory_quantities,
-        _invalidate_lock_cache,
+        _invalidate_lock_cache, set_variant_lock, set_variant_price_increase,
+        get_locked_variant_ids, get_variant_price_increase_map,
     )
 
     # ── 1. Prices — ONE GraphQL mutation for all variants ──
@@ -2544,6 +2558,28 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     price_result = bulk_update_variant_prices(product.shopify_product_id, price_updates)
     if not price_result["success"]:
         raise HTTPException(502, f"Shopify variant price update failed: {price_result['errors']}")
+
+    # A plus-button increase follows this variant's future AliExpress price.
+    # A directly entered absolute price is instead protected by a price lock.
+    for v in variants_payload:
+        try:
+            vid = int(v.get("variant_id"))
+        except (ValueError, TypeError):
+            continue
+        if "price_increase" in v:
+            try:
+                amount = float(v["price_increase"])
+            except (ValueError, TypeError):
+                raise HTTPException(400, f"Invalid price increase for variant {vid}")
+            if not set_variant_price_increase(vid, amount):
+                raise HTTPException(502, f"Failed to save price increase for variant {vid}")
+            set_variant_lock(vid, "price", False)
+        else:
+            set_variant_price_increase(vid, 0.0)
+            set_variant_lock(vid, "price", True)
+    _invalidate_lock_cache(product.shopify_product_id)
+    has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
+    has_variant_increases = bool(get_variant_price_increase_map(product.shopify_product_id))
 
     # ── 2. Inventory — ONE GraphQL mutation across all variants + locations ──
     inventory_updates = {}
@@ -2604,7 +2640,11 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     # Per-variant customization is protected by that variant's price lock.
     # Do not switch the whole product to manual mode, otherwise automatic
     # sync stops before it gets a chance to update the unlocked variants.
-    product.price_mode = "variant_manual"
+    product.price_mode = (
+        "variant_manual" if has_price_locks
+        else "variant_increase" if has_variant_increases
+        else "auto"
+    )
     product.price_increase = 0.0
     product.custom_price = None
     db.commit()
@@ -4985,6 +5025,8 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
         raise HTTPException(502, res.text)
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
+    from .shopify import get_variant_price_increase_map
+    price_increases = get_variant_price_increase_map(mapping.shopify_product_id)
     result = []
     for v in variants:
         label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
@@ -4995,6 +5037,7 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
+            "price_increase": price_increases.get(v["id"], 0.0),
         })
     return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
 
@@ -5008,7 +5051,11 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
     if not variants_payload:
         raise HTTPException(400, "No variants provided")
 
-    from .shopify import _base, _h
+    from .shopify import (
+        _base, _h, _shopify_request, set_variant_lock,
+        set_variant_price_increase, _invalidate_lock_cache,
+        get_locked_variant_ids, get_variant_price_increase_map,
+    )
     updated_variants = []
     for v in variants_payload:
         vid, price = v.get("variant_id"), v.get("price")
@@ -5024,7 +5071,7 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
     price_success = 0
     for uv in updated_variants:
         try:
-            res = requests.put(f"{_base()}/variants/{uv['id']}.json",
+            res = _shopify_request("PUT", f"{_base()}/variants/{uv['id']}.json",
                 json={"variant": {"id": uv["id"], "price": uv["price"]}}, headers=_h(), timeout=20)
             res.raise_for_status()
             price_success += 1
@@ -5032,6 +5079,26 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
             print(f"[MappingVariantEdit] Price update failed for variant {uv['id']}: {e}")
     if price_success == 0:
         raise HTTPException(502, "Shopify variant price update failed for all variants")
+
+    for v in variants_payload:
+        try:
+            vid = int(v.get("variant_id"))
+        except (ValueError, TypeError):
+            continue
+        if "price_increase" in v:
+            try:
+                amount = float(v["price_increase"])
+            except (ValueError, TypeError):
+                raise HTTPException(400, f"Invalid price increase for variant {vid}")
+            if not set_variant_price_increase(vid, amount):
+                raise HTTPException(502, f"Failed to save price increase for variant {vid}")
+            set_variant_lock(vid, "price", False)
+        else:
+            set_variant_price_increase(vid, 0.0)
+            set_variant_lock(vid, "price", True)
+    _invalidate_lock_cache(mapping.shopify_product_id)
+    has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
+    has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
 
     inventory_updates = {}
     for v in variants_payload:
@@ -5045,7 +5112,11 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
 
     # Variant-specific locks, not product-wide manual mode, protect edited
     # prices while allowing all unlocked variants to keep auto-syncing.
-    mapping.price_mode = "variant_manual"
+    mapping.price_mode = (
+        "variant_manual" if has_price_locks
+        else "variant_increase" if has_variant_increases
+        else "auto"
+    )
     mapping.price_increase = 0.0
     db.commit()
 

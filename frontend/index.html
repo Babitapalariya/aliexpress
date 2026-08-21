@@ -959,6 +959,8 @@ function showToast(msg, type="", persistent=false){
       modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
     else if (p.price_mode === "increase")
       modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+    else if (p.price_mode === "variant_increase")
+      modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> Variant +</span>`;
     else if (p.price_mode === "manual" || p.price_mode === "variant_manual")
       modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
     else
@@ -1364,7 +1366,7 @@ async function syncProductPrice(productId){
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right;display:flex;align-items:center;gap:4px">
-          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-price-increase="${v.price_increase || 0}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </td>
         <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--orange);font-family:var(--mono);font-weight:600">${increaseDisplay}</td>
@@ -1422,13 +1424,18 @@ async function syncProductPrice(productId){
   //   }
   // }
 
-  function applyPriceToAllVariants(){const inputs=document.querySelectorAll(".variant-price-input");if(!inputs.length)return;const v=inputs[0].value;inputs.forEach(i=>i.value=v);}
+  function applyPriceToAllVariants(){const inputs=document.querySelectorAll(".variant-price-input");if(!inputs.length)return;const v=inputs[0].value;inputs.forEach(i=>{i.value=v;markVariantPriceEdited(i);});}
+  function markVariantPriceEdited(input) {
+    input.dataset.dirty = "true";
+    input.dataset.editMode = "manual";
+  }
   function getEditedVariantPrices() {
     const priceInputs = Array.from(document.querySelectorAll(".variant-price-input"));
-    return priceInputs.map(i => {
+    return priceInputs.filter(i => i.dataset.dirty === "true").map(i => {
       const vid = i.dataset.variantId;
       const stockInput = document.querySelector(`.variant-stock-input[data-variant-id="${vid}"]`);
       const out = { variant_id: vid, price: i.value };
+      if (i.dataset.editMode === "increase") out.price_increase = parseFloat(i.dataset.priceIncrease || "0");
       if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
       return out;
     });
@@ -1646,6 +1653,7 @@ async function syncInventoryFromModal() {
       let modeBadge='';
       if(!m.track_price) modeBadge=`<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
       else if(m.price_mode==='increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> +$${m.price_increase}</span>`;
+      else if(m.price_mode==='variant_increase') modeBadge=`<span class="badge b-orange"><i class="ti ti-plus"></i> Variant +</span>`;
       else if(m.price_mode==='manual' || m.price_mode==='variant_manual') modeBadge=`<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
       else modeBadge=`<span class="badge b-blue"><i class="ti ti-refresh"></i> Auto</span>`;
       const deadBadge = m.is_dead_listing ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>` : "";
@@ -2071,6 +2079,8 @@ async function pushInventoryToShopify() {
               modeBadge = `<span class="badge b-gray"><i class="ti ti-pause"></i> Paused</span>`;
             else if (p.price_mode === "increase")
               modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> +$${p.price_increase}</span>`;
+            else if (p.price_mode === "variant_increase")
+              modeBadge = `<span class="badge b-orange"><i class="ti ti-plus"></i> Variant +</span>`;
             else if (p.price_mode === "manual" || p.price_mode === "variant_manual")
               modeBadge = `<span class="badge b-purple"><i class="ti ti-pencil"></i> Manual</span>`;
             else
@@ -2351,6 +2361,9 @@ async function pushInventoryToShopify() {
     if (isNaN(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     const newPrice = currentPrice + inc;
     priceInput.value = newPrice.toFixed(2);
+    priceInput.dataset.priceIncrease = ((parseFloat(priceInput.dataset.priceIncrease) || 0) + inc).toFixed(2);
+    priceInput.dataset.dirty = "true";
+    priceInput.dataset.editMode = "increase";
     showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
   }
 
@@ -2364,6 +2377,9 @@ async function pushInventoryToShopify() {
     inputs.forEach(inp => {
       const cur = parseFloat(inp.value) || 0;
       inp.value = (cur + inc).toFixed(2);
+      inp.dataset.priceIncrease = ((parseFloat(inp.dataset.priceIncrease) || 0) + inc).toFixed(2);
+      inp.dataset.dirty = "true";
+      inp.dataset.editMode = "increase";
     });
     showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
   }
@@ -2665,7 +2681,7 @@ async function loadVariantsForMappingModal(mappingId) {
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right;display:flex;align-items:center;gap:4px">
-          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" value="${v.price}" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-price-increase="${v.price_increase || 0}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </td>
         <td style="padding:6px 8px;text-align:right">
@@ -2721,20 +2737,26 @@ function buildMappingLockIcons(variantId, flags) {
 
 function getEditedMappingVariantPrices() {
   const priceInputs = Array.from(document.querySelectorAll(".mm-variant-price-input"));
-  return priceInputs.map(i => {
+  return priceInputs.filter(i => i.dataset.dirty === "true").map(i => {
     const vid = i.dataset.variantId;
     const stockInput = document.querySelector(`.mm-variant-stock-input[data-variant-id="${vid}"]`);
     const out = { variant_id: vid, price: i.value };
+    if (i.dataset.editMode === "increase") out.price_increase = parseFloat(i.dataset.priceIncrease || "0");
     if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
     return out;
   });
+}
+
+function markMappingVariantPriceEdited(input) {
+  input.dataset.dirty = "true";
+  input.dataset.editMode = "manual";
 }
 
 function applyPriceToAllMappingVariants(){
   const inputs = document.querySelectorAll(".mm-variant-price-input");
   if (!inputs.length) return;
   const v = inputs[0].value;
-  inputs.forEach(i => i.value = v);
+  inputs.forEach(i => { i.value = v; markMappingVariantPriceEdited(i); });
 }
 
 function increaseMappingVariantPrice(btn, variantId) {
@@ -2748,6 +2770,9 @@ function increaseMappingVariantPrice(btn, variantId) {
   if (isNaN(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
   const newPrice = currentPrice + inc;
   priceInput.value = newPrice.toFixed(2);
+  priceInput.dataset.priceIncrease = ((parseFloat(priceInput.dataset.priceIncrease) || 0) + inc).toFixed(2);
+  priceInput.dataset.dirty = "true";
+  priceInput.dataset.editMode = "increase";
   showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
 }
 
@@ -2761,6 +2786,9 @@ function increaseAllMappingVariants() {
   inputs.forEach(inp => {
     const cur = parseFloat(inp.value) || 0;
     inp.value = (cur + inc).toFixed(2);
+    inp.dataset.priceIncrease = ((parseFloat(inp.dataset.priceIncrease) || 0) + inc).toFixed(2);
+    inp.dataset.dirty = "true";
+    inp.dataset.editMode = "increase";
   });
   showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
 }
