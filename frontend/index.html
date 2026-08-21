@@ -2031,13 +2031,12 @@ async function pushInventoryToShopify() {
     document.getElementById("prod-count-sub").textContent = `Searching for ID "${q}"…`;
     document.getElementById("prod-pag").style.display = "none";
     try {
-      //const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}`);
-      const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}&source=imported`);
+      const r = await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(q)}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (!d.found) {
         document.getElementById("prod-count-sub").textContent = `No results for "${q}"`;
-        tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-search-off" style="font-size:44px;margin-bottom:12px;opacity:.5"></i><p>ID "${q}" not found in your imports</p><small style="margin-top:6px;display:block;max-width:420px;line-height:1.6">${d.message}</small><div style="display:flex;gap:8px;margin-top:14px;justify-content:center;flex-wrap:wrap"><a href="https://www.aliexpress.com/item/${q}.html" target="_blank"><button class="btn btn-sm"><i class="ti ti-external-link"></i> Check on AliExpress</button></a><button class="btn btn-sm" onclick="document.getElementById('prod-search').value='';searchDebounce()"><i class="ti ti-x"></i> Clear Search</button></div></div></td></tr>`;
+        tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-search-off" style="font-size:44px;margin-bottom:12px;opacity:.5"></i><p>ID "${q}" not found in Imported Products or Product Mappings</p><small style="margin-top:6px;display:block;max-width:420px;line-height:1.6">${d.message}</small><div style="display:flex;gap:8px;margin-top:14px;justify-content:center;flex-wrap:wrap"><a href="https://www.aliexpress.com/item/${q}.html" target="_blank"><button class="btn btn-sm"><i class="ti ti-external-link"></i> Check on AliExpress</button></a><button class="btn btn-sm" onclick="document.getElementById('prod-search').value='';searchDebounce()"><i class="ti ti-x"></i> Clear Search</button></div></div></td></tr>`;
         return;
       }
       document.getElementById("prod-count-sub").textContent = `${d.count} result${d.count !== 1 ? "s" : ""} found for ID "${q}"`;
@@ -2051,7 +2050,12 @@ async function pushInventoryToShopify() {
           const rating = p.rating || p.avg_rating;
           const date = p.imported_at ? new Date(p.imported_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
           const imgEl = p.main_image ? `<img src="${p.main_image}" class="td-img" onerror="this.style.display='none'"/>` : `<div class="td-img-ph"><i class="ti ti-photo"></i></div>`;
-          const statusBadge = p.shopify_status === "active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
+          const statusBadge = p.source === "mapping"
+            ? `<span class="badge b-blue">Mapped</span>`
+            : p.shopify_status === "active" ? `<span class="badge b-green">Active</span>` : `<span class="badge b-gray">Draft</span>`;
+          const sourceBadge = p.source === "mapping"
+            ? `<span class="badge b-purple" style="margin-top:3px;font-size:10px"><i class="ti ti-link"></i> Product Mappings table</span>`
+            : `<span class="badge b-indigo" style="margin-top:3px;font-size:10px"><i class="ti ti-packages"></i> Imported Products table</span>`;
           const deadBadge = p.is_dead_listing ? `<span class="badge b-red" style="margin-left:4px"><i class="ti ti-alert-triangle"></i> Dead</span>` : "";
           const isOldId = p.match_reason.toLowerCase().includes("old");
           const isDead = p.is_dead_listing;
@@ -2080,9 +2084,9 @@ async function pushInventoryToShopify() {
 
           const pj = escJson(p);
           return `<tr style="${isDead ? 'background:var(--red-bg)' : isOldId ? 'background:var(--orange-bg)' : ''}">
-            <td><input type="checkbox" class="product-checkbox" data-id="${p.id}"></td>
+            <td>${p.source === "imported" ? `<input type="checkbox" class="product-checkbox" data-id="${p.id}">` : ""}</td>
             <td>${imgEl}</td>
-            <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name || ""}</div><div style="margin-top:3px">${reasonBadge}</div>${oldIdNote}</td>
+            <td><div class="td-title" style="max-width:200px" title="${title}">${title}</div><div class="td-sub">${p.store_name || ""}</div><div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">${sourceBadge}${reasonBadge}</div>${oldIdNote}</td>
             <td><span class="td-id">${p.aliexpress_id}</span></td>
             <td><span class="td-price">${cur} ${price}</span></td>
             <td>${modeBadge}</td>
