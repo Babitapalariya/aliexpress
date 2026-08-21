@@ -1724,7 +1724,36 @@ async function syncMappingImages(mappingId){
     const title=document.getElementById("map-title").value.trim();
     aliexpress=extractIdFromUrl(aliexpress,"aliexpress"); shopify=extractIdFromUrl(shopify,"shopify");
     if(!aliexpress||!shopify){showToast("Both IDs are required","err");return;}
-    try{const r=await fetch(`${API}/mappings/add?aliexpress_id=${encodeURIComponent(aliexpress)}&shopify_product_id=${encodeURIComponent(shopify)}&shopify_product_title=${encodeURIComponent(title)}`,{method:"POST"});if(!r.ok){const e=await r.json();throw new Error(e.detail||"Failed");}showToast("Mapping added","ok");document.getElementById("map-aliexpress").value="";document.getElementById("map-shopify").value="";document.getElementById("map-title").value="";await loadMappings(mappingPage);}
+    try{
+      // Check both IDs before submitting so one ID cannot be used in multiple mappings.
+      const findExactMapping = async (value, field) => {
+        const r = await fetch(`${API}/mappings/list?page=1&page_size=100&search=${encodeURIComponent(value)}`);
+        const d = await safeJson(r);
+        if(!r.ok) throw new Error(d.detail || "Could not validate existing mappings");
+        return (d.mappings || []).find(m => String(m[field]).trim() === value);
+      };
+      const [aliDuplicate, shopifyDuplicate] = await Promise.all([
+        findExactMapping(aliexpress, "aliexpress_id"),
+        findExactMapping(shopify, "shopify_product_id"),
+      ]);
+      if(aliDuplicate){
+        showToast(`AliExpress ID ${aliexpress} is already mapped to Shopify ID ${aliDuplicate.shopify_product_id}`,"err");
+        return;
+      }
+      if(shopifyDuplicate){
+        showToast(`Shopify ID ${shopify} is already mapped to AliExpress ID ${shopifyDuplicate.aliexpress_id}`,"err");
+        return;
+      }
+
+      const r=await fetch(`${API}/mappings/add?aliexpress_id=${encodeURIComponent(aliexpress)}&shopify_product_id=${encodeURIComponent(shopify)}&shopify_product_title=${encodeURIComponent(title)}`,{method:"POST"});
+      const d=await safeJson(r);
+      if(!r.ok)throw new Error(d.detail||"Failed");
+      showToast("Mapping added","ok");
+      document.getElementById("map-aliexpress").value="";
+      document.getElementById("map-shopify").value="";
+      document.getElementById("map-title").value="";
+      await loadMappings(mappingPage);
+    }
     catch(e){showToast("Error: "+e.message,"err");}
   }
   async function deleteMapping(id){if(!confirm("Delete mapping?"))return;try{const r=await fetch(`${API}/mappings/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(await r.text());showToast("Deleted","ok");await loadMappings(mappingPage);}catch(e){showToast("Delete failed: "+e.message,"err");}}
