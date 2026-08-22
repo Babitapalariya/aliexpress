@@ -1330,7 +1330,7 @@ async function syncProductPrice(productId){
   });
   try {
     const [variantsRes, locksRes] = await Promise.all([
-      fetch(`${API}/dashboard/products/${productId}/variants`),
+      fetchWithRetry(`${API}/dashboard/products/${productId}/variants`),
       fetch(`${API}/dashboard/products/${productId}/variant-locks`).catch(() => null),
     ]);
     if (!variantsRes.ok) throw new Error(`HTTP ${variantsRes.status}`);
@@ -1409,7 +1409,7 @@ async function syncProductPrice(productId){
         <i class="ti ti-info-circle"></i> Lock icons: <i class="ti ti-currency-dollar" style="font-size:10px"></i> Price · <i class="ti ti-box" style="font-size:10px"></i> Inventory · <i class="ti ti-photo" style="font-size:10px"></i> Image. Locked = skipped by auto-sync for that field only.
       </div>`;
   } catch (e) {
-    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;
+    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}<div style="margin-top:10px"><button type="button" class="btn btn-xs" onclick="loadVariantsForModal(${productId})"><i class="ti ti-refresh"></i> Retry variants</button></div></div>`;
   }
 }
 
@@ -2440,6 +2440,23 @@ async function pushInventoryToShopify() {
     try { return JSON.parse(text); } catch { return { detail: text ? text.slice(0, 200) : `HTTP ${response.status}` }; }
   }
 
+  async function fetchWithRetry(url, options={}, maxAttempts=3) {
+    let lastError;
+    for (let attempt=1; attempt<=maxAttempts; attempt++) {
+      try {
+        const response = await fetch(url, options);
+        if (response.ok || (response.status !== 429 && response.status < 500)) return response;
+        lastError = new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+      if (attempt < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+    throw lastError || new Error("Request failed");
+  }
+
   // ── MAPPING DEAD CHECKS ──
   async function checkMappingListingStatus(mappingId, aliexpressId){
     showToast(`Checking listing ${aliexpressId}…`, "info");
@@ -2682,7 +2699,7 @@ async function loadVariantsForMappingModal(mappingId) {
   wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
   try {
     const [variantsRes, locksRes] = await Promise.all([
-      fetch(`${API}/mappings/${mappingId}/variants`),
+      fetchWithRetry(`${API}/mappings/${mappingId}/variants`),
       fetch(`${API}/mappings/${mappingId}/variant-locks`).catch(() => null),
     ]);
     if (!variantsRes.ok) throw new Error(`HTTP ${variantsRes.status}`);
@@ -2742,7 +2759,7 @@ async function loadVariantsForMappingModal(mappingId) {
         <i class="ti ti-info-circle"></i> Lock icons: <i class="ti ti-currency-dollar" style="font-size:10px"></i> Price · <i class="ti ti-box" style="font-size:10px"></i> Inventory · <i class="ti ti-photo" style="font-size:10px"></i> Image. Locked = skipped by auto-sync for that field only.
       </div>`;
   } catch (e) {
-    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}</div>`;
+    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}<div style="margin-top:10px"><button type="button" class="btn btn-xs" onclick="loadVariantsForMappingModal(${mappingId})"><i class="ti ti-refresh"></i> Retry variants</button></div></div>`;
   }
 }
 

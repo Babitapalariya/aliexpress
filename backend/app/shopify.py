@@ -2126,16 +2126,24 @@ def _shopify_request(method: str, url: str, max_retries: int = 5, **kwargs) -> r
     kwargs.setdefault("timeout", 20)
     for attempt in range(max_retries):
         _throttle()
-        res = requests.request(method, url, **kwargs)
-        if res.status_code != 429:
+        try:
+            res = requests.request(method, url, **kwargs)
+        except requests.RequestException as exc:
+            if attempt == max_retries - 1:
+                raise
+            delay = min(float(attempt + 1), 5.0)
+            print(f"[Shopify][Retry] {method} request failed: {exc}; retrying in {delay:.1f}s")
+            time.sleep(delay)
+            continue
+        if res.status_code != 429 and res.status_code not in (500, 502, 503, 504):
             return res
         retry_after = res.headers.get("Retry-After")
         try:
             delay = float(retry_after) if retry_after else 1.0
         except (ValueError, TypeError):
             delay = 1.0
-        delay = max(delay, 0.5) * (attempt + 1)
-        print(f"[Shopify][RateLimit] 429 on {method} {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
+        delay = min(max(delay, 0.5) * (attempt + 1), 5.0)
+        print(f"[Shopify][Retry] HTTP {res.status_code} on {method} {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
         time.sleep(delay)
     print(f"[Shopify][RateLimit] Giving up after {max_retries} retries: {method} {url}")
     return res

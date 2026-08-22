@@ -2335,14 +2335,15 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
     if not product.shopify_product_id:
         return {"variants": [], "message": "No Shopify product linked"}
 
-    from .shopify import _base, _h
-    res = requests.get(
+    from .shopify import _base, _h, _shopify_request
+    res = _shopify_request(
+        "GET",
         f"{_base()}/products/{product.shopify_product_id}.json",
         params={"fields": "id,title,variants,options"},
         headers=_h(), timeout=15,
     )
     if res.status_code != 200:
-        raise HTTPException(502, res.text)
+        raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
 
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
@@ -5064,11 +5065,11 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
     if not mapping:
         raise HTTPException(404, "Mapping not found")
-    from .shopify import _base, _h
-    res = requests.get(f"{_base()}/products/{mapping.shopify_product_id}.json",
+    from .shopify import _base, _h, _shopify_request
+    res = _shopify_request("GET", f"{_base()}/products/{mapping.shopify_product_id}.json",
         params={"fields": "id,title,variants,options"}, headers=_h(), timeout=15)
     if res.status_code != 200:
-        raise HTTPException(502, res.text)
+        raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
     from .shopify import get_variant_price_increase_map
