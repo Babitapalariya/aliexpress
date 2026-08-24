@@ -912,7 +912,7 @@ function showToast(msg, type="", persistent=false){
     const tb = document.getElementById("prod-tbody");
     tb.innerHTML = `<tr><td colspan="11"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading…</p></div></td></tr>`;
     try {
-      const url = `${API}/dashboard/products?page=${prodPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
+      const url = `${API}/dashboard/products?page=${prodPage}&page_size=20` + (q ? `&search=${encodeURIComponent(q)}` : '');
       const r = await fetch(url);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
@@ -1667,7 +1667,7 @@ async function syncInventoryFromModal() {
   const tbody = document.getElementById("mappings-tbody"); if(!tbody) return;
   tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><i class="ti ti-loader-2 spin"></i><p>Loading mappings...</p></div></td></tr>`;
   try{
-    const url = `${API}/mappings/list?page=${mappingPage}&page_size=5` + (q ? `&search=${encodeURIComponent(q)}` : '');
+    const url = `${API}/mappings/list?page=${mappingPage}&page_size=20` + (q ? `&search=${encodeURIComponent(q)}` : '');
     const r = await fetch(url);
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();

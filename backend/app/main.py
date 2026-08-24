@@ -527,7 +527,7 @@ def dashboard_stats(db: Session = Depends(get_db)):
 
 def list_products(
     page: int = Query(1, ge=1),
-    page_size: int = Query(5, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=100),
     search: str = Query(None, description="Search by title or AliExpress ID"),
     db: Session = Depends(get_db)
 ):
@@ -1086,7 +1086,7 @@ def add_mapping(aliexpress_id: str, shopify_product_id: str, shopify_product_tit
 @app.get("/mappings/list")
 def list_mappings(
     page: int = Query(1, ge=1),
-    page_size: int = Query(5, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=100),
     search: str = Query(None, description="Search by AliExpress ID, Shopify ID, or title"),
     db: Session = Depends(get_db)
 ):
