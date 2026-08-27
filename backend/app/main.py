@@ -101,6 +101,38 @@ IMPORT_MODE = "all"
 
 
 
+def _resume_variant_price_sync(record, db: Session) -> bool:
+    """Let legacy ``manual`` records sync when protection is per variant.
+
+    Older versions changed the whole product/mapping to manual mode after a
+    variant edit.  That prevents the scheduler from ever reaching the code
+    which skips locked variants and updates the unlocked ones.  Shopify's
+    variant metafields are the source of truth for these per-variant rules.
+    """
+    if record.price_mode != "manual":
+        return True
+
+    shopify_product_id = getattr(record, "shopify_product_id", None)
+    if not shopify_product_id:
+        return False
+
+    from .shopify import get_locked_variant_ids, get_variant_price_increase_map
+
+    has_price_locks = bool(get_locked_variant_ids(shopify_product_id, "price"))
+    has_variant_increases = bool(get_variant_price_increase_map(shopify_product_id))
+    if not (has_price_locks or has_variant_increases):
+        return False
+
+    # Repair the legacy product-wide mode so future scheduled runs do not stop
+    # before update_shopify_product_prices_with_skus can apply variant rules.
+    record.price_mode = "variant_manual" if has_price_locks else "variant_increase"
+    if hasattr(record, "custom_price"):
+        record.custom_price = None
+    db.commit()
+    print(f"[Sync] Resumed per-variant price sync for Shopify product {shopify_product_id}")
+    return True
+
+
 def sync_product_price(product_id: int, db: Session) -> bool:
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
@@ -115,7 +147,7 @@ def sync_product_price(product_id: int, db: Session) -> bool:
 
     print(f"[Sync][DEBUG] Starting sync for {product.aliexpress_id} (mode={product.price_mode})")
 
-    if product.price_mode == 'manual':
+    if not _resume_variant_price_sync(product, db):
         print(f"[Sync] Skipping manual product {product.aliexpress_id}")
         return False
 
@@ -1308,7 +1340,9 @@ def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = De
             for mapping_id in [m.id for m in mappings]:
                 try:
                     m = sub_db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
-                    if not m or not m.track_price or m.price_mode == "manual":
+                    if not m or not m.track_price:
+                        continue
+                    if not _resume_variant_price_sync(m, sub_db):
                         continue
                     raw = get_product(m.aliexpress_id, sub_db)
                     skus = raw.get("skus", [])
@@ -1388,7 +1422,7 @@ def sync_all_mapped_products_background():
     try:
         mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
         for m in mappings:
-            if m.price_mode == "manual":
+            if not _resume_variant_price_sync(m, db):
                 continue
             try:
                 raw = get_product(m.aliexpress_id, db)

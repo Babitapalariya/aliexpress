@@ -1371,7 +1371,7 @@ async function syncProductPrice(productId){
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right;display:flex;align-items:center;gap:4px">
-          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-price-increase="${v.price_increase || 0}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </td>
         <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--orange);font-family:var(--mono);font-weight:600">${increaseDisplay}</td>
@@ -1464,7 +1464,13 @@ async function deleteImportedVariant(variantId) {
       const vid = i.dataset.variantId;
       const stockInput = document.querySelector(`.variant-stock-input[data-variant-id="${vid}"]`);
       const out = { variant_id: vid, price: i.value };
-      if (i.dataset.editMode === "increase") out.price_increase = parseFloat(i.dataset.priceIncrease || "0");
+      // An explicit price lock means absolute/manual price. Otherwise any
+      // edit is a persistent increase over the AliExpress base price.
+      if (i.dataset.priceLocked !== "true") {
+        const savedIncrease = parseFloat(i.dataset.priceIncrease || "0");
+        const originalPrice = parseFloat(i.dataset.originalPrice || i.value);
+        out.price_increase = savedIncrease + (parseFloat(i.value) - originalPrice);
+      }
       if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
       return out;
     });
@@ -2390,7 +2396,6 @@ async function pushInventoryToShopify() {
     if (isNaN(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     const newPrice = currentPrice + inc;
     priceInput.value = newPrice.toFixed(2);
-    priceInput.dataset.priceIncrease = ((parseFloat(priceInput.dataset.priceIncrease) || 0) + inc).toFixed(2);
     priceInput.dataset.dirty = "true";
     priceInput.dataset.editMode = "increase";
     showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
@@ -2406,7 +2411,6 @@ async function pushInventoryToShopify() {
     inputs.forEach(inp => {
       const cur = parseFloat(inp.value) || 0;
       inp.value = (cur + inc).toFixed(2);
-      inp.dataset.priceIncrease = ((parseFloat(inp.dataset.priceIncrease) || 0) + inc).toFixed(2);
       inp.dataset.dirty = "true";
       inp.dataset.editMode = "increase";
     });
@@ -2727,7 +2731,7 @@ async function loadVariantsForMappingModal(mappingId) {
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right;display:flex;align-items:center;gap:4px">
-          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-price-increase="${v.price_increase || 0}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </td>
         <td style="padding:6px 8px;text-align:right">
@@ -2787,7 +2791,11 @@ function getEditedMappingVariantPrices() {
     const vid = i.dataset.variantId;
     const stockInput = document.querySelector(`.mm-variant-stock-input[data-variant-id="${vid}"]`);
     const out = { variant_id: vid, price: i.value };
-    if (i.dataset.editMode === "increase") out.price_increase = parseFloat(i.dataset.priceIncrease || "0");
+    if (i.dataset.priceLocked !== "true") {
+      const savedIncrease = parseFloat(i.dataset.priceIncrease || "0");
+      const originalPrice = parseFloat(i.dataset.originalPrice || i.value);
+      out.price_increase = savedIncrease + (parseFloat(i.value) - originalPrice);
+    }
     if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
     return out;
   });
@@ -2816,7 +2824,6 @@ function increaseMappingVariantPrice(btn, variantId) {
   if (isNaN(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
   const newPrice = currentPrice + inc;
   priceInput.value = newPrice.toFixed(2);
-  priceInput.dataset.priceIncrease = ((parseFloat(priceInput.dataset.priceIncrease) || 0) + inc).toFixed(2);
   priceInput.dataset.dirty = "true";
   priceInput.dataset.editMode = "increase";
   showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
@@ -2832,7 +2839,6 @@ function increaseAllMappingVariants() {
   inputs.forEach(inp => {
     const cur = parseFloat(inp.value) || 0;
     inp.value = (cur + inc).toFixed(2);
-    inp.dataset.priceIncrease = ((parseFloat(inp.dataset.priceIncrease) || 0) + inc).toFixed(2);
     inp.dataset.dirty = "true";
     inp.dataset.editMode = "increase";
   });
