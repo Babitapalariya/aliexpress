@@ -1489,7 +1489,7 @@ def debug_product_prices(shopify_product_id: str, db: Session = Depends(get_db))
 
 @app.post("/dashboard/products/{product_id}/sync-price")
 def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
-    """Manual sync: fetch latest AliExpress price, update Shopify, and reset mode to auto."""
+    """Fetch latest AliExpress prices while preserving per-variant rules."""
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
@@ -1505,21 +1505,15 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if not new_skus:
             raise HTTPException(500, "No SKUs found in AliExpress product")
 
-        # Manual Sync Price means "use AliExpress base price" for every
-        # unlocked variant. Remove temporary per-variant increases first;
-        # price-locked variants are left completely untouched.
-        from .shopify import (
-            get_locked_variant_ids, get_variant_price_increase_map,
-            set_variant_price_increase,
-        )
+        # A sync must never delete a variant's saved increase. Locked prices
+        # stay fixed; each unlocked variant is recalculated independently as
+        # its latest AliExpress base price plus its own saved increase.
+        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
         locked_variant_ids = get_locked_variant_ids(product.shopify_product_id, "price")
         saved_increases = get_variant_price_increase_map(product.shopify_product_id)
-        for variant_id in saved_increases:
-            if variant_id not in locked_variant_ids:
-                if not set_variant_price_increase(variant_id, 0.0):
-                    raise HTTPException(502, f"Failed to reset increase for variant {variant_id}")
 
-        # 2. Update unlocked Shopify variants to AliExpress base prices.
+        # 2. Update only unlocked Shopify variants. The central updater reads
+        # the same per-variant map and reapplies each value by variant ID.
         success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
         if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
@@ -1529,16 +1523,18 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if original_price:
             product.original_price = original_price
 
-        # The product remains in Auto mode. Variant price locks are the only
-        # protection needed for prices that must not follow AliExpress.
-        product.price_mode = "auto"
+        product.price_mode = (
+            "variant_manual" if locked_variant_ids
+            else "variant_increase" if saved_increases
+            else "auto"
+        )
         product.price_increase = 0.0
         product.custom_price = None   # remove any manual override
         db.commit()
 
         return {
             "message": (
-                "Unlocked variant prices synced from AliExpress"
+                "Unlocked variant prices synced from AliExpress with saved increases"
                 + (f"; {len(locked_variant_ids)} locked variant(s) kept unchanged" if locked_variant_ids else "")
             ),
             "price_mode": product.price_mode
@@ -4977,19 +4973,19 @@ def toggle_variant_lock(
     if shopify_id:
         _invalidate_lock_cache(shopify_id)
 
-    # Repair products put into product-wide manual mode by the old
-    # per-variant edit behavior. Individual price locks now provide the
-    # protection while unlocked variants continue syncing normally.
+    # Keep the product in a per-variant mode whenever a price lock changes.
+    # A product-wide manual mode would prevent unlocked/increased siblings
+    # from reaching the per-variant sync logic.
     if lock_type == "price" and new_state:
         if product_id:
             p = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
-            if p and p.price_mode == "manual":
+            if p:
                 p.price_mode = "variant_manual"
                 p.custom_price = None
                 db.commit()
         elif mapping_id:
             m = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
-            if m and m.price_mode == "manual":
+            if m:
                 m.price_mode = "variant_manual"
                 db.commit()
 

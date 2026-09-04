@@ -1012,7 +1012,13 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         return "failed"
 
     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "price")
-    variant_price_increases = get_variant_price_increase_map(shopify_product_id)
+    # Keep adjustments keyed by the exact Shopify variant ID. Never collapse
+    # these into a product-level/max value: sibling variants may have different
+    # increases and locked variants may coexist with increased variants.
+    variant_price_increases = {
+        int(variant_id): float(amount)
+        for variant_id, amount in get_variant_price_increase_map(shopify_product_id).items()
+    }
     if locked_variant_ids:
         print(f"[UPDATE] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
 
@@ -1093,7 +1099,13 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         if new_price is not None:
             # Reapply only this variant's saved increase to the latest
             # AliExpress base price; sibling variants remain independent.
-            new_price += variant_price_increases.get(variant["id"], 0.0)
+            variant_id = int(variant["id"])
+            variant_increase = variant_price_increases.get(variant_id, 0.0)
+            new_price += variant_increase
+            print(
+                f"[UPDATE][RULE] variant={variant_id} base={new_price - variant_increase:.2f} "
+                f"increase={variant_increase:.2f} final={new_price:.2f}"
+            )
             any_match_found = True
             if abs(float(variant["price"]) - new_price) > 0.01:
                 to_update.append((variant["id"], new_price, variant.get("option1", "?"), variant["price"]))
