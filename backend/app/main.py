@@ -169,6 +169,7 @@ def sync_product_price(product_id: int, db: Session) -> bool:
             current_price = sku.get("sale_price") or sku.get("price")
             if current_price is not None:
                 new_price = float(current_price) + product.price_increase
+                sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                 sku["sale_price"] = str(new_price)
                 sku["price"] = str(new_price)
 
@@ -355,7 +356,12 @@ def sync_all_tracked_products():
         products = db.query(ImportedProduct).filter(ImportedProduct.track_price == True).all()
         print(f"[Sync] Starting price sync for {len(products)} products")
         for p in products:
-            sync_product_price(p.id, db)
+            try:
+                sync_product_price(p.id, db)
+            except Exception as exc:
+                db.rollback()
+                print(f"[Sync] Product {p.id} failed: {exc}")
+                continue
             # After price sync, check if this product has OOS variants
             # and queue it if not already tracked
             try:
@@ -501,9 +507,19 @@ from fastapi.middleware.cors import CORSMiddleware as _RootCORS
 @asynccontextmanager
 async def root_lifespan(root_app: FastAPI):
     start_scheduler()
-    sync_existing_shopify_products_to_db()   # initial sync
-    yield
-    shutdown_scheduler()
+    # The initial Shopify scan can take minutes. Serve login requests while
+    # the scheduler runs that scan in the background.
+    if scheduler is not None:
+        scheduler.add_job(
+            sync_existing_shopify_products_to_db,
+            trigger="date",
+            id="initial_shopify_scan",
+            replace_existing=True,
+        )
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
 
 root_app = _RootFastAPI(title="AliShopify Backend Root", lifespan=root_lifespan)
 #root_app.add_middleware(...)   # CORS
@@ -514,7 +530,8 @@ root_app = _RootFastAPI(title="AliShopify Backend Root", lifespan=root_lifespan)
 # Re-apply CORS on the root app as well (covers the mount boundary)
 root_app.add_middleware(
     _RootCORS,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001"],
+    allow_origins=["https://aliexpress.retradviews.com"],
+    allow_origin_regex=r"https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1354,6 +1371,7 @@ def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = De
                             price = sku.get("sale_price") or sku.get("price")
                             if price is not None:
                                 adjusted = str(float(price) + m.price_increase)
+                                sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                                 sku["sale_price"] = adjusted
                                 sku["price"] = adjusted
                     result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
@@ -1449,6 +1467,7 @@ def sync_all_mapped_products_background():
                     for sku in skus:
                         price = sku.get("sale_price") or sku.get("price")
                         if price:
+                            sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                             sku["sale_price"] = str(float(price) + m.price_increase)
                             sku["price"] = str(float(price) + m.price_increase)
                 update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
@@ -1674,6 +1693,7 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
         base_price = sku.get("sale_price") or sku.get("price")
         if base_price is not None:
             new_price = float(base_price) + total_increase
+            sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
             sku["sale_price"] = str(new_price)
             sku["price"] = str(new_price)
 
@@ -1952,6 +1972,7 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
         base_price = sku.get("sale_price") or sku.get("price")
         if base_price is not None:
             new_price = float(base_price) + increase_by
+            sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
             sku["sale_price"] = str(new_price)
             sku["price"] = str(new_price)
 
@@ -2378,8 +2399,8 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
 
-    from .shopify import get_variant_price_increase_map
-    price_increases = get_variant_price_increase_map(product.shopify_product_id)
+    from .shopify import get_variant_sync_state
+    pricing = get_variant_sync_state(product.shopify_product_id)
     result = []
     for v in variants:
         # Build a readable label from option1/2/3
@@ -2393,7 +2414,9 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
-            "price_increase": price_increases.get(v["id"], 0.0),
+            "price_increase": float(pricing[v["id"]]["price_increase"]),
+            "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
+            "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
         })
 
     return {
@@ -2611,54 +2634,13 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
         raise HTTPException(400, "No variants provided")
 
     from .shopify import (
-        _base, _h, _shopify_request,
-        bulk_update_variant_prices, bulk_set_inventory_quantities,
-        _invalidate_lock_cache, set_variant_lock, set_variant_price_increase,
-        get_locked_variant_ids, get_variant_price_increase_map,
+        _base, _h, _shopify_request, bulk_set_inventory_quantities,
+        get_locked_variant_ids, get_variant_price_increase_map, save_variant_price_edits,
     )
-
-    # ── 1. Prices — ONE GraphQL mutation for all variants ──
-    price_updates = []
-    for v in variants_payload:
-        vid = v.get("variant_id")
-        price = v.get("price")
-        if vid is None or price is None:
-            continue
-        try:
-            price_updates.append({"variant_id": int(vid), "price": str(float(price))})
-        except (ValueError, TypeError):
-            raise HTTPException(400, f"Invalid price for variant {vid}")
-
-    if not price_updates:
-        raise HTTPException(400, "No valid variant updates provided")
-
-    price_result = bulk_update_variant_prices(product.shopify_product_id, price_updates)
-    if not price_result["success"]:
-        raise HTTPException(502, f"Shopify variant price update failed: {price_result['errors']}")
-
-    # A plus-button increase follows this variant's future AliExpress price.
-    # A directly entered absolute price is instead protected by a price lock.
-    for v in variants_payload:
-        try:
-            vid = int(v.get("variant_id"))
-        except (ValueError, TypeError):
-            continue
-        if "price_increase" in v:
-            try:
-                amount = float(v["price_increase"])
-            except (ValueError, TypeError):
-                raise HTTPException(400, f"Invalid price increase for variant {vid}")
-            if not set_variant_price_increase(vid, amount):
-                raise HTTPException(502, f"Failed to save price increase for variant {vid}")
-            set_variant_lock(vid, "price", False)
-        else:
-            set_variant_price_increase(vid, 0.0)
-            set_variant_lock(vid, "price", True)
-    _invalidate_lock_cache(product.shopify_product_id)
+    price_updates = save_variant_price_edits(product.shopify_product_id, variants_payload)
     has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
     has_variant_increases = bool(get_variant_price_increase_map(product.shopify_product_id))
 
-    # ── 2. Inventory — ONE GraphQL mutation across all variants + locations ──
     inventory_updates = {}
     for v in variants_payload:
         vid = v.get("variant_id")
@@ -5102,8 +5084,8 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
         raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
-    from .shopify import get_variant_price_increase_map
-    price_increases = get_variant_price_increase_map(mapping.shopify_product_id)
+    from .shopify import get_variant_sync_state
+    pricing = get_variant_sync_state(mapping.shopify_product_id)
     result = []
     for v in variants:
         label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
@@ -5114,7 +5096,9 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
-            "price_increase": price_increases.get(v["id"], 0.0),
+            "price_increase": float(pricing[v["id"]]["price_increase"]),
+            "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
+            "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
         })
     return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
 
@@ -5129,51 +5113,9 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
         raise HTTPException(400, "No variants provided")
 
     from .shopify import (
-        _base, _h, _shopify_request, set_variant_lock,
-        set_variant_price_increase, _invalidate_lock_cache,
-        get_locked_variant_ids, get_variant_price_increase_map,
+        get_locked_variant_ids, get_variant_price_increase_map, save_variant_price_edits,
     )
-    updated_variants = []
-    for v in variants_payload:
-        vid, price = v.get("variant_id"), v.get("price")
-        if vid is None or price is None:
-            continue
-        try:
-            updated_variants.append({"id": int(vid), "price": str(float(price))})
-        except (ValueError, TypeError):
-            raise HTTPException(400, f"Invalid price for variant {vid}")
-    if not updated_variants:
-        raise HTTPException(400, "No valid variant updates provided")
-
-    price_success = 0
-    for uv in updated_variants:
-        try:
-            res = _shopify_request("PUT", f"{_base()}/variants/{uv['id']}.json",
-                json={"variant": {"id": uv["id"], "price": uv["price"]}}, headers=_h(), timeout=20)
-            res.raise_for_status()
-            price_success += 1
-        except Exception as e:
-            print(f"[MappingVariantEdit] Price update failed for variant {uv['id']}: {e}")
-    if price_success == 0:
-        raise HTTPException(502, "Shopify variant price update failed for all variants")
-
-    for v in variants_payload:
-        try:
-            vid = int(v.get("variant_id"))
-        except (ValueError, TypeError):
-            continue
-        if "price_increase" in v:
-            try:
-                amount = float(v["price_increase"])
-            except (ValueError, TypeError):
-                raise HTTPException(400, f"Invalid price increase for variant {vid}")
-            if not set_variant_price_increase(vid, amount):
-                raise HTTPException(502, f"Failed to save price increase for variant {vid}")
-            set_variant_lock(vid, "price", False)
-        else:
-            set_variant_price_increase(vid, 0.0)
-            set_variant_lock(vid, "price", True)
-    _invalidate_lock_cache(mapping.shopify_product_id)
+    updated_variants = save_variant_price_edits(mapping.shopify_product_id, variants_payload)
     has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
     has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
 

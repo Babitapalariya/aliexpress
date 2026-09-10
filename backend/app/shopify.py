@@ -979,165 +979,85 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
 
 
 def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
-    """
-    Returns one of: "updated", "unchanged", "failed"
-    """
-    if not settings.SHOPIFY_STORE:
+    """Sync each unlocked variant from its own supplier price and saved increase."""
+    from decimal import Decimal, ROUND_HALF_UP
+    from .price_history import observe_supplier_price
+    if not settings.SHOPIFY_STORE or not aliexpress_skus:
         return "failed"
-    print(f"\n[UPDATE] Starting variant price sync for product {shopify_product_id}")
-
-    price_by_ae_sku = {}
-    for sku in aliexpress_skus:
-        ae_sku_id = str(sku.get("sku_id"))
-        price = sku.get("sale_price") or sku.get("price")
-        if ae_sku_id and ae_sku_id != "None" and price:
-            price_by_ae_sku[ae_sku_id] = float(price)
-
-    if not price_by_ae_sku and not aliexpress_skus:
-        print("[UPDATE] No AE SKU IDs")
-        return "failed"
-
     try:
-        res = requests.get(
-            f"{_base()}/products/{shopify_product_id}.json",
-            params={"fields": "id,variants"},
-            headers=_h(), timeout=15,
-        )
-        res.raise_for_status()
-        shopify_variants = res.json().get("product", {}).get("variants", [])
-        if not shopify_variants:
+        # Fresh snapshot: no stale lock cache and no separate requests per SKU.
+        variants = get_variant_sync_state(shopify_product_id)
+        if not variants:
             return "failed"
-    except Exception as e:
-        print(f"[UPDATE] Fetch error: {e}")
+        by_id, by_label = {}, {}
+        for sku in aliexpress_skus:
+            raw = sku.get("sale_price") or sku.get("price")
+            if raw is None:
+                continue
+            price = Decimal(str(raw))
+            if not price.is_finite() or price < 0:
+                raise ValueError("Invalid AliExpress variant price")
+            if sku.get("sku_id") is not None:
+                by_id[str(sku["sku_id"])] = (price, sku.get("_supplier_price", raw))
+            label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
+            if label:
+                by_label.setdefault(label, []).append((price, sku.get("_supplier_price", raw)))
+
+        updates, unmatched = [], []
+        for vid, variant in variants.items():
+            ae_id = variant["ae_sku_id"]
+            base = by_id.get(str(ae_id)) if ae_id is not None else None
+            if base is None and ae_id is None:
+                label = variant["label"].strip().lower()
+                matches = by_label.get(label, [])
+                if not matches and label:
+                    tokens = {part.strip() for part in label.split("/")}
+                    matches = [price for key, prices in by_label.items()
+                               if tokens == {part.strip() for part in key.split("/")}
+                               for price in prices]
+                if len(matches) == 1:
+                    base = matches[0]
+                elif not label and len(variants) == len(aliexpress_skus) == 1:
+                    raw = aliexpress_skus[0].get("sale_price") or aliexpress_skus[0].get("price")
+                    base = (Decimal(str(raw)), aliexpress_skus[0].get("_supplier_price", raw)) if raw is not None else None
+            if base is None:
+                if not variant["locks"]["price"]:
+                    unmatched.append(vid)
+                continue
+            base, supplier_price = base
+            previous = variant.get("supplier_history")
+            history = observe_supplier_price(previous, supplier_price)
+            update = {"variant_id": vid}
+            if history != previous:
+                update["supplier_history"] = history
+                update["supplier_history_id"] = variant.get("supplier_history_id")
+            if variant["locks"]["price"]:
+                if "supplier_history" in update:
+                    updates.append(update)
+                continue
+            final = (base + variant["price_increase"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if final < 0:
+                raise ValueError(f"Negative final price for variant {vid}")
+            if Decimal(str(variant["price"])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) != final:
+                update["price"] = str(final)
+            if len(update) > 1:
+                updates.append(update)
+            print(f"[PriceSync] variant={vid} supplier={base} increase={variant['price_increase']} final={final}")
+        if unmatched:
+            print(f"[PriceSync] No unambiguous AliExpress SKU match for variants {unmatched}")
+        if not updates:
+            return "failed" if unmatched else "unchanged"
+        for offset in range(0, len(updates), 100):
+            batch = updates[offset:offset + 100]
+            result = bulk_update_variant_prices(shopify_product_id, batch)
+            if not result["success"] or result.get("errors") or result["updated"] != len(batch):
+                print(f"[PriceSync] Shopify update incomplete: {result}")
+                return "failed"
+        return "failed" if unmatched else "updated" if any("price" in row for row in updates) else "unchanged"
+    except Exception as exc:
+        print(f"[PriceSync] Product {shopify_product_id} failed: {exc}")
         return "failed"
 
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "price")
-    # Keep adjustments keyed by the exact Shopify variant ID. Never collapse
-    # these into a product-level/max value: sibling variants may have different
-    # increases and locked variants may coexist with increased variants.
-    variant_price_increases = {
-        int(variant_id): float(amount)
-        for variant_id, amount in get_variant_price_increase_map(shopify_product_id).items()
-    }
-    if locked_variant_ids:
-        print(f"[UPDATE] {len(locked_variant_ids)} variant(s) locked — will be skipped: {locked_variant_ids}")
-
-    variant_ae_map = {}
-    for variant in shopify_variants:
-        vid = variant["id"]
-        try:
-            mf_res = _shopify_request(
-                "GET", f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
-            )
-            if mf_res.status_code == 200:
-                mfs = mf_res.json().get("metafields", [])
-                if mfs:
-                    variant_ae_map[vid] = mfs[0].get("value")
-        except Exception as e:
-            print(f"[UPDATE] Metafield error for variant {vid}: {e}")
-
-    price_by_label = {}
-    for sku in aliexpress_skus:
-        label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
-        price = sku.get("sale_price") or sku.get("price")
-        if label and price:
-            price_by_label[label] = float(price)
-
-    def _variant_label(variant: dict) -> str:
-        parts = [
-            variant.get(f"option{i}")
-            for i in (1, 2, 3)
-            if variant.get(f"option{i}") and variant.get(f"option{i}") != "Default Title"
-        ]
-        return " / ".join(parts).strip().lower()
-
-    def _fuzzy_label_match(variant_label: str):
-        if not variant_label:
-            return None
-        if variant_label in price_by_label:
-            return price_by_label[variant_label]
-        variant_tokens = set(t.strip() for t in variant_label.split("/"))
-        for label, price in price_by_label.items():
-            label_tokens = set(t.strip() for t in label.split("/"))
-            if variant_tokens and variant_tokens.issubset(label_tokens):
-                return price
-        return None
-
-    print(f"[UPDATE][DEBUG] price_by_ae_sku = {price_by_ae_sku}")
-    print(f"[UPDATE][DEBUG] price_by_label = {price_by_label}")
-    print(f"[UPDATE][DEBUG] variant_ae_map = {variant_ae_map}")
-
-    to_update = []
-    any_match_found = False
-    skipped_locked = 0
-    unmatched_variants = []
-
-    for i, variant in enumerate(shopify_variants):
-        if variant["id"] in locked_variant_ids:
-            skipped_locked += 1
-            continue  # price-locked — auto-sync must not touch this variant's price
-
-        new_price = None
-        ae_sku_id = variant_ae_map.get(variant["id"])
-
-        # 1. This variant's own metafield match (most reliable, per-variant)
-        if ae_sku_id and ae_sku_id in price_by_ae_sku:
-            new_price = price_by_ae_sku[ae_sku_id]
-        else:
-            # 2. Label fallback for THIS variant — NEVER gated by whether
-            #    other variants matched via metafield. No global flag here.
-            label = _variant_label(variant)
-            new_price = _fuzzy_label_match(label)
-            # 3. Positional fallback as last resort for THIS variant
-            if new_price is None and i < len(aliexpress_skus):
-                ae_sku = aliexpress_skus[i]
-                ae_price = ae_sku.get("sale_price") or ae_sku.get("price")
-                if ae_price is not None:
-                    new_price = float(ae_price)
-
-        if new_price is not None:
-            # Reapply only this variant's saved increase to the latest
-            # AliExpress base price; sibling variants remain independent.
-            variant_id = int(variant["id"])
-            variant_increase = variant_price_increases.get(variant_id, 0.0)
-            new_price += variant_increase
-            print(
-                f"[UPDATE][RULE] variant={variant_id} base={new_price - variant_increase:.2f} "
-                f"increase={variant_increase:.2f} final={new_price:.2f}"
-            )
-            any_match_found = True
-            if abs(float(variant["price"]) - new_price) > 0.01:
-                to_update.append((variant["id"], new_price, variant.get("option1", "?"), variant["price"]))
-        else:
-            unmatched_variants.append(variant["id"])
-
-    if skipped_locked:
-        print(f"[UPDATE] Skipped {skipped_locked} price-locked variant(s) for product {shopify_product_id}")
-    if unmatched_variants:
-        print(f"[UPDATE] {len(unmatched_variants)} variant(s) had NO price match at all: {unmatched_variants}")
-
-    if not any_match_found:
-        print("[UPDATE] No price changes (no metafield/label/positional match found)")
-        return "failed"
-
-    if not to_update:
-        print("[UPDATE] Price already up to date — no Shopify update needed")
-        return "unchanged"
-
-    # Send one GraphQL mutation instead of one REST request per variant. The
-    # REST loop easily exhausts Shopify's request bucket and leaves a product
-    # only partially updated with HTTP 429 responses.
-    result = bulk_update_variant_prices(shopify_product_id, [
-        {"variant_id": variant_id, "price": str(new_price)}
-        for variant_id, new_price, _option_label, _old_price in to_update
-    ])
-    if not result["success"]:
-        print(f"[UPDATE] Bulk price update failed: {result['errors']}")
-        return "failed"
-
-    print(f"[UPDATE] Success, {result['updated']}/{len(to_update)} variants updated")
-    return "updated"
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
     res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h())
@@ -1971,54 +1891,67 @@ LOCK_TYPES = ("price", "inventory", "image")
 #     _lock_cache[shopify_product_id] = (_time.time(), lock_map)
 #     return lock_map
 
-def get_variant_lock_map(shopify_product_id: str, use_cache: bool = True) -> dict:
-    """
-    Fetch every variant's lock flags in ONE GraphQL call (instead of 1 + N
-    sequential REST calls). Returns {variant_id: {"price": bool, "inventory": bool, "image": bool}}
-    Cached for _LOCK_CACHE_TTL seconds.
-    """
-    if use_cache:
-        cached = _lock_cache.get(shopify_product_id)
-        if cached and (_time.time() - cached[0]) < _LOCK_CACHE_TTL:
-            return cached[1]
-
-    lock_map = {}
+def get_variant_sync_state(shopify_product_id: str) -> dict:
+    """Read all prices, SKU links and rules together; never default failed reads."""
     query = """
-    query($id: ID!) {
+    query($id: ID!, $after: String) {
       product(id: $id) {
-        variants(first: 100) {
-          edges {
-            node {
-              id
-              metafields(namespace: "sync", first: 10) {
-                edges { node { key value } }
-              }
-            }
-          }
+        variants(first: 100, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          edges { node {
+            id price selectedOptions { name value }
+            aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value }
+            increase: metafield(namespace: "sync", key: "price_increase") { id value }
+            supplierHistory: metafield(namespace: "sync", key: "supplier_price_history") { id value }
+            priceLock: metafield(namespace: "sync", key: "price_locked") { value }
+            inventoryLock: metafield(namespace: "sync", key: "inventory_locked") { value }
+            imageLock: metafield(namespace: "sync", key: "image_locked") { value }
+          } }
         }
       }
     }
     """
-    try:
-        data = _graphql(query, {"id": _product_gid(shopify_product_id)})
-        product = data.get("product") or {}
-        edges = product.get("variants", {}).get("edges", [])
-        for edge in edges:
+    import json
+    from decimal import Decimal
+    state, cursor = {}, None
+    while True:
+        data = _graphql(query, {"id": _product_gid(shopify_product_id), "after": cursor})
+        if not data.get("product"):
+            raise RuntimeError("Shopify variant pricing rules could not be read")
+        connection = data["product"]["variants"]
+        for edge in connection["edges"]:
             node = edge["node"]
             vid = int(_numeric_id_from_gid(node["id"]))
-            flags = {"price": False, "inventory": False, "image": False}
-            for mf_edge in node.get("metafields", {}).get("edges", []):
-                mf = mf_edge["node"]
-                key = mf.get("key", "")
-                if key.endswith("_locked") and mf.get("value") == "true":
-                    lt = key.replace("_locked", "")
-                    if lt in flags:
-                        flags[lt] = True
-            lock_map[vid] = flags
-    except Exception as e:
-        print(f"[Lock] GraphQL fetch failed for {shopify_product_id}: {e}")
-        return lock_map
+            increase = Decimal((node.get("increase") or {}).get("value", "0"))
+            if not increase.is_finite():
+                raise ValueError(f"Invalid saved increase for variant {vid}")
+            state[vid] = {
+                "id": vid, "price": node["price"],
+                "ae_sku_id": (node.get("aeSku") or {}).get("value"),
+                "price_increase": increase,
+                "supplier_history": json.loads(node["supplierHistory"]["value"]) if node.get("supplierHistory") else None,
+                "supplier_history_id": (node.get("supplierHistory") or {}).get("id"),
+                "increase_metafield_id": (node.get("increase") or {}).get("id"),
+                "label": " / ".join(option["value"] for option in node["selectedOptions"]
+                                     if option["value"] != "Default Title"),
+                "locks": {field: (node.get(field + "Lock") or {}).get("value") == "true"
+                          for field in LOCK_TYPES},
+            }
+        page = connection["pageInfo"]
+        if not page["hasNextPage"]:
+            return state
+        next_cursor = page["endCursor"]
+        if not next_cursor or next_cursor == cursor:
+            raise RuntimeError("Shopify variant pagination did not advance")
+        cursor = next_cursor
 
+
+def get_variant_lock_map(shopify_product_id: str, use_cache: bool = True) -> dict:
+    if use_cache:
+        cached = _lock_cache.get(shopify_product_id)
+        if cached and (_time.time() - cached[0]) < _LOCK_CACHE_TTL:
+            return cached[1]
+    lock_map = {vid: row["locks"] for vid, row in get_variant_sync_state(shopify_product_id).items()}
     _lock_cache[shopify_product_id] = (_time.time(), lock_map)
     return lock_map
 
@@ -2035,33 +1968,48 @@ def get_locked_variant_ids(shopify_product_id: str, lock_type: str) -> set:
 
 
 def get_variant_price_increase_map(shopify_product_id: str) -> dict[int, float]:
-    """Return persistent per-variant price increases stored in Shopify."""
-    query = """
-    query($id: ID!) {
-      product(id: $id) {
-        variants(first: 100) {
-          edges { node {
-            id
-            priceIncrease: metafield(namespace: "sync", key: "price_increase") { value }
-          } }
-        }
-      }
-    }
-    """
-    increases = {}
-    try:
-        data = _graphql(query, {"id": _product_gid(shopify_product_id)})
-        edges = (data.get("product") or {}).get("variants", {}).get("edges", [])
-        for edge in edges:
-            node = edge["node"]
-            metafield = node.get("priceIncrease")
-            if metafield:
-                amount = float(metafield.get("value") or 0)
-                if amount:
-                    increases[int(_numeric_id_from_gid(node["id"]))] = amount
-    except Exception as e:
-        print(f"[VariantIncrease] Fetch failed for product {shopify_product_id}: {e}")
-    return increases
+    return {vid: float(row["price_increase"])
+            for vid, row in get_variant_sync_state(shopify_product_id).items()
+            if row["price_increase"]}
+
+
+def save_variant_price_edits(shopify_product_id: str, edits: list) -> list:
+    """Save each final price and its persistent adjustment in the same mutation."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    state = get_variant_sync_state(shopify_product_id)
+    updates, seen = [], set()
+    for edit in edits:
+        try:
+            vid = int(edit["variant_id"])
+            price = Decimal(str(edit["price"]))
+            if vid not in state or vid in seen:
+                raise ValueError("Variant is missing from this product or duplicated")
+            if not price.is_finite() or price < 0:
+                raise ValueError("Price must be finite and non-negative")
+            price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            previous = state[vid]
+            # Older clients may submit an absolute price without an increase.
+            # Derive the additional adjustment from that variant's current price,
+            # preserving its existing increase instead of resetting it or locking it.
+            increase = (Decimal(str(edit["price_increase"])) if "price_increase" in edit
+                        else previous["price_increase"] + price - Decimal(str(previous["price"])))
+            if not increase.is_finite():
+                raise ValueError("Increase must be finite")
+            increase = increase.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            updates.append({"variant_id": vid, "price": str(price), "price_increase": str(increase),
+                            "increase_metafield_id": previous.get("increase_metafield_id")})
+            seen.add(vid)
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise HTTPException(400, f"Invalid variant price edit: {exc}") from exc
+    if not updates:
+        raise HTTPException(400, "No variant price edits provided")
+    # Validate the complete request before writing any batches.
+    for offset in range(0, len(updates), 100):
+        result = bulk_update_variant_prices(shopify_product_id, updates[offset:offset + 100])
+        if not result["success"]:
+            raise HTTPException(502, f"Failed to save variant prices and increases: {result['errors']}")
+    _invalidate_lock_cache(shopify_product_id)
+    return updates
 
 
 def set_variant_price_increase(variant_id: int, amount: float) -> bool:
@@ -2232,16 +2180,33 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
 
     mutation = """
     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants { id price }
+      productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
+        productVariants { id price priceIncrease: metafield(namespace: "sync", key: "price_increase") { value } }
         userErrors { field message }
       }
     }
     """
-    variants_input = [
-        {"id": _variant_gid(v["variant_id"]), "price": str(v["price"])}
-        for v in variant_prices
-    ]
+    variants_input = []
+    for edit in variant_prices:
+        row = {"id": _variant_gid(edit["variant_id"])}
+        if "price" in edit:
+            row["price"] = str(edit["price"])
+        if "price_increase" in edit:
+            metafield = {"value": str(edit["price_increase"])}
+            if edit.get("increase_metafield_id"):
+                metafield["id"] = edit["increase_metafield_id"]
+            else:
+                metafield.update({"namespace": "sync", "key": "price_increase", "type": "number_decimal"})
+            row["metafields"] = [metafield]
+        if "supplier_history" in edit:
+            import json
+            history = {"value": json.dumps(edit["supplier_history"])}
+            if edit.get("supplier_history_id"):
+                history["id"] = edit["supplier_history_id"]
+            else:
+                history.update({"namespace": "sync", "key": "supplier_price_history", "type": "json"})
+            row.setdefault("metafields", []).append(history)
+        variants_input.append(row)
     try:
         data = _graphql(mutation, {
             "productId": _product_gid(shopify_product_id),
@@ -2249,10 +2214,18 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
         })
         result = data.get("productVariantsBulkUpdate", {})
         errors = result.get("userErrors", [])
-        updated = len(result.get("productVariants", []))
+        returned = {row["id"]: row for row in result.get("productVariants", [])}
+        updated = len(returned)
+        from decimal import Decimal
+        for edit in variant_prices:
+            if "price_increase" in edit:
+                saved = returned.get(_variant_gid(edit["variant_id"]), {})
+                amount = (saved.get("priceIncrease") or {}).get("value")
+                if amount is None or Decimal(amount) != Decimal(str(edit["price_increase"])):
+                    errors.append({"message": f"Increase was not confirmed for variant {edit['variant_id']}"})
         if errors:
             print(f"[BulkPrice] userErrors: {errors}")
-        return {"success": updated > 0, "updated": updated, "errors": errors}
+        return {"success": not errors and updated == len(variants_input), "updated": updated, "errors": errors}
     except Exception as e:
         print(f"[BulkPrice] Mutation failed: {e}")
         return {"success": False, "updated": 0, "errors": [str(e)]}
