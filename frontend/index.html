@@ -1807,7 +1807,19 @@ async function syncMappingImages(mappingId){
     }
     catch(e){showToast("Error: "+e.message,"err");}
   }
-  async function deleteMapping(id){if(!confirm("Delete mapping?"))return;try{const r=await fetch(`${API}/mappings/${id}`,{method:"DELETE"});if(!r.ok)throw new Error(await r.text());showToast("Deleted","ok");await loadMappings(mappingPage);}catch(e){showToast("Delete failed: "+e.message,"err");}}
+  async function deleteMapping(id, fromProductSearch = false) {
+    if (!confirm("Delete this mapping? The Shopify product will remain unchanged.")) return;
+    try {
+      const r = await fetch(`${API}/mappings/${id}`, {method: "DELETE"});
+      const data = await safeJson(r);
+      if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+      showToast("Mapping deleted", "ok");
+      await loadMappings(mappingPage);
+      if (fromProductSearch) await refreshCurrentSearch();
+    } catch (e) {
+      showToast("Delete failed: " + e.message, "err");
+    }
+  }
   // async function syncMappedPrice(aliexpressId){
   //   try{
   //     showToast("Syncing...","info");
@@ -2185,7 +2197,9 @@ async function pushInventoryToShopify() {
                     : `<button class="btn btn-danger btn-icon sm" title="Remap to new AliExpress ID" onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>`)
                 : ""}
               ${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>` : ""}
-              ${p.source === 'imported' ? `<button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ""}
+              ${p.source === 'mapping'
+                ? `<button class="btn btn-icon sm" style="color:var(--red)" title="Delete mapping" onclick="deleteMapping(${p.id}, true)"><i class="ti ti-trash" style="font-size:13px"></i></button>`
+                : p.source === 'imported' ? `<button class="btn btn-icon sm" style="color:var(--red)" title="Delete product" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>` : ""}
             </div></td>
           </tr>`;
           }).join("");
@@ -3026,9 +3040,9 @@ async function syncMappingInventoryFromModal() {
 
 function refreshCurrentSearch() {
   const q = document.getElementById("prod-search").value.trim();
-  if (!q) { loadProducts(prodPage); return; }
-  if (/^\d+$/.test(q)) { doSmartLookup(q); }
-  else { loadProducts(1); }
+  if (!q) return loadProducts(prodPage);
+  if (/^\d+$/.test(q)) return doSmartLookup(q);
+  else return loadProducts(1);
 }
 
 // ── DATABASE BACKUP ──
