@@ -59,6 +59,39 @@ async function checkForm(mapping) {
   assert.equal(context[collect]()[0].price_increase, 5);
 }
 
+async function checkMatchingTables() {
+  const panels = {'m-variants-wrap': {}, 'mm-variants-wrap': {}};
+  const context = vm.createContext({
+    API: '/api', currentVariants: [],
+    document: {getElementById: id => panels[id]},
+    fetchWithRetry: async () => ({ok: true, json: async () => ({variants: [
+      {variant_id: 1, label: 'Red', price: '17.00', price_increase: 5, supplier_price_change: '-2.00'},
+    ]})}),
+    fetch: async () => ({ok: true, json: async () => ({locks: {}})}),
+    buildLockIcons: () => 'locks', buildMappingLockIcons: () => 'locks',
+  });
+  // Locate active definitions (the source retains a commented older loader).
+  for (const name of ['formatIncrease', 'loadVariantsForModal', 'loadVariantsForMappingModal']) {
+    if (name === 'loadVariantsForModal') {
+      const start = html.indexOf('  async function loadVariantsForModal(');
+      const end = html.indexOf('\nasync function deleteImportedVariant', start);
+      vm.runInContext(html.slice(start, end), context);
+    } else load(name, context);
+  }
+  await context.loadVariantsForModal(1);
+  await context.loadVariantsForMappingModal(1);
+  const imported = panels['m-variants-wrap'].innerHTML;
+  const mapped = panels['mm-variants-wrap'].innerHTML;
+  assert.equal(imported.match(/<thead[\s\S]*?<\/thead>/)[0], mapped.match(/<thead[\s\S]*?<\/thead>/)[0]);
+  for (const table of [imported, mapped]) {
+    assert.match(table, /\+\$5\.00/);
+    assert.match(table, /-\$2\.00/);
+    assert.match(table, /supplier-change-heading/);
+    assert.match(table, /variant-table-scroll/);
+  }
+  assert.match(mapped, /deleteMappedVariant\(1\)/);
+}
+
 (async () => {
   const routing = vm.createContext({});
   load('formatIncrease', routing);
@@ -77,5 +110,6 @@ async function checkForm(mapping) {
   assert.equal(routing.getApiBase({hostname: 'aliexpress.retradviews.com'}), 'https://aliexpress.retradviews.com/api');
   await checkForm(false);
   await checkForm(true);
+  await checkMatchingTables();
   console.log('Both forms preserve individual increases through lock/unlock; JavaScript syntax passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

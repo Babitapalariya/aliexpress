@@ -2743,6 +2743,7 @@ async function saveMappingModal(){
 async function loadVariantsForMappingModal(mappingId) {
   const wrap = document.getElementById("mm-variants-wrap");
   wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-loader-2 spin"></i> Loading variants…</div>`;
+  let mappingVariants = [];
   try {
     const [variantsRes, locksRes] = await Promise.all([
       fetchWithRetry(`${API}/mappings/${mappingId}/variants`),
@@ -2750,20 +2751,21 @@ async function loadVariantsForMappingModal(mappingId) {
     ]);
     if (!variantsRes.ok) throw new Error(`HTTP ${variantsRes.status}`);
     const data = await variantsRes.json();
-    const variants = data.variants || [];
+    mappingVariants = data.variants || [];
 
+    // NEW shape: { locks: { variantId: { price: bool, inventory: bool, image: bool } } }
     let lockMap = {};
     if (locksRes && locksRes.ok) {
       const lockData = await locksRes.json();
       lockMap = lockData.locks || {};
     }
 
-    if (!variants.length) {
+    if (!mappingVariants.length) {
       wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--t3);font-size:12px"><i class="ti ti-package-off"></i> No variants found</div>`;
       return;
     }
 
-    let rowsHtml = variants.map((v, i) => {
+    let rowsHtml = mappingVariants.map((v, i) => {
       const label = v.label || "Default";
       const flags = lockMap[v.variant_id] || { price: false, inventory: false, image: false };
       const anyLocked = flags.price || flags.inventory || flags.image;
@@ -2774,7 +2776,7 @@ async function loadVariantsForMappingModal(mappingId) {
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right"><div class="variant-price-controls">
           <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
-          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase or decrease this variant by a custom amount"><i class="ti ti-plus-minus"></i></button>
+          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </div></td>
         <td data-manual-increase class="manual-increase">${formatIncrease(v.price_increase || 0)}</td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Last detected: ' + new Date(v.supplier_price_changed_at).toLocaleString() : 'Waiting for supplier price history'}">${formatIncrease(v.supplier_price_change)}</td>
@@ -2782,6 +2784,9 @@ async function loadVariantsForMappingModal(mappingId) {
           <input type="number" step="1" min="0" class="mm-variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
         <td style="padding:6px 8px;text-align:center;white-space:nowrap">${lockIcons}</td>
+        <td style="padding:6px 8px;text-align:center">
+          <button type="button" class="btn btn-danger btn-xs btn-icon" onclick="deleteMappedVariant(${v.variant_id})" title="Delete this undeliverable variant only"><i class="ti ti-trash"></i></button>
+        </td>
       </tr>`;
     }).join("");
 
@@ -2792,8 +2797,10 @@ async function loadVariantsForMappingModal(mappingId) {
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th>Manual Increase (USD)</th><th class="supplier-change-heading" title="Last AliExpress price increase or decrease in USD">AliExpress<br>Update Price<br>(USD)</th><th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last AliExpress price increase or decrease in USD">AliExpress<br>Update Price<br>(USD)</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
+            <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
           </tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -2801,7 +2808,7 @@ async function loadVariantsForMappingModal(mappingId) {
       <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change is the last detected supplier increase (+) or decrease (-); a dash means no change history yet. Unlocked price = latest supplier price + saved manual increase.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
-        <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus-minus"></i> Adjust All</button>
+        <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Increase All</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncMappingInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
@@ -2809,6 +2816,26 @@ async function loadVariantsForMappingModal(mappingId) {
       </div>`;
   } catch (e) {
     wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}<div style="margin-top:10px"><button type="button" class="btn btn-xs" onclick="loadVariantsForMappingModal(${mappingId})"><i class="ti ti-refresh"></i> Retry variants</button></div></div>`;
+  }
+}
+
+async function deleteMappedVariant(variantId) {
+  const mappingId = document.getElementById("mm-dbid").value;
+  if (!mappingId) return;
+  const btn = document.querySelector(`#mm-variants-wrap button[onclick="deleteMappedVariant(${variantId})"]`);
+  const label = btn?.closest("tr")?.querySelector("td")?.textContent.trim() || `ID ${variantId}`;
+  if (!confirm(`Delete only the variant "${label}" from Shopify?\n\nAll other variants will remain unchanged.`)) return;
+
+  if (btn) { btn.disabled = true; btn.innerHTML = `<i class="ti ti-loader-2 spin"></i>`; }
+  try {
+    const r = await fetch(`${API}/mappings/${mappingId}/variants/${variantId}`, { method: "DELETE" });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    showToast(`Deleted variant: ${label}`, "ok");
+    await loadVariantsForMappingModal(mappingId);
+  } catch (e) {
+    showToast("Variant delete failed: " + e.message, "err");
+    if (btn) { btn.disabled = false; btn.innerHTML = `<i class="ti ti-trash"></i>`; }
   }
 }
 
@@ -2860,42 +2887,38 @@ function applyPriceToAllMappingVariants(){
 }
 
 function increaseMappingVariantPrice(btn, variantId) {
-  const row = btn.closest('tr');
-  const priceInput = row.querySelector('.mm-variant-price-input');
-  if (!priceInput) return;
-  const currentPrice = parseFloat(priceInput.value) || 0;
-  const amount = prompt(`Enter an adjustment (current: $${currentPrice.toFixed(2)}). Positive increases; negative decreases.`, "1.00");
-  if (amount === null) return;
-  const inc = parseFloat(amount);
-  if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a non-zero positive or negative amount", "err"); return; }
-  const newPrice = currentPrice + inc;
-  if (newPrice < 0) { showToast("The adjusted price cannot be negative", "err"); return; }
-  priceInput.value = newPrice.toFixed(2);
-  priceInput.dataset.dirty = "true";
-  priceInput.dataset.editMode = "increase";
+    const row = btn.closest('tr');
+    const priceInput = row.querySelector('.mm-variant-price-input');
+    if (!priceInput) return;
+    const currentPrice = parseFloat(priceInput.value) || 0;
+    const amount = prompt(`Enter amount to add to this variant's price (current: $${currentPrice.toFixed(2)})`, "1.00");
+    if (amount === null) return;
+    const inc = parseFloat(amount);
+    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
+    const newPrice = currentPrice + inc;
+    priceInput.value = newPrice.toFixed(2);
+    priceInput.dataset.dirty = "true";
+    priceInput.dataset.editMode = "increase";
     refreshManualIncrease(priceInput);
-  showToast(`Variant adjusted by ${inc >= 0 ? "+" : "-"}$${Math.abs(inc).toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
-}
+    showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
+  }
 
 function increaseAllMappingVariants() {
-  const inputs = document.querySelectorAll(".mm-variant-price-input");
-  if (!inputs.length) return;
-  const amount = prompt("Enter an adjustment for ALL variants. Positive increases; negative decreases.", "1.00");
-  if (amount === null) return;
-  const inc = parseFloat(amount);
-  if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a non-zero positive or negative amount", "err"); return; }
-  if (Array.from(inputs).some(inp => (parseFloat(inp.value) || 0) + inc < 0)) {
-    showToast("The adjustment would make at least one variant price negative", "err"); return;
-  }
-  inputs.forEach(inp => {
-    const cur = parseFloat(inp.value) || 0;
-    inp.value = (cur + inc).toFixed(2);
-    inp.dataset.dirty = "true";
-    inp.dataset.editMode = "increase";
+    const inputs = document.querySelectorAll(".mm-variant-price-input");
+    if (!inputs.length) return;
+    const amount = prompt("Enter amount to add to ALL variant prices", "1.00");
+    if (amount === null) return;
+    const inc = parseFloat(amount);
+    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
+    inputs.forEach(inp => {
+      const cur = parseFloat(inp.value) || 0;
+      inp.value = (cur + inc).toFixed(2);
+      inp.dataset.dirty = "true";
+      inp.dataset.editMode = "increase";
     refreshManualIncrease(inp);
-  });
-  showToast(`All variants adjusted by ${inc >= 0 ? "+" : "-"}$${Math.abs(inc).toFixed(2)}`, "ok");
-}
+    });
+    showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
+  }
 
 async function refreshMappingDetails(){
   const mappingId = document.getElementById("mm-dbid").value, aliexpressId = document.getElementById("mm-aeid").value;

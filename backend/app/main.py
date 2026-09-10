@@ -1308,6 +1308,14 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
 
+        global_increase = mapping.price_increase if mapping.price_mode == "increase" else 0.0
+        if global_increase:
+            for sku in aliexpress_skus:
+                base = sku.get("sale_price") or sku.get("price")
+                if base is not None:
+                    sku["_supplier_price"] = base
+                    sku["sale_price"] = str(float(base) + global_increase)
+
         price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
         if price_result == "failed":
             raise HTTPException(502, "Failed to update Shopify variant prices")
@@ -1320,20 +1328,20 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
         has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
         has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
         mapping.price_mode = (
-            "variant_manual" if has_price_locks
+            "increase" if global_increase else "variant_manual" if has_price_locks
             else "variant_increase" if has_variant_increases
             else "auto"
         )
-        mapping.price_increase = 0.0
+        mapping.price_increase = global_increase
         db.commit()
 
-        price_msg = "Price already up to date" if price_result == "unchanged" else "Variant prices updated to AliExpress base"
+        price_msg = "Price already up to date" if price_result == "unchanged" else "Unlocked variant prices updated with their saved increases"
         inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
         return {
             "message": f"{price_msg} · {inv_msg}",
             "product_id": mapping.shopify_product_id,
             "price_mode": mapping.price_mode,
-            "price_increase": 0.0,
+            "price_increase": mapping.price_increase,
             "inventory_updated": inventory_updated,
         }
     except HTTPException:
@@ -1440,9 +1448,9 @@ def sync_all_mapped_products_background():
     try:
         mappings = db.query(ProductMapping).filter(ProductMapping.track_price == True).all()
         for m in mappings:
-            if not _resume_variant_price_sync(m, db):
-                continue
             try:
+                if not _resume_variant_price_sync(m, db):
+                    continue
                 raw = get_product(m.aliexpress_id, db)
 
                 # NEW: dead listing check
@@ -1470,10 +1478,11 @@ def sync_all_mapped_products_background():
                             sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                             sku["sale_price"] = str(float(price) + m.price_increase)
                             sku["price"] = str(float(price) + m.price_increase)
-                update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
+                price_result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
                 update_shopify_product_inventory_with_skus(m.shopify_product_id, skus)
-                print(f"[Hourly] Updated price+inventory for {m.aliexpress_id} (mode={m.price_mode})")
+                print(f"[Hourly] Price sync for {m.aliexpress_id}: {price_result} (mode={m.price_mode})")
             except Exception as e:
+                db.rollback()
                 print(f"[Hourly] Error for {m.aliexpress_id}: {e}")
     finally:
         db.close()
@@ -5101,6 +5110,42 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
         })
     return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
+
+
+@app.delete("/mappings/{mapping_id}/variants/{variant_id}")
+def delete_mapping_variant(mapping_id: int, variant_id: int, db: Session = Depends(get_db)):
+    """Delete one Shopify variant without modifying its sibling variants."""
+    mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
+    if not mapping:
+        raise HTTPException(404, "Product not found")
+    if not mapping.shopify_product_id:
+        raise HTTPException(400, "Product has no Shopify ID linked")
+
+    from .shopify import _base, _h, _shopify_request, _invalidate_lock_cache
+
+    variants_res = _shopify_request(
+        "GET", f"{_base()}/products/{mapping.shopify_product_id}.json",
+        params={"fields": "id,variants"}, headers=_h(), timeout=15,
+    )
+    if variants_res.status_code != 200:
+        raise HTTPException(502, "Could not verify Shopify variants")
+
+    variants = variants_res.json().get("product", {}).get("variants", [])
+    if not any(int(v["id"]) == variant_id for v in variants):
+        raise HTTPException(404, "Variant does not belong to this mapping")
+    if len(variants) <= 1:
+        raise HTTPException(400, "The final mapping variant cannot be deleted")
+
+    delete_res = _shopify_request(
+        "DELETE", f"{_base()}/variants/{variant_id}.json",
+        headers=_h(), timeout=20,
+    )
+    if delete_res.status_code not in (200, 204):
+        detail = delete_res.text[:300] if delete_res.text else "Shopify rejected the deletion"
+        raise HTTPException(502, detail)
+
+    _invalidate_lock_cache(mapping.shopify_product_id)
+    return {"message": "Variant deleted", "variant_id": variant_id}
 
 
 @app.post("/mappings/{mapping_id}/update-variant-prices")

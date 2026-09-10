@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 from app import shopify
-from app.models import ImportedProduct
+from app.models import ImportedProduct, ProductMapping
 
 REAL_BULK_UPDATE = shopify.bulk_update_variant_prices
 
@@ -276,6 +276,69 @@ class VariantPriceSyncTests(unittest.TestCase):
         ]}}
         result = REAL_BULK_UPDATE("123", [{"variant_id": 1, "price": "12.00", "price_increase": "2.00"}])
         self.assertFalse(result["success"])
+
+    def mapping_context(self, mode="auto", increase=0):
+        mapping = SimpleNamespace(id=1, shopify_product_id="123", price_mode=mode,
+                                  price_increase=increase, track_price=True,
+                                  aliexpress_id="mapped-ae", is_dead_listing=False)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = mapping
+        db.query.return_value.filter.return_value.all.return_value = [mapping]
+        namespace = {"ProductMapping": ProductMapping, "HTTPException": HTTPException,
+                     "get_latest_token": Mock(),
+                     "get_product": Mock(side_effect=lambda *_: {"skus": copy.deepcopy(self.skus)}),
+                     "is_listing_dead": lambda _: False,
+                     "update_shopify_product_prices_with_skus": shopify.update_shopify_product_prices_with_skus}
+        load_main_functions(namespace, "update_mapping_variant_prices", "_resume_variant_price_sync",
+                            "sync_mapped_product_price", "sync_all_mapped_products_background",
+                            "delete_mapping_variant")
+        return mapping, db, namespace
+
+    def test_mapping_edits_manual_and_hourly_sync_preserve_rules_and_history(self):
+        mapping, db, ns = self.mapping_context()
+        self.lock(2, "price", True)
+        ns["update_mapping_variant_prices"](1, {"variants": [
+            {"variant_id": i, "price": 10 + amount, "price_increase": amount}
+            for i, amount in ((1, 2), (2, 5), (3, 8))
+        ]}, db)
+        self.assertEqual(mapping.price_mode, "variant_manual")
+        self.set_lock.assert_not_called()
+        with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True), \
+             patch("app.database.SessionLocal", return_value=db):
+            ns["sync_mapped_product_price"]("mapped-ae", db)
+            self.assertEqual(self.prices(), [14, 15, 20, 12])
+            for sku in self.skus:
+                sku["sale_price"] = "9"
+            ns["sync_all_mapped_products_background"]()
+        self.assertEqual(self.prices(), [11, 15, 17, 9])
+        self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"]["change"], "-3.00")
+        self.assertEqual(float(shopify.get_variant_sync_state("123")[1]["price_increase"]), 2)
+
+    def test_mapping_manual_sync_preserves_existing_product_wide_increase(self):
+        mapping, db, ns = self.mapping_context("increase", 4)
+        self.increase(1, 3)
+        with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
+            ns["sync_mapped_product_price"]("mapped-ae", db)
+        self.assertEqual(self.prices(), [19, 16, 16, 16])
+        self.assertEqual(mapping.price_increase, 4)
+        self.assertEqual(mapping.price_mode, "increase")
+        self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"]["price"], "12.00")
+
+    def test_mapping_delete_verifies_ownership_and_protects_final_variant(self):
+        _, db, ns = self.mapping_context()
+        response = Mock(status_code=200)
+        response.json.return_value = {"product": {"variants": [{"id": 1}, {"id": 2}]}}
+        with patch.object(shopify, "_h", return_value={}), \
+             patch.object(shopify, "_shopify_request", return_value=response) as request:
+            self.assertEqual(ns["delete_mapping_variant"](1, 2, db)["variant_id"], 2)
+            self.assertEqual(request.call_args.args[0], "DELETE")
+            request.reset_mock()
+            with self.assertRaises(HTTPException):
+                ns["delete_mapping_variant"](1, 99, db)
+            self.assertEqual(request.call_count, 1)
+            response.json.return_value = {"product": {"variants": [{"id": 1}]}}
+            with self.assertRaises(HTTPException):
+                ns["delete_mapping_variant"](1, 1, db)
 
 
 if __name__ == "__main__":
