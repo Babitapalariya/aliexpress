@@ -1368,10 +1368,10 @@ async function syncProductPrice(productId){
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right"><div class="variant-price-controls">
-          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-product-price-increase="${v.product_price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </div></td>
-        <td data-manual-increase class="manual-increase">${formatIncrease(v.price_increase || 0)}</td>
+        <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Last detected: ' + new Date(v.supplier_price_changed_at).toLocaleString() : 'Waiting for supplier price history'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
@@ -1460,7 +1460,7 @@ function formatIncrease(value) {
 }
 function refreshManualIncrease(input) {
   const cell = input.closest("tr")?.querySelector("[data-manual-increase]");
-  if (cell) cell.textContent = formatIncrease(Number(input.dataset.priceIncrease || 0) + Number(input.value) - Number(input.dataset.originalPrice));
+  if (cell) cell.textContent = formatIncrease(Number(input.dataset.productPriceIncrease || 0) + Number(input.dataset.priceIncrease || 0) + Number(input.value) - Number(input.dataset.originalPrice));
 }
 
   function markVariantPriceEdited(input) {
@@ -2789,10 +2789,10 @@ async function loadVariantsForMappingModal(mappingId) {
         <td style="padding:8px 12px;color:var(--t1);font-weight:600">${label}${anyLocked ? ` <span class="badge b-orange" style="font-size:9px;margin-left:4px"><i class="ti ti-lock" style="font-size:8px"></i> Locked</span>` : ""}</td>
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right"><div class="variant-price-controls">
-          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-product-price-increase="${v.product_price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </div></td>
-        <td data-manual-increase class="manual-increase">${formatIncrease(v.price_increase || 0)}</td>
+        <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Last detected: ' + new Date(v.supplier_price_changed_at).toLocaleString() : 'Waiting for supplier price history'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="mm-variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">

@@ -164,7 +164,8 @@ def sync_product_price(product_id: int, db: Session) -> bool:
         print(f"[Sync] No SKUs for {product.aliexpress_id}")
         return False
 
-    if product.price_mode == 'increase' and product.price_increase != 0.0:
+    # A price lock changes price_mode but must not disable a saved increase.
+    if product.price_increase:
         for sku in new_skus:
             current_price = sku.get("sale_price") or sku.get("price")
             if current_price is not None:
@@ -1308,7 +1309,7 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
 
-        global_increase = mapping.price_increase if mapping.price_mode == "increase" else 0.0
+        global_increase = mapping.price_increase or 0.0
         if global_increase:
             for sku in aliexpress_skus:
                 base = sku.get("sale_price") or sku.get("price")
@@ -1374,7 +1375,7 @@ def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = De
                     if not skus:
                         print(f"[SyncMapped] No SKUs for {m.aliexpress_id}")
                         continue
-                    if m.price_mode == "increase" and m.price_increase != 0.0:
+                    if m.price_increase:
                         for sku in skus:
                             price = sku.get("sale_price") or sku.get("price")
                             if price is not None:
@@ -1471,7 +1472,7 @@ def sync_all_mapped_products_background():
                 skus = raw.get("skus", [])
                 if not skus:
                     continue
-                if m.price_mode == "increase" and m.price_increase != 0.0:
+                if m.price_increase:
                     for sku in skus:
                         price = sku.get("sale_price") or sku.get("price")
                         if price:
@@ -1542,6 +1543,14 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
 
         # 2. Update only unlocked Shopify variants. The central updater reads
         # the same per-variant map and reapplies each value by variant ID.
+        # Locks change the display mode, not the saved adjustment.
+        global_increase = product.price_increase or 0.0
+        if global_increase:
+            for sku in new_skus:
+                base = sku.get("sale_price") or sku.get("price")
+                if base is not None:
+                    sku["_supplier_price"] = base
+                    sku["sale_price"] = str(float(base) + global_increase)
         success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
         if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
@@ -1553,10 +1562,11 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
 
         product.price_mode = (
             "variant_manual" if locked_variant_ids
+            else "increase" if global_increase
             else "variant_increase" if saved_increases
             else "auto"
         )
-        product.price_increase = 0.0
+        product.price_increase = global_increase
         product.custom_price = None   # remove any manual override
         db.commit()
 
@@ -2243,7 +2253,7 @@ def bulk_increase_mappings(
 def get_product_display_price(product: ImportedProduct, live_aliexpress_price: float = None) -> float:
     if product.custom_price:
         return float(product.custom_price)
-    if product.price_mode == 'increase' and product.price_increase:
+    if product.price_increase:
         base = live_aliexpress_price or float(product.original_price or 0)
         return base + product.price_increase
     # auto or no increase
@@ -2424,6 +2434,7 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
             "price_increase": float(pricing[v["id"]]["price_increase"]),
+            "product_price_increase": float(product.price_increase or 0),
             "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
             "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
         })
@@ -2711,9 +2722,11 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
     product.price_mode = (
         "variant_manual" if has_price_locks
         else "variant_increase" if has_variant_increases
+        else "increase" if product.price_increase
         else "auto"
     )
-    product.price_increase = 0.0
+    # Variant metafields are offsets in addition to the product-wide increase.
+    # Saving a sibling's edit must not erase that shared baseline.
     product.custom_price = None
     db.commit()
 
@@ -5106,6 +5119,7 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "compare_at_price": v.get("compare_at_price"),
             "inventory_quantity": v.get("inventory_quantity"),
             "price_increase": float(pricing[v["id"]]["price_increase"]),
+            "product_price_increase": float(mapping.price_increase or 0),
             "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
             "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
         })
@@ -5179,9 +5193,10 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
     mapping.price_mode = (
         "variant_manual" if has_price_locks
         else "variant_increase" if has_variant_increases
+        else "increase" if mapping.price_increase
         else "auto"
     )
-    mapping.price_increase = 0.0
+    # Keep the shared increase; variant edits only replace individual offsets.
     db.commit()
 
     msg = f"Updated {len(updated_variants)} variant price(s)"
