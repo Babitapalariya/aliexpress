@@ -1372,7 +1372,7 @@ async function syncProductPrice(productId){
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </div></td>
         <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
-        <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Last detected: ' + new Date(v.supplier_price_changed_at).toLocaleString() : 'Waiting for supplier price history'}">${formatIncrease(v.supplier_price_change)}</td>
+        <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
@@ -1390,7 +1390,7 @@ async function syncProductPrice(productId){
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last AliExpress price increase or decrease in USD">AliExpress<br>Update Price<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress price difference from the previous successful supplier check">AliExpress<br>Change This Check<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -1398,7 +1398,7 @@ async function syncProductPrice(productId){
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change is the last detected supplier increase (+) or decrease (-); a dash means no change history yet. Unlocked price = latest supplier price + saved manual increase.</div>
+      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual increase.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Increase All</button>
@@ -2793,7 +2793,7 @@ async function loadVariantsForMappingModal(mappingId) {
           <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
         </div></td>
         <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
-        <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Last detected: ' + new Date(v.supplier_price_changed_at).toLocaleString() : 'Waiting for supplier price history'}">${formatIncrease(v.supplier_price_change)}</td>
+        <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="mm-variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
@@ -2811,7 +2811,7 @@ async function loadVariantsForMappingModal(mappingId) {
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last AliExpress price increase or decrease in USD">AliExpress<br>Update Price<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress price difference from the previous successful supplier check">AliExpress<br>Change This Check<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -2819,7 +2819,7 @@ async function loadVariantsForMappingModal(mappingId) {
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change is the last detected supplier increase (+) or decrease (-); a dash means no change history yet. Unlocked price = latest supplier price + saved manual increase.</div>
+      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual increase.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Increase All</button>

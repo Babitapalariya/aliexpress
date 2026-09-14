@@ -64,6 +64,8 @@ class VariantPriceSyncTests(unittest.TestCase):
                 self.nodes[row["variant_id"] - 1]["price"] = row["price"]
             if "price_increase" in row:
                 self.increase(row["variant_id"], row["price_increase"])
+            if "ae_sku_id" in row:
+                self.nodes[row["variant_id"] - 1]["aeSku"] = {"value": row["ae_sku_id"]}
             if "supplier_history" in row:
                 self.nodes[row["variant_id"] - 1]["supplierHistory"] = {
                     "id": f"gid://shopify/Metafield/{row['variant_id']}",
@@ -148,8 +150,137 @@ class VariantPriceSyncTests(unittest.TestCase):
 
     def test_missing_sku_does_not_take_sibling_price(self):
         self.nodes[0]["aeSku"]["value"] = "removed"
+        self.nodes[0]["selectedOptions"][0]["value"] = "Removed option"
         self.assertEqual(self.sync(), "failed")
         self.assertEqual(self.prices(), [10, 12, 12, 12])
+
+    def controller_fixture(self):
+        supplier = [
+            ("12000053381971912", "48-72V50A", "130.68", 104),
+            ("12000053381971913", "48-72V70A", "186.99", 109),
+            ("12000053381971914", "48-72V90A", "243.86", 111),
+            ("12000053381971915", "48-96V120A", "270.61", 110),
+            ("12000053381971916", "48-96V160A", "327.37", 107),
+            ("12000053381971911", "72v lcd", "52.92", 110),
+        ]
+        self.skus = [dict(sku_id=sid, label=label, sale_price=price, stock=stock)
+                     for sid, label, price, stock in supplier]
+        template = copy.deepcopy(self.nodes[0])
+        self.nodes = []
+        for i, (label, increase, price) in enumerate([
+            ("48–72V70A", 25, "211.99"), ("48–72V50A", 25, "155.68"),
+            ("48–96V160A", 40, "367.37"), ("72VLCD", 10, "65.48"),
+            ("48–72V90A", 30, "273.86"), ("48–96V120A", 30, "300.61"),
+        ], 1):
+            node = copy.deepcopy(template)
+            node.update(id=f"gid://shopify/ProductVariant/{i}", price=price,
+                        selectedOptions=[{"name": "Variant", "value": label}],
+                        aeSku={"value": f"old-{i}"}, increase={"value": str(increase)})
+            self.nodes.append(node)
+
+    def test_controller_stale_ids_repaired_with_individual_markups(self):
+        self.controller_fixture()
+        self.assertEqual(self.sync(), "updated")
+        self.assertEqual(self.prices(), [211.99, 155.68, 367.37, 62.92, 273.86, 300.61])
+        self.assertEqual([n["aeSku"]["value"] for n in self.nodes],
+                         [self.skus[i]["sku_id"] for i in (1, 0, 4, 5, 2, 3)])
+        self.assertEqual(self.sync(), "unchanged")
+        self.skus[5]["sale_price"] = "50.00"
+        self.assertEqual(self.sync(), "updated")
+        self.assertEqual(self.prices()[3], 60)
+        self.assertEqual(shopify.get_variant_sync_state("123")[4]["supplier_history"]["change"], "-2.92")
+
+    def test_controller_wrong_existing_ids_repaired_without_overriding_locks(self):
+        self.controller_fixture()
+        for node, sku in zip(self.nodes, self.skus):
+            node["aeSku"] = {"value": sku["sku_id"]}
+        self.lock(4, "price", True)
+        self.sync()
+        self.assertEqual(self.prices()[3], 65.48)
+        self.assertEqual(self.nodes[3]["aeSku"]["value"], self.skus[5]["sku_id"])
+        self.lock(4, "price", False)
+        self.sync()
+        self.assertEqual(self.prices()[3], 62.92)
+
+    def test_lcd_old_change_clears_and_future_prices_follow_both_directions(self):
+        self.controller_fixture()
+        shopify.store_aliexpress_sku_ids("123", self.skus)
+        self.nodes[3]["supplierHistory"] = {"id": "gid://shopify/Metafield/4", "value": json.dumps({
+            "price": "52.92", "change": "2.56", "changed_at": "2026-09-01T00:00:00+00:00"})}
+        self.assertEqual(self.sync(), "updated")
+        self.assertEqual(self.prices()[3], 62.92)
+        self.assertEqual(shopify.get_variant_sync_state("123")[4]["supplier_history"]["change"], "0.00")
+        for supplier, expected, change in [("55.48", 65.48, "2.56"), ("50.00", 60, "-5.48"), ("50.00", 60, "0.00")]:
+            self.skus[5]["sale_price"] = supplier
+            self.sync()
+            state = shopify.get_variant_sync_state("123")[4]
+            self.assertEqual(self.prices()[3], expected)
+            self.assertEqual(state["supplier_history"]["change"], change)
+            self.assertEqual(float(state["price_increase"]), 10)
+
+    def test_repaired_link_does_not_report_wrong_variant_history_as_movement(self):
+        self.controller_fixture()
+        self.nodes[3]["supplierHistory"] = {"id": "gid://shopify/Metafield/4", "value": json.dumps({
+            "price": "55.48", "change": "2.56", "changed_at": "2026-09-01T00:00:00+00:00"})}
+        self.sync()
+        history = shopify.get_variant_sync_state("123")[4]["supplier_history"]
+        self.assertEqual(history["price"], "52.92")
+        self.assertIsNone(history["change"])
+        self.assertIsNone(history["changed_at"])
+        self.assertEqual(self.prices()[3], 62.92)
+
+    def test_backfill_matches_labels_instead_of_position(self):
+        self.controller_fixture()
+        shopify.store_aliexpress_sku_ids("123", self.skus)
+        self.assertEqual(self.nodes[0]["aeSku"]["value"], self.skus[1]["sku_id"])
+        self.assertEqual(self.prices()[3], 65.48)  # Link-only backfill.
+
+    def test_ambiguous_labels_and_duplicate_claims_are_not_guessed(self):
+        variants = {1: {"label": "Red", "ae_sku_id": "old"}}
+        skus = [{"sku_id": "a", "label": "Red"}, {"sku_id": "b", "label": "red"}]
+        self.assertEqual(shopify._match_supplier_variants(variants, skus), {})
+        variants[1]["ae_sku_id"] = "b"
+        self.assertEqual(shopify._match_supplier_variants(variants, skus), {1: skus[1]})
+        variants[2] = dict(variants[1])
+        self.assertEqual(shopify._match_supplier_variants(variants, skus), {})
+
+    def test_legacy_import_options_and_custom_titles(self):
+        skus = [{"sku_id": "a", "label": "72v lcd", "sku_attr": "14:29#72v lcd"}]
+        for label, sid in [("29#72v lcd", None), ("Custom display", "a")]:
+            self.assertEqual(shopify._match_supplier_variants({1: {"label": label, "ae_sku_id": sid}}, skus), {1: skus[0]})
+
+    def test_bulk_verifies_repaired_sku_link(self):
+        def mutation(query, variables):
+            row = variables["variants"][0]
+            self.assertIn({"namespace": "aliexpress", "key": "sku_id",
+                           "type": "single_line_text_field", "value": "new"}, row["metafields"])
+            return {"productVariantsBulkUpdate": {"userErrors": [], "productVariants": [
+                {"id": row["id"], "aeSku": {"value": "new"}}]}}
+        self.query.side_effect = mutation
+        self.assertTrue(REAL_BULK_UPDATE("123", [{"variant_id": 1, "ae_sku_id": "new"}])["success"])
+        self.query.side_effect = None
+        self.query.return_value = {"productVariantsBulkUpdate": {"userErrors": [], "productVariants": [
+            {"id": "gid://shopify/ProductVariant/1", "aeSku": None}]}}
+        self.assertFalse(REAL_BULK_UPDATE("123", [{"variant_id": 1, "ae_sku_id": "new"}])["success"])
+
+    def test_inventory_reordered_labels_and_missing_match(self):
+        self.controller_fixture()
+        variants = [{"id": i, "option1": node["selectedOptions"][0]["value"],
+                     "inventory_item_id": i, "inventory_quantity": 0}
+                    for i, node in enumerate(self.nodes, 1)]
+        variants.insert(0, {"id": 7, "option1": "Unknown", "inventory_item_id": 7, "inventory_quantity": 5})
+        product, locations, metadata = Mock(), Mock(), Mock(status_code=200)
+        product.json.return_value = {"product": {"variants": variants}}
+        locations.json.return_value = {"locations": [{"id": 99}]}
+        metadata.json.return_value = {"metafields": [{"value": "old"}]}
+        with patch.object(shopify, "_h", return_value={}), \
+             patch.object(shopify.requests, "get", side_effect=[product, locations]), \
+             patch.object(shopify, "_shopify_request", return_value=metadata), \
+             patch.object(shopify, "get_locked_variant_ids", return_value={3}), \
+             patch.object(shopify.requests, "post", return_value=Mock()) as write:
+            self.assertTrue(shopify.update_shopify_product_inventory_with_skus("123", self.skus))
+        self.assertEqual({c.kwargs["json"]["inventory_item_id"]: c.kwargs["json"]["available"]
+                          for c in write.call_args_list}, {1: 109, 2: 104, 4: 110, 5: 111, 6: 110})
 
     def test_paginated_rules_include_later_variants(self):
         def page(query, variables):
@@ -211,7 +342,12 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(history["change"], "-5.00")
         self.assertEqual(self.prices()[:2], [12, 10])
         self.sync()
-        self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"], history)
+        latest = shopify.get_variant_sync_state("123")[1]["supplier_history"]
+        self.assertEqual(latest["change"], "0.00")
+        self.assertIsNone(latest["changed_at"])
+        self.bulk.reset_mock()
+        self.assertEqual(self.sync(), "unchanged")
+        self.bulk.assert_not_called()
 
     def test_product_wide_markup_is_not_recorded_as_supplier_movement(self):
         for sku in self.skus:
@@ -220,7 +356,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         for sku in self.skus:
             sku["sale_price"] = "20"  # Product-wide markup changed; supplier did not.
         self.sync()
-        self.assertIsNone(shopify.get_variant_sync_state("123")[1]["supplier_history"]["change"])
+        self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"]["change"], "0.00")
 
     def test_partial_shopify_failure_is_reported(self):
         self.bulk.side_effect = None

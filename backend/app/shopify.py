@@ -978,6 +978,49 @@ def update_shopify_product_price(shopify_product_id: str, new_price: float) -> b
 #     return "updated"
 
 
+def _sku_label_key(label):
+    # Preserve option boundaries and punctuation; normalize only presentation.
+    label = str(label or "").casefold().translate(str.maketrans({
+        "–": "-", "—": "-", "‑": "-", "−": "-",
+    }))
+    return tuple(sorted(re.sub(r"\s+", "", part) for part in label.split("/")))
+
+
+def _match_supplier_variants(variants, skus):
+    """Return one-to-one matches, never assigning by supplier array position.
+
+    A unique complete option label repairs stale or previously positional links.
+    Existing IDs still support custom Shopify titles. Ambiguities fail closed.
+    """
+    by_label, by_id = {}, {}
+    for index, sku in enumerate(skus):
+        # Also recognize option values produced by older imports (e.g. 29#72v lcd).
+        legacy_label = " / ".join(part.split(":")[-1].strip()
+                                  for part in (sku.get("sku_attr") or "").split(";") if ":" in part)
+        for label in {_sku_label_key(sku.get("label")), _sku_label_key(legacy_label)}:
+            if label != ("",):
+                by_label.setdefault(label, []).append(index)
+        if sku.get("sku_id") is not None:
+            by_id.setdefault(str(sku["sku_id"]), []).append(index)
+    proposed = {}
+    for vid, variant in variants.items():
+        label = _sku_label_key(variant.get("label"))
+        candidates = by_label.get(label, [])
+        id_candidates = by_id.get(str(variant.get("ae_sku_id")), [])
+        if len(candidates) > 1:
+            candidates = [i for i in candidates if i in id_candidates]
+        elif not candidates:
+            candidates = id_candidates
+            if not candidates and label == ("",) and not variant.get("ae_sku_id") and len(variants) == len(skus) == 1:
+                candidates = [0]
+        if len(candidates) == 1:
+            proposed[vid] = candidates[0]
+    counts = {}
+    for index in proposed.values():
+        counts[index] = counts.get(index, 0) + 1
+    return {vid: skus[index] for vid, index in proposed.items() if counts[index] == 1}
+
+
 def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
     """Sync each unlocked variant from its own supplier price and saved increase."""
     from decimal import Decimal, ROUND_HALF_UP
@@ -989,7 +1032,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         variants = get_variant_sync_state(shopify_product_id)
         if not variants:
             return "failed"
-        by_id, by_label = {}, {}
+        matched = _match_supplier_variants(variants, aliexpress_skus)
         for sku in aliexpress_skus:
             raw = sku.get("sale_price") or sku.get("price")
             if raw is None:
@@ -997,42 +1040,29 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
             price = Decimal(str(raw))
             if not price.is_finite() or price < 0:
                 raise ValueError("Invalid AliExpress variant price")
-            if sku.get("sku_id") is not None:
-                by_id[str(sku["sku_id"])] = (price, sku.get("_supplier_price", raw))
-            label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
-            if label:
-                by_label.setdefault(label, []).append((price, sku.get("_supplier_price", raw)))
 
         updates, unmatched = [], []
         for vid, variant in variants.items():
-            ae_id = variant["ae_sku_id"]
-            base = by_id.get(str(ae_id)) if ae_id is not None else None
-            if base is None and ae_id is None:
-                label = variant["label"].strip().lower()
-                matches = by_label.get(label, [])
-                if not matches and label:
-                    tokens = {part.strip() for part in label.split("/")}
-                    matches = [price for key, prices in by_label.items()
-                               if tokens == {part.strip() for part in key.split("/")}
-                               for price in prices]
-                if len(matches) == 1:
-                    base = matches[0]
-                elif not label and len(variants) == len(aliexpress_skus) == 1:
-                    raw = aliexpress_skus[0].get("sale_price") or aliexpress_skus[0].get("price")
-                    base = (Decimal(str(raw)), aliexpress_skus[0].get("_supplier_price", raw)) if raw is not None else None
-            if base is None:
+            sku = matched.get(vid)
+            raw = (sku.get("sale_price") or sku.get("price")) if sku else None
+            if raw is None:
                 if not variant["locks"]["price"]:
                     unmatched.append(vid)
                 continue
-            base, supplier_price = base
+            base, supplier_price = Decimal(str(raw)), sku.get("_supplier_price", raw)
             previous = variant.get("supplier_history")
-            history = observe_supplier_price(previous, supplier_price)
+            repairing_link = sku.get("sku_id") is not None and str(sku["sku_id"]) != str(variant["ae_sku_id"])
+            # A repaired link may have observed a different supplier variant.
+            # Establish its baseline without claiming that difference was a price move.
+            history = observe_supplier_price(None if repairing_link else previous, supplier_price)
             update = {"variant_id": vid}
+            if repairing_link:
+                update["ae_sku_id"] = str(sku["sku_id"])
             if history != previous:
                 update["supplier_history"] = history
                 update["supplier_history_id"] = variant.get("supplier_history_id")
             if variant["locks"]["price"]:
-                if "supplier_history" in update:
+                if len(update) > 1:
                     updates.append(update)
                 continue
             final = (base + variant["price_increase"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -1060,22 +1090,18 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
 
 
 def store_aliexpress_sku_ids(shopify_product_id: str, aliexpress_skus: list):
-    res = requests.get(f"{_base()}/products/{shopify_product_id}.json", params={"fields": "id,variants"}, headers=_h())
-    res.raise_for_status()
-    variants = res.json()["product"]["variants"]
-    for i, variant in enumerate(variants):
-        if i < len(aliexpress_skus):
-            sku_id = str(aliexpress_skus[i].get("sku_id"))
-            mf_url = f"{_base()}/variants/{variant['id']}/metafields.json"
-            check = requests.get(mf_url, params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h())
-            existing = check.json().get("metafields", [])
-            payload = {"metafield": {"namespace": "aliexpress", "key": "sku_id", "value": sku_id, "type": "single_line_text_field"}}
-            if existing:
-                mf_id = existing[0]["id"]
-                requests.put(f"{_base()}/metafields/{mf_id}.json", json=payload, headers=_h())
-            else:
-                requests.post(mf_url, json=payload, headers=_h())
-    print(f"[Shopify] Stored SKU IDs for {len(aliexpress_skus)} variants")
+    variants = get_variant_sync_state(shopify_product_id)
+    matches = _match_supplier_variants(variants, aliexpress_skus)
+    updates = [{"variant_id": vid, "ae_sku_id": str(sku["sku_id"])}
+               for vid, sku in matches.items() if sku.get("sku_id") is not None
+               and str(sku["sku_id"]) != str(variants[vid]["ae_sku_id"])]
+    for offset in range(0, len(updates), 100):
+        result = bulk_update_variant_prices(shopify_product_id, updates[offset:offset + 100])
+        if not result["success"]:
+            raise RuntimeError(f"SKU link update failed: {result['errors']}")
+    if len(matches) != len(variants):
+        raise RuntimeError("Some variants have no unambiguous AliExpress SKU match")
+    print(f"[Shopify] Matched SKU IDs for {len(matches)} variants")
 
 def increase_shopify_product_price(shopify_product_id: str, increase_by: float) -> bool:
     """Increase all variants of a Shopify product by a fixed amount — via per-variant PUT so image/inventory links survive."""
@@ -1501,17 +1527,7 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     if not settings.SHOPIFY_STORE:
         return False
 
-    stock_by_ae_sku = {}
-    for sku in aliexpress_skus:
-        ae_sku_id = str(sku.get("sku_id"))
-        stock = sku.get("stock")
-        if ae_sku_id and ae_sku_id != "None" and stock is not None:
-            try:
-                stock_by_ae_sku[ae_sku_id] = int(stock)
-            except (ValueError, TypeError):
-                continue
-
-    if not stock_by_ae_sku and not aliexpress_skus:
+    if not aliexpress_skus:
         print("[Inventory] No AE stock data to sync")
         return False
 
@@ -1569,16 +1585,6 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         except Exception as e:
             print(f"[Inventory] Metafield error for variant {vid}: {e}")
 
-    stock_by_label = {}
-    for sku in aliexpress_skus:
-        label = (sku.get("label") or sku.get("sku_attr") or "").strip().lower()
-        stock = sku.get("stock")
-        if label and stock is not None:
-            try:
-                stock_by_label[label] = int(stock)
-            except (ValueError, TypeError):
-                continue
-
     def _variant_label(variant: dict) -> str:
         parts = [
             variant.get(f"option{i}")
@@ -1591,34 +1597,22 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     skipped_locked = 0
     unmatched_variants = []
 
-    for i, variant in enumerate(shopify_variants):
+    matches = _match_supplier_variants({v["id"]: {
+        "label": _variant_label(v), "ae_sku_id": variant_ae_map.get(v["id"]),
+    } for v in shopify_variants}, aliexpress_skus)
+
+    for variant in shopify_variants:
         if variant["id"] in locked_variant_ids:
             skipped_locked += 1
             continue  # manually customized — never touch inventory here
 
         new_stock = None
-        ae_sku_id = variant_ae_map.get(variant["id"])
-
-        # 1. Try THIS variant's own metafield match first (most reliable)
-        if ae_sku_id and ae_sku_id in stock_by_ae_sku:
-            new_stock = stock_by_ae_sku[ae_sku_id]
-        else:
-            # 2. Fall back to label matching for THIS variant — regardless
-            #    of whether OTHER variants matched via metafield. A missing
-            #    metafield on one variant must never block fallback matching
-            #    for that specific variant.
-            label = _variant_label(variant)
-            if label and label in stock_by_label:
-                new_stock = stock_by_label[label]
-            # 3. Positional fallback as last resort for THIS variant
-            elif i < len(aliexpress_skus):
-                ae_sku = aliexpress_skus[i]
-                stock_val = ae_sku.get("stock")
-                if stock_val is not None:
-                    try:
-                        new_stock = int(stock_val)
-                    except (ValueError, TypeError):
-                        new_stock = None
+        sku = matches.get(variant["id"])
+        if sku is not None and sku.get("stock") is not None:
+            try:
+                new_stock = int(sku["stock"])
+            except (ValueError, TypeError):
+                pass
 
         if new_stock is None:
             unmatched_variants.append(variant["id"])
@@ -2181,7 +2175,8 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
     mutation = """
     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
       productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
-        productVariants { id price priceIncrease: metafield(namespace: "sync", key: "price_increase") { value } }
+        productVariants { id price priceIncrease: metafield(namespace: "sync", key: "price_increase") { value }
+          aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value } }
         userErrors { field message }
       }
     }
@@ -2206,6 +2201,9 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
             else:
                 history.update({"namespace": "sync", "key": "supplier_price_history", "type": "json"})
             row.setdefault("metafields", []).append(history)
+        if "ae_sku_id" in edit:
+            row.setdefault("metafields", []).append({"namespace": "aliexpress", "key": "sku_id",
+                "type": "single_line_text_field", "value": str(edit["ae_sku_id"])})
         variants_input.append(row)
     try:
         data = _graphql(mutation, {
@@ -2218,6 +2216,10 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
         updated = len(returned)
         from decimal import Decimal
         for edit in variant_prices:
+            if "ae_sku_id" in edit:
+                saved = returned.get(_variant_gid(edit["variant_id"]), {})
+                if (saved.get("aeSku") or {}).get("value") != str(edit["ae_sku_id"]):
+                    errors.append({"message": f"SKU link was not confirmed for variant {edit['variant_id']}"})
             if "price_increase" in edit:
                 saved = returned.get(_variant_gid(edit["variant_id"]), {})
                 amount = (saved.get("priceIncrease") or {}).get("value")

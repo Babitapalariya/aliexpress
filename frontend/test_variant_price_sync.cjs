@@ -66,6 +66,7 @@ async function checkMatchingTables() {
     document: {getElementById: id => panels[id]},
     fetchWithRetry: async () => ({ok: true, json: async () => ({variants: [
       {variant_id: 1, label: 'Red', price: '17.00', price_increase: 5, supplier_price_change: '-2.00'},
+      {variant_id: 2, label: 'LCD', price: '62.92', price_increase: 10, supplier_price_change: '0.00'},
     ]})}),
     fetch: async () => ({ok: true, json: async () => ({locks: {}})}),
     buildLockIcons: () => 'locks', buildMappingLockIcons: () => 'locks',
@@ -88,6 +89,9 @@ async function checkMatchingTables() {
     assert.match(table, /-\$2\.00/);
     assert.match(table, /supplier-change-heading/);
     assert.match(table, /variant-table-scroll/);
+    assert.match(table, /Supplier price unchanged on latest check/);
+    assert.match(table, />\$0\.00<\/td>/);
+    assert.match(table, /Change This Check/);
   }
   assert.match(mapped, /deleteMappedVariant\(1\)/);
 }
