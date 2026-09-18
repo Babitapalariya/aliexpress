@@ -1458,14 +1458,28 @@ function formatIncrease(value) {
   const amount = Number(value);
   return `${amount < 0 ? "-" : amount > 0 ? "+" : ""}$${Math.abs(amount).toFixed(2)}`;
 }
+function getDraftVariantIncrease(input) {
+  const saved = Number(input.dataset.priceIncrease || 0);
+  if (input.dataset.pendingIncrease !== undefined) return Number(input.dataset.pendingIncrease);
+  if (input.dataset.editMode === "fixed" || (input.dataset.priceLocked === "true" && input.dataset.editMode !== "increase")) return saved;
+  return saved + Number(input.value) - Number(input.dataset.originalPrice || input.value);
+}
+function addVariantPriceIncrease(input, amount) {
+  input.dataset.pendingIncrease = (getDraftVariantIncrease(input) + amount).toFixed(2);
+  input.value = (Number(input.value) + amount).toFixed(2);
+  input.dataset.dirty = "true";
+  input.dataset.editMode = "increase";
+  refreshManualIncrease(input);
+}
 function refreshManualIncrease(input) {
   const cell = input.closest("tr")?.querySelector("[data-manual-increase]");
-  if (cell) cell.textContent = formatIncrease(Number(input.dataset.productPriceIncrease || 0) + Number(input.dataset.priceIncrease || 0) + Number(input.value) - Number(input.dataset.originalPrice));
+  if (cell) cell.textContent = formatIncrease(Number(input.dataset.productPriceIncrease || 0) + getDraftVariantIncrease(input));
 }
 
   function markVariantPriceEdited(input) {
     input.dataset.dirty = "true";
-    input.dataset.editMode = "increase";
+    input.dataset.editMode = input.dataset.priceLocked === "true" ? "fixed" : "increase";
+    if (input.dataset.priceLocked !== "true") delete input.dataset.pendingIncrease;
     refreshManualIncrease(input);
   }
   function getEditedVariantPrices() {
@@ -1474,11 +1488,7 @@ function refreshManualIncrease(input) {
       const vid = i.dataset.variantId;
       const stockInput = document.querySelector(`.variant-stock-input[data-variant-id="${vid}"]`);
       const out = { variant_id: vid, price: i.value };
-      // This popup is increase-only: every edited price remains relative to
-      // the AliExpress base, so it follows future supplier price decreases.
-      const savedIncrease = parseFloat(i.dataset.priceIncrease || "0");
-      const originalPrice = parseFloat(i.dataset.originalPrice || i.value);
-      out.price_increase = Number((savedIncrease + (parseFloat(i.value) - originalPrice)).toFixed(2));
+      out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2));
       if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
       return out;
     });
@@ -2428,10 +2438,7 @@ async function pushInventoryToShopify() {
     const inc = parseFloat(amount);
     if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     const newPrice = currentPrice + inc;
-    priceInput.value = newPrice.toFixed(2);
-    priceInput.dataset.dirty = "true";
-    priceInput.dataset.editMode = "increase";
-    refreshManualIncrease(priceInput);
+    addVariantPriceIncrease(priceInput, inc);
     showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
   }
 
@@ -2443,11 +2450,7 @@ async function pushInventoryToShopify() {
     const inc = parseFloat(amount);
     if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     inputs.forEach(inp => {
-      const cur = parseFloat(inp.value) || 0;
-      inp.value = (cur + inc).toFixed(2);
-      inp.dataset.dirty = "true";
-      inp.dataset.editMode = "increase";
-    refreshManualIncrease(inp);
+      addVariantPriceIncrease(inp, inc);
     });
     showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
   }
@@ -2877,11 +2880,7 @@ function getEditedMappingVariantPrices() {
     const vid = i.dataset.variantId;
     const stockInput = document.querySelector(`.mm-variant-stock-input[data-variant-id="${vid}"]`);
     const out = { variant_id: vid, price: i.value };
-    if (i.dataset.editMode === "increase") {
-      const savedIncrease = parseFloat(i.dataset.priceIncrease || "0");
-      const originalPrice = parseFloat(i.dataset.originalPrice || i.value);
-      out.price_increase = Number((savedIncrease + (parseFloat(i.value) - originalPrice)).toFixed(2));
-    }
+    out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2));
     if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
     return out;
   });
@@ -2889,7 +2888,8 @@ function getEditedMappingVariantPrices() {
 
 function markMappingVariantPriceEdited(input) {
   input.dataset.dirty = "true";
-  input.dataset.editMode = "increase";
+  input.dataset.editMode = input.dataset.priceLocked === "true" ? "fixed" : "increase";
+  if (input.dataset.priceLocked !== "true") delete input.dataset.pendingIncrease;
     refreshManualIncrease(input);
 }
 
@@ -2910,10 +2910,7 @@ function increaseMappingVariantPrice(btn, variantId) {
     const inc = parseFloat(amount);
     if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     const newPrice = currentPrice + inc;
-    priceInput.value = newPrice.toFixed(2);
-    priceInput.dataset.dirty = "true";
-    priceInput.dataset.editMode = "increase";
-    refreshManualIncrease(priceInput);
+    addVariantPriceIncrease(priceInput, inc);
     showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
   }
 
@@ -2925,11 +2922,7 @@ function increaseAllMappingVariants() {
     const inc = parseFloat(amount);
     if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
     inputs.forEach(inp => {
-      const cur = parseFloat(inp.value) || 0;
-      inp.value = (cur + inc).toFixed(2);
-      inp.dataset.dirty = "true";
-      inp.dataset.editMode = "increase";
-    refreshManualIncrease(inp);
+      addVariantPriceIncrease(inp, inc);
     });
     showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
   }

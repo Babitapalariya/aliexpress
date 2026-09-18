@@ -376,6 +376,32 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(self.sync(), "unchanged")
         self.assertEqual(self.prices(), [17, 17, 20, 12])
 
+    def test_locked_final_price_edit_preserves_markup_and_supplier_sync(self):
+        self.increase(1, 5)
+        self.nodes[0]["price"] = "124.47"
+        self.lock(1, "price", True)
+        shopify.save_variant_price_edits("123", [{"variant_id": 1, "price": "24.47"}])
+        self.assertEqual(float(self.nodes[0]["increase"]["value"]), 5)
+        for supplier in ("119.47", "19.47", "15.00"):
+            for sku in self.skus:
+                sku["sale_price"] = supplier
+            self.sync()
+            self.assertEqual(self.prices()[0], 24.47)
+            self.assertEqual(float(self.nodes[0]["increase"]["value"]), 5)
+            self.assertEqual(self.prices()[1], float(supplier))
+        self.lock(1, "price", False)
+        self.sync()
+        self.assertEqual(self.prices()[0], 20)
+
+    def test_explicit_markup_repair_keeps_locked_price(self):
+        self.increase(1, -95)
+        self.nodes[0]["price"] = "24.47"
+        self.lock(1, "price", True)
+        shopify.save_variant_price_edits("123", [{"variant_id": 1, "price": "24.47", "price_increase": "5"}])
+        self.assertEqual(self.prices()[0], 24.47)
+        self.assertEqual(float(self.nodes[0]["increase"]["value"]), 5)
+        self.assertEqual(self.nodes[0]["priceLock"]["value"], "true")
+
     def test_rejects_invalid_increase_before_any_prices_are_written(self):
         with self.assertRaises(HTTPException) as error:
             shopify.save_variant_price_edits("123", [

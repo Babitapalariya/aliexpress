@@ -43,7 +43,7 @@ async function checkForm(mapping) {
   });
   const collect = mapping ? 'getEditedMappingVariantPrices' : 'getEditedVariantPrices';
   const toggle = mapping ? 'toggleMappingVariantLockType' : 'toggleVariantLockType';
-  for (const name of ['updateVariantLockButton', collect, toggle]) load(name, context);
+  for (const name of ['getDraftVariantIncrease', 'updateVariantLockButton', collect, toggle]) load(name, context);
   const original = JSON.stringify(context[collect]());
   await context[toggle](button, 2, 'price');
   assert.equal(inputs[1].dataset.priceLocked, 'true');
@@ -57,6 +57,27 @@ async function checkForm(mapping) {
   inputs[0].dataset.originalPrice = '12';
   inputs[0].value = '15';
   assert.equal(context[collect]()[0].price_increase, 5);
+
+  // Editing a locked selling price must not turn a +$5 markup into -$95.
+  for (const name of ['formatIncrease', 'refreshManualIncrease', 'addVariantPriceIncrease',
+    mapping ? 'markMappingVariantPriceEdited' : 'markVariantPriceEdited']) load(name, context);
+  const lockedInput = inputs[0];
+  lockedInput.closest = () => ({querySelector: () => ({})});
+  lockedInput.dataset.priceLocked = 'true';
+  lockedInput.dataset.priceIncrease = '5';
+  lockedInput.dataset.originalPrice = '124.47';
+  lockedInput.value = '24.47';
+  context[mapping ? 'markMappingVariantPriceEdited' : 'markVariantPriceEdited'](lockedInput);
+  assert.equal(context[collect]()[0].price_increase, 5);
+  lockedInput.dataset.priceLocked = 'false';
+  assert.equal(context[collect]()[0].price_increase, 5);
+  lockedInput.dataset.priceLocked = 'true';
+  context.addVariantPriceIncrease(lockedInput, 2);
+  assert.equal(lockedInput.value, '26.47');
+  assert.equal(context[collect]()[0].price_increase, 7);
+  lockedInput.value = '24.47';
+  context[mapping ? 'markMappingVariantPriceEdited' : 'markVariantPriceEdited'](lockedInput);
+  assert.equal(context[collect]()[0].price_increase, 7);
 }
 
 async function checkMatchingTables() {
@@ -99,6 +120,7 @@ async function checkMatchingTables() {
 (async () => {
   const routing = vm.createContext({});
   load('formatIncrease', routing);
+  load('getDraftVariantIncrease', routing);
   load('refreshManualIncrease', routing);
   assert.equal(routing.formatIncrease(null), '\u2014');
   assert.equal(routing.formatIncrease(3), '+$3.00');

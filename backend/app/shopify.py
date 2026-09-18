@@ -1983,9 +1983,11 @@ def save_variant_price_edits(shopify_product_id: str, edits: list) -> list:
             price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             previous = state[vid]
             # Older clients may submit an absolute price without an increase.
-            # Derive the additional adjustment from that variant's current price,
-            # preserving its existing increase instead of resetting it or locking it.
+            # An absolute edit to a locked selling price preserves its markup.
+            # Only an explicit increase changes that saved rule while locked.
+            # For unlocked variants, derive the adjustment from the current price.
             increase = (Decimal(str(edit["price_increase"])) if "price_increase" in edit
+                        else previous["price_increase"] if previous["locks"]["price"]
                         else previous["price_increase"] + price - Decimal(str(previous["price"])))
             if not increase.is_finite():
                 raise ValueError("Increase must be finite")
