@@ -1518,7 +1518,7 @@ def debug_product_prices(shopify_product_id: str, db: Session = Depends(get_db))
 
 @app.post("/dashboard/products/{product_id}/sync-price")
 def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
-    """Fetch latest AliExpress prices while preserving per-variant rules."""
+    """Restore unlocked variants to AliExpress prices and clear their increases."""
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
@@ -1534,24 +1534,12 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if not new_skus:
             raise HTTPException(500, "No SKUs found in AliExpress product")
 
-        # A sync must never delete a variant's saved increase. Locked prices
-        # stay fixed; each unlocked variant is recalculated independently as
-        # its latest AliExpress base price plus its own saved increase.
-        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
+        # Explicit Sync Price resets markups; scheduled sync retains them.
+        from .shopify import get_locked_variant_ids
         locked_variant_ids = get_locked_variant_ids(product.shopify_product_id, "price")
-        saved_increases = get_variant_price_increase_map(product.shopify_product_id)
-
-        # 2. Update only unlocked Shopify variants. The central updater reads
-        # the same per-variant map and reapplies each value by variant ID.
-        # Locks change the display mode, not the saved adjustment.
-        global_increase = product.price_increase or 0.0
-        if global_increase:
-            for sku in new_skus:
-                base = sku.get("sale_price") or sku.get("price")
-                if base is not None:
-                    sku["_supplier_price"] = base
-                    sku["sale_price"] = str(float(base) + global_increase)
-        success = update_shopify_product_prices_with_skus(product.shopify_product_id, new_skus)
+        success = update_shopify_product_prices_with_skus(
+            product.shopify_product_id, new_skus, reset_increases=True
+        )
         if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
 
@@ -1560,19 +1548,14 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if original_price:
             product.original_price = original_price
 
-        product.price_mode = (
-            "variant_manual" if locked_variant_ids
-            else "increase" if global_increase
-            else "variant_increase" if saved_increases
-            else "auto"
-        )
-        product.price_increase = global_increase
+        product.price_mode = "variant_manual" if locked_variant_ids else "auto"
+        product.price_increase = 0.0
         product.custom_price = None   # remove any manual override
         db.commit()
 
         return {
             "message": (
-                "Unlocked variant prices synced from AliExpress with saved increases"
+                "Unlocked variant prices restored to AliExpress prices; saved increases cleared"
                 + (f"; {len(locked_variant_ids)} locked variant(s) kept unchanged" if locked_variant_ids else "")
             ),
             "price_mode": product.price_mode

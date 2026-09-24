@@ -732,7 +732,7 @@
 <div class="overlay" id="increase-price-modal-imported">
   <div class="modal" style="max-width:400px">
     <div class="modal-hd"><h3>Increase Product Price</h3><button class="modal-x" onclick="closeIncreasePriceModalImported()">✕</button></div>
-    <div class="modal-bd"><input type="hidden" id="increase-product-id"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="increase-amount-imported" placeholder="e.g., 5.00"></div><div class="info-banner"><i class="ti ti-info-circle"></i><span>Added to every SKU price. Reapplied automatically on sync.</span></div><div id="increase-product-progress" style="display:none;margin-top:12px;color:var(--blue);font-size:12px"><i class="ti ti-loader-2 spin"></i> Price is increasing, please wait...</div></div>
+    <div class="modal-bd"><input type="hidden" id="increase-product-id"><div class="fg"><label>Increase by (USD)</label><input type="number" step="0.01" id="increase-amount-imported" placeholder="e.g., 5.00"></div><div class="info-banner"><i class="ti ti-info-circle"></i><span>Added to every SKU price. Kept during automatic updates; Sync Price clears increases on unlocked variants.</span></div><div id="increase-product-progress" style="display:none;margin-top:12px;color:var(--blue);font-size:12px"><i class="ti ti-loader-2 spin"></i> Price is increasing, please wait...</div></div>
     <div class="modal-ft"><button class="btn btn-sm" onclick="closeIncreasePriceModalImported()">Cancel</button><button id="btn-apply-product-increase" class="btn btn-primary btn-sm" onclick="submitPriceIncreaseImported()">Apply Increase</button></div>
   </div>
 </div>
@@ -1005,7 +1005,7 @@ function showToast(msg, type="", persistent=false){
       <td>${statusBadge}${editedBadge}${deadBadge}</td>
       <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
       <td><div class="td-actions">
-        <button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
+        <button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncProductImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
@@ -2183,7 +2183,7 @@ async function pushInventoryToShopify() {
             <td><div class="td-actions">
               ${p.source === 'mapping'
                 ? `<button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
-                : `<button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
               }
               ${p.source === 'mapping'
                 ? `<button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>`

@@ -1021,7 +1021,7 @@ def _match_supplier_variants(variants, skus):
     return {vid: skus[index] for vid, index in proposed.items() if counts[index] == 1}
 
 
-def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list) -> str:
+def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list, *, reset_increases: bool = False) -> str:
     """Sync each unlocked variant from its own supplier price and saved increase."""
     from decimal import Decimal, ROUND_HALF_UP
     from .price_history import observe_supplier_price
@@ -1065,7 +1065,11 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
                 if len(update) > 1:
                     updates.append(update)
                 continue
-            final = (base + variant["price_increase"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            increase = Decimal("0") if reset_increases else variant["price_increase"]
+            if reset_increases and variant["price_increase"] != 0:
+                update["price_increase"] = "0.00"
+                update["increase_metafield_id"] = variant.get("increase_metafield_id")
+            final = (base + increase).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             if final < 0:
                 raise ValueError(f"Negative final price for variant {vid}")
             if Decimal(str(variant["price"])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) != final:

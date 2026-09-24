@@ -513,7 +513,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(self.prices(), [110, 50, 120, 110])
         self.assertEqual(mapping.price_increase, 10)
 
-    def test_imported_mixed_locks_preserve_adjustment_in_manual_and_hourly_sync(self):
+    def test_imported_manual_sync_resets_unlocked_prices_after_hourly_sync(self):
         product, db, ns = self.mapping_context("variant_manual", 10)
         product.original_price = "50"
         product.custom_price = None
@@ -531,8 +531,35 @@ class VariantPriceSyncTests(unittest.TestCase):
             ns["sync_product_price"](1, db)
             self.assertEqual(self.prices(), [110, 50, 120, 110])
             ns["manual_product_price_sync"](1, db)
-            self.assertEqual(product.price_increase, 10)
-            self.assertEqual(self.prices(), [110, 50, 120, 110])
+            self.assertEqual(product.price_increase, 0)
+            self.assertEqual(product.price_mode, "variant_manual")
+            self.assertEqual(self.prices(), [110, 50, 90, 70])
+
+    def test_imported_sync_clears_increases_and_returns_to_auto(self):
+        product, db, ns = self.mapping_context("variant_increase", 4)
+        product.custom_price = "25"
+        ns["ImportedProduct"] = ImportedProduct
+        load_main_functions(ns, "manual_product_price_sync")
+        for vid in (1, 2, 3, 4):
+            self.increase(vid, vid * 2)
+        result = ns["manual_product_price_sync"](1, db)
+        self.assertEqual(result["price_mode"], "auto")
+        self.assertEqual(product.price_increase, 0)
+        self.assertIsNone(product.custom_price)
+        self.assertEqual(self.prices(), [12, 12, 12, 12])
+        self.assertEqual([float(n["increase"]["value"]) for n in self.nodes], [0] * 4)
+        self.assertEqual(self.sync(), "unchanged")
+
+    def test_imported_failed_reset_does_not_report_auto(self):
+        product, db, ns = self.mapping_context("variant_increase", 4)
+        ns["ImportedProduct"] = ImportedProduct
+        ns["update_shopify_product_prices_with_skus"] = Mock(return_value="failed")
+        load_main_functions(ns, "manual_product_price_sync")
+        with self.assertRaises(HTTPException):
+            ns["manual_product_price_sync"](1, db)
+        self.assertEqual(product.price_mode, "variant_increase")
+        self.assertEqual(product.price_increase, 4)
+        db.commit.assert_not_called()
 
     def test_mapping_hourly_sync_retains_adjustments_in_mixed_lock_mode(self):
         mapping, db, ns = self.mapping_context("variant_manual", 10)
