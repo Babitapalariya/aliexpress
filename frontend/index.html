@@ -1403,12 +1403,35 @@ async function syncProductPrice(productId){
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Increase All</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
+        <button type="button" class="btn btn-xs" onclick="repairImportedOptions(this)">Repair option groups</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
         <i class="ti ti-info-circle"></i> Lock icons: <i class="ti ti-currency-dollar" style="font-size:10px"></i> Price · <i class="ti ti-box" style="font-size:10px"></i> Inventory · <i class="ti ti-photo" style="font-size:10px"></i> Image. Locked = skipped by auto-sync for that field only.
       </div>`;
   } catch (e) {
     wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}<div style="margin-top:10px"><button type="button" class="btn btn-xs" onclick="loadVariantsForModal(${productId})"><i class="ti ti-refresh"></i> Retry variants</button></div></div>`;
+  }
+}
+
+async function repairImportedOptions(btn) {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  if (document.querySelector('#m-variants-wrap input[data-dirty="true"]')) {
+    showToast("Save your variant edits before repairing option groups", "err");
+    return;
+  }
+  btn.disabled = true;
+  showToast("Restoring AliExpress option groups...", "loading", true);
+  try {
+    const response = await fetch(`${API}/dashboard/products/${productId}/repair-options`, {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Option repair failed");
+    showToast(data.message, "ok");
+    await loadVariantsForModal(productId);
+  } catch (e) {
+    showToast(e.message, "err");
+  } finally {
+    btn.disabled = false;
   }
 }
 

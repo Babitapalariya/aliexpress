@@ -115,6 +115,7 @@ def _resolve_sku_info(sku: dict) -> dict:
         return {"label": label, "image": None}
 
     parts = []
+    options = []
     image_url = None
 
     for prop in prop_list:
@@ -126,20 +127,30 @@ def _resolve_sku_info(sku: dict) -> dict:
         )
         if val:
             parts.append(str(val).strip())
+            options.append({
+                "id": str(prop.get("sku_property_id") or prop.get("attr_name_id") or prop.get("sku_property_name") or len(options)),
+                "name": str(prop.get("sku_property_name") or prop.get("attr_name") or f"Option {len(options) + 1}"),
+                "value": str(val).strip(),
+            })
 
-        # Grab the first image found across any property
-        if image_url is None:
-            img = (
+        # Keep the image's option identity so sizes can share their color image.
+        img = (
                 prop.get("sku_property_value_id_long_image")   # most common DS field
                 or prop.get("property_value_id_long_image")
                 or prop.get("sku_image")
                 or prop.get("image_path")
             )
-            if img and isinstance(img, str) and img.startswith("http"):
-                image_url = img
+        if img and isinstance(img, str):
+            if img.startswith("//"):
+                img = "https:" + img
+            if img.startswith(("https://", "http://")):
+                if val:
+                    options[-1]["image"] = img
+                if image_url is None:
+                    image_url = img
 
     label = " / ".join(parts) if parts else sku.get("sku_attr", "")
-    return {"label": label, "image": image_url}
+    return {"label": label, "image": image_url, "options": options}
 
 
 # Keep the old name as an alias so nothing breaks
@@ -265,6 +276,8 @@ def _filter_skus_by_ship_location(skus: list, ship_to_country: str) -> list:
 
         new_sku = dict(chosen)
         new_sku["label"] = base_label
+        if new_sku.get("options"):
+            new_sku["options"] = new_sku["options"][:-1]
         collapsed.append(new_sku)
 
     result = passthrough + collapsed
@@ -436,6 +449,7 @@ def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
             "sku_id":       sku.get("sku_id"),
             "sku_attr":     sku.get("sku_attr"),
             "label":        info["label"],
+            "options":      info.get("options", []),
             "image":        info["image"],           # ← per-variant image URL
             "price":        sku.get("sku_price"),
             "sale_price":   sku.get("offer_sale_price"),

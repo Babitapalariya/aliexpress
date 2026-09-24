@@ -1567,6 +1567,23 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Sync failed: {str(e)}")
 
 
+@app.post("/dashboard/products/{product_id}/repair-options")
+def repair_imported_product_options(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if not product.shopify_product_id:
+        raise HTTPException(400, "This product has no Shopify ID attached")
+    from .shopify import repair_supplier_option_groups
+    latest = get_product(product.aliexpress_id, db)
+    try:
+        return repair_supplier_option_groups(product.shopify_product_id, latest.get("skus", []))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Option repair failed: {exc}")
+
+
 @app.post("/mappings/{mapping_id}/update-price")
 def update_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
@@ -3645,7 +3662,8 @@ def sync_product_images(product_id: int, db: Session = Depends(get_db)):
     return {
         "message": (
             f"Attached {result['attached']} image(s). "
-            f"{result['skipped']} variant(s) already had images."
+            f"{result['skipped']} variant(s) already had images or were image-locked. "
+            f"{result.get('remaining', 0)} variant(s) still need images; retry Sync SKU Images if needed."
         ),
         **result,
     }

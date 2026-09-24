@@ -174,7 +174,7 @@ def _upload_image_to_shopify(shopify_product_id: str, image_url: str, alt: str =
     """
     try:
         payload = {"image": {"src": image_url, "alt": alt}}
-        res = requests.post(
+        res = _shopify_request("POST",
             f"{_base()}/products/{shopify_product_id}/images.json",
             json=payload,
             headers=_h(),
@@ -235,85 +235,8 @@ def _upload_image_to_shopify(shopify_product_id: str, image_url: str, alt: str =
 
 
 def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
-    if not aliexpress_skus or not shopify_variants:
-        return 0
-
-    locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
-
-    # Build sku_id -> ae_sku lookup instead of relying on array position
-    ae_sku_by_id = {str(s.get("sku_id")): s for s in aliexpress_skus if s.get("sku_id")}
-
-    # Fetch each variant's aliexpress.sku_id metafield (same source of truth
-    # your price/inventory sync already relies on)
-    variant_ae_map = {}
-    for variant in shopify_variants:
-        vid = variant["id"]
-        try:
-            mf_res = _shopify_request(
-                "GET", f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
-            )
-            if mf_res.status_code == 200:
-                mfs = mf_res.json().get("metafields", [])
-                if mfs:
-                    variant_ae_map[vid] = mfs[0].get("value")
-        except Exception as e:
-            print(f"[Shopify][Image] Metafield lookup failed for variant {vid}: {e}")
-
-    url_to_image_id: dict[str, int] = {}
-    attached = 0
-    unmatched = []
-
-    for i, shopify_variant in enumerate(shopify_variants):
-        variant_id = shopify_variant["id"]
-        if variant_id in locked_variant_ids:
-            continue
-
-        # 1. Match by this variant's own sku_id metafield — reliable, order-independent
-        ae_sku_id = variant_ae_map.get(variant_id)
-        ae_sku = ae_sku_by_id.get(ae_sku_id) if ae_sku_id else None
-
-        # 2. Fall back to positional match only if no metafield exists at all
-        #    (e.g. product imported before metafields were being stored)
-        if ae_sku is None and i < len(aliexpress_skus):
-            ae_sku = aliexpress_skus[i]
-
-        if ae_sku is None:
-            unmatched.append(variant_id)
-            continue
-
-        img_url = ae_sku.get("image")
-        if not img_url:
-            continue  # this SKU genuinely has no image on AliExpress's side
-
-        if img_url not in url_to_image_id:
-            image_id = _upload_image_to_shopify(
-                shopify_product_id, img_url, alt=ae_sku.get("label", ""),
-            )
-            if image_id:
-                url_to_image_id[img_url] = image_id
-            else:
-                continue
-        else:
-            image_id = url_to_image_id[img_url]
-
-        try:
-            res = requests.put(
-                f"{_base()}/variants/{variant_id}.json",
-                json={"variant": {"id": variant_id, "image_id": image_id}},
-                headers=_h(),
-                timeout=15,
-            )
-            res.raise_for_status()
-            attached += 1
-            print(f"[Shopify][Image] Variant {variant_id} ← image {image_id} ({ae_sku.get('label','')})")
-        except Exception as e:
-            print(f"[Shopify][Image] Variant link failed for {variant_id}: {e}")
-
-    if unmatched:
-        print(f"[Shopify][Image] {len(unmatched)} variant(s) had no matching AliExpress SKU at all: {unmatched}")
-
-    return attached
+    # Use the paginated snapshot and identical matching/retry rules on import and repair.
+    return backfill_sku_images(shopify_product_id, aliexpress_skus)["attached"]
 
 
 
@@ -340,7 +263,7 @@ def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list,
 #     already_has = len(shopify_variants) - len(needs_image)
 
 #     if not needs_image:
-#         return {"attached": 0, "skipped": already_has, "total_variants": len(shopify_variants)}
+#         return {"attached": 0, "skipped": already_has, "total_variants": len(shopify_variants), "remaining": 0}
 
 #     # Build matching sku list for the ones that need images
 #     # We map by position — same assumption as store_aliexpress_sku_ids
@@ -400,6 +323,7 @@ def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
         variants(first: 100, after: $after) {
           nodes {
             id
+            selectedOptions { name value }
             image { id }
             skuId: metafield(namespace: "aliexpress", key: "sku_id") { value }
           }
@@ -426,6 +350,7 @@ def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
             sku_metafield = node.get("skuId") or {}
             variants.append({
                 "id": int(_numeric_id_from_gid(node["id"])),
+                "label": " / ".join(o["value"] for o in node.get("selectedOptions", []) if o["value"] != "Default Title"),
                 "image_id": (
                     int(_numeric_id_from_gid(image["id"]))
                     if image.get("id") else None
@@ -446,13 +371,30 @@ def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
     return variants
 
 
-def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
-    try:
-        shopify_variants = _get_all_variants_for_image_sync(shopify_product_id)
-    except Exception as e:
-        print(f"[Backfill][Image] Fetch variants failed: {e}")
-        return {"attached": 0, "skipped": 0, "total_variants": 0}
+def resolve_supplier_images(skus: list) -> list:
+    """Share only images explicitly associated with the same option value."""
+    images = {}
+    for sku in skus:
+        for option in sku.get("options", []):
+            if option.get("image"):
+                key = (str(option["id"]), option["value"])
+                images.setdefault(key, set()).add(option["image"])
+    resolved = []
+    for sku in skus:
+        row = dict(sku)
+        if not row.get("image"):
+            candidates = set()
+            for option in sku.get("options", []):
+                candidates.update(images.get((str(option["id"]), option["value"]), set()))
+            if len(candidates) == 1:
+                row["image"] = candidates.pop()
+        resolved.append(row)
+    return resolved
 
+
+def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
+    shopify_variants = _get_all_variants_for_image_sync(shopify_product_id)
+    aliexpress_skus = resolve_supplier_images(aliexpress_skus)
     locked_variant_ids = get_locked_variant_ids(shopify_product_id, "image")
 
     # Skip variants that already have an image OR are locked
@@ -463,14 +405,12 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
     already_has = len(shopify_variants) - len(needs_image)
 
     if not needs_image:
-        return {"attached": 0, "skipped": already_has, "total_variants": len(shopify_variants)}
+        return {"attached": 0, "skipped": already_has, "total_variants": len(shopify_variants), "remaining": 0}
 
     url_to_image_id: dict[str, int] = {}
-    ae_sku_by_id = {
-        str(sku.get("sku_id")): sku
-        for sku in aliexpress_skus
-        if sku.get("sku_id") is not None
-    }
+    matches = _match_supplier_variants({v["id"]: {
+        "ae_sku_id": v.get("aliexpress_sku_id"), "label": v.get("label", "")
+    } for v in shopify_variants}, aliexpress_skus)
     attached = 0
     unmatched = 0
 
@@ -479,14 +419,7 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
             continue
         if shopify_variant["id"] in locked_variant_ids:
             continue  # manually customized — skip
-        # Current imports store the AliExpress SKU ID on each Shopify variant.
-        # Keep positional matching only for products imported before that
-        # metafield existed.
-        ae_sku_id = shopify_variant.get("aliexpress_sku_id")
-        if ae_sku_id is not None:
-            ae_sku = ae_sku_by_id.get(ae_sku_id)
-        else:
-            ae_sku = aliexpress_skus[i] if i < len(aliexpress_skus) else None
+        ae_sku = matches.get(shopify_variant["id"])
         if ae_sku is None:
             unmatched += 1
             continue
@@ -506,7 +439,7 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
 
         variant_id = shopify_variant["id"]
         try:
-            res2 = requests.put(
+            res2 = _shopify_request("PUT",
                 f"{_base()}/variants/{variant_id}.json",
                 json={"variant": {"id": variant_id, "image_id": image_id}},
                 headers=_h(), timeout=15,
@@ -524,12 +457,46 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
         "attached": attached,
         "skipped": already_has,
         "total_variants": len(shopify_variants),
+        "remaining": len(needs_image) - attached,
     }
 
 
 # ─────────────────────────────────────────────
 # NORMALIZER & CREATE
 # ─────────────────────────────────────────────
+def build_supplier_options(skus: list):
+    """Preserve named supplier dimensions; never invent missing combinations."""
+    if not skus:
+        return [], []
+    structured = [bool(s.get("options")) for s in skus]
+    if not any(structured):
+        values = [[s.get("label") or " / ".join(
+            p.split(":", 1)[-1].split("#", 1)[-1].strip()
+            for p in (s.get("sku_attr") or "").split(";") if ":" in p
+        ) or "Default Title"] for s in skus]
+        names = ["Variant"]
+    else:
+        if not all(structured):
+            raise HTTPException(400, "Incomplete supplier options; fetch the product again before importing")
+        first = skus[0]["options"]
+        keys = [str(o["id"]) for o in first]
+        names = [o["name"] for o in first]
+        if len(keys) > 3 or len(set(keys)) != len(keys) or len(set(names)) != len(names):
+            raise HTTPException(400, "Supplier options must have up to three distinct names")
+        values = []
+        for sku in skus:
+            by_id = {str(o["id"]): o["value"] for o in sku["options"]}
+            if set(by_id) != set(keys) or len(sku["options"]) != len(keys):
+                raise HTTPException(400, "Supplier option groups differ between variants")
+            values.append([by_id[key] for key in keys])
+    if any(not v or len(v) > 255 for row in values for v in row):
+        raise HTTPException(400, "Supplier option values must contain 1 to 255 characters")
+    if len({tuple(row) for row in values}) != len(values):
+        raise HTTPException(400, "Duplicate supplier option combinations; cannot safely import")
+    return [{"name": name, "values": list(dict.fromkeys(row[i] for row in values))}
+            for i, name in enumerate(names)], values
+
+
 def normalize_aliexpress_product(product: dict) -> dict:
     title = product.get("title") or "AliExpress Product"
     base_price = str(product.get("sale_price") or product.get("original_price") or "0")
@@ -544,15 +511,15 @@ def normalize_aliexpress_product(product: dict) -> dict:
     if rating:
         tags.append(f"rating:{rating}")
     skus = product.get("skus") or []
+    options, option_values = build_supplier_options(skus)
     variants = []
-    for sku in skus:
+    for sku, values in zip(skus, option_values):
         sku_price = str(sku.get("sale_price") or sku.get("price") or base_price)
-        sku_attr = sku.get("sku_attr") or ""
-        option_parts = [p.split(":")[-1].strip() for p in sku_attr.split(";") if ":" in p]
-        option_value = " / ".join(option_parts) if option_parts else None
         v = {"price": sku_price, "inventory_management": "shopify", "inventory_quantity": int(sku.get("stock") or 0)}
-        if option_value:
-            v["option1"] = option_value
+        v.update({f"option{i}": value for i, value in enumerate(values, 1)})
+        if sku.get("sku_id") is not None:
+            v["metafields"] = [{"namespace": "aliexpress", "key": "sku_id",
+                                "type": "single_line_text_field", "value": str(sku["sku_id"])}]
         variants.append(v)
     if not variants:
         variants = [{"price": base_price}]
@@ -569,8 +536,8 @@ def normalize_aliexpress_product(product: dict) -> dict:
             {"namespace": "aliexpress", "key": "product_id", "value": product_id, "type": "single_line_text_field"}
         ]
     }
-    if any(v.get("option1") for v in variants):
-        payload["options"] = [{"name": "Variant"}]
+    if options:
+        payload["options"] = options
     imgs = []
     main = product.get("main_image")
     if main:
@@ -581,6 +548,34 @@ def normalize_aliexpress_product(product: dict) -> dict:
     if imgs:
         payload["images"] = [{"src": u} for u in imgs]
     return payload
+
+
+def repair_supplier_option_groups(shopify_product_id: str, skus: list) -> dict:
+    """Update options on existing variant IDs without replacing variants."""
+    if not skus or not all(s.get("options") for s in skus):
+        raise HTTPException(400, "AliExpress did not return named option groups for this product")
+    state = get_variant_sync_state(shopify_product_id)
+    matches = _match_supplier_variants(state, skus)
+    if not state or len(matches) != len(state):
+        raise HTTPException(409, "Some existing variants cannot be matched safely to AliExpress; option repair stopped")
+    ids = list(state)
+    options, values = build_supplier_options([matches[vid] for vid in ids])
+    variants = [{"id": vid, **{f"option{i}": row[i-1] if i <= len(row) else None
+                              for i in range(1, 4)}} for vid, row in zip(ids, values)]
+    response = requests.put(
+        f"{_base()}/products/{shopify_product_id}.json",
+        json={"product": {"id": shopify_product_id, "options": options, "variants": variants}},
+        headers=_h(), timeout=30,
+    )
+    response.raise_for_status()
+    saved = response.json().get("product", {})
+    actual = {int(v["id"]): tuple(v.get(f"option{i}") for i in range(1, 4))
+              for v in saved.get("variants", [])}
+    expected = {v["id"]: tuple(v.get(f"option{i}") for i in range(1, 4)) for v in variants}
+    if actual != expected or [o["name"] for o in saved.get("options", [])] != [o["name"] for o in options]:
+        raise HTTPException(502, "Shopify option repair could not be verified; reload the product before retrying")
+    return {"message": "Option groups repaired: " + ", ".join(o["name"] for o in options),
+            "updated": len(variants)}
 
 
 def create_shopify_product(product: dict) -> dict:
