@@ -1309,34 +1309,24 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
 
-        global_increase = mapping.price_increase or 0.0
-        if global_increase:
-            for sku in aliexpress_skus:
-                base = sku.get("sale_price") or sku.get("price")
-                if base is not None:
-                    sku["_supplier_price"] = base
-                    sku["sale_price"] = str(float(base) + global_increase)
-
-        price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, aliexpress_skus)
+        # Explicit Sync Price restores supplier prices, as in the imported table.
+        from .shopify import get_locked_variant_ids
+        has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
+        price_result = update_shopify_product_prices_with_skus(
+            mapping.shopify_product_id, aliexpress_skus, reset_increases=True
+        )
         if price_result == "failed":
             raise HTTPException(502, "Failed to update Shopify variant prices")
 
         inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
-        # Keep partial-manual status while any variant price lock exists.
-        # The sync above already updates every unlocked variant.
-        from .shopify import get_locked_variant_ids, get_variant_price_increase_map
-        has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
-        has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
-        mapping.price_mode = (
-            "increase" if global_increase else "variant_manual" if has_price_locks
-            else "variant_increase" if has_variant_increases
-            else "auto"
-        )
-        mapping.price_increase = global_increase
+        mapping.price_mode = "variant_manual" if has_price_locks else "auto"
+        mapping.price_increase = 0.0
         db.commit()
 
-        price_msg = "Price already up to date" if price_result == "unchanged" else "Unlocked variant prices updated with their saved increases"
+        price_msg = "Unlocked variant prices restored to AliExpress prices; saved increases cleared"
+        if has_price_locks:
+            price_msg += "; locked variant prices kept unchanged"
         inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
         return {
             "message": f"{price_msg} · {inv_msg}",

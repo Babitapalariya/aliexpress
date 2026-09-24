@@ -1744,7 +1744,7 @@ async function syncInventoryFromModal() {
         <td>${modeBadge}</td>
         <td class="td-actions">
           <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openMappingModal(${mj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
-          <button class="btn btn-primary btn-sm" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+          <button class="btn btn-primary btn-sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
           <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
           <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
           ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
@@ -2205,7 +2205,7 @@ async function pushInventoryToShopify() {
             <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
             <td><div class="td-actions">
               ${p.source === 'mapping'
-                ? `<button class="btn btn-primary btn-icon sm" title="Sync Price" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+                ? `<button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
                 : `<button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
               }
               ${p.source === 'mapping'

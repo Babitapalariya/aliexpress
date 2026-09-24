@@ -456,7 +456,7 @@ class VariantPriceSyncTests(unittest.TestCase):
                             "delete_mapping_variant")
         return mapping, db, namespace
 
-    def test_mapping_edits_manual_and_hourly_sync_preserve_rules_and_history(self):
+    def test_mapping_manual_reset_then_hourly_sync_keeps_locked_prices(self):
         mapping, db, ns = self.mapping_context()
         self.lock(2, "price", True)
         ns["update_mapping_variant_prices"](1, {"variants": [
@@ -468,23 +468,45 @@ class VariantPriceSyncTests(unittest.TestCase):
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True), \
              patch("app.database.SessionLocal", return_value=db):
             ns["sync_mapped_product_price"]("mapped-ae", db)
-            self.assertEqual(self.prices(), [14, 15, 20, 12])
+            self.assertEqual(self.prices(), [12, 15, 12, 12])
             for sku in self.skus:
                 sku["sale_price"] = "9"
             ns["sync_all_mapped_products_background"]()
-        self.assertEqual(self.prices(), [11, 15, 17, 9])
+        self.assertEqual(self.prices(), [9, 15, 9, 9])
         self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"]["change"], "-3.00")
-        self.assertEqual(float(shopify.get_variant_sync_state("123")[1]["price_increase"]), 2)
+        self.assertEqual(float(shopify.get_variant_sync_state("123")[1]["price_increase"]), 0)
 
-    def test_mapping_manual_sync_preserves_existing_product_wide_increase(self):
+    def test_mapping_manual_sync_clears_product_and_variant_increases(self):
         mapping, db, ns = self.mapping_context("increase", 4)
         self.increase(1, 3)
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
             ns["sync_mapped_product_price"]("mapped-ae", db)
-        self.assertEqual(self.prices(), [19, 16, 16, 16])
-        self.assertEqual(mapping.price_increase, 4)
-        self.assertEqual(mapping.price_mode, "increase")
+        self.assertEqual(self.prices(), [12, 12, 12, 12])
+        self.assertEqual(mapping.price_increase, 0)
+        self.assertEqual(mapping.price_mode, "auto")
+        self.assertEqual(self.sync(), "unchanged")
         self.assertEqual(shopify.get_variant_sync_state("123")[1]["supplier_history"]["price"], "12.00")
+
+    def test_mapping_failed_manual_reset_keeps_mode_and_increase(self):
+        mapping, db, ns = self.mapping_context("variant_increase", 4)
+        with patch.object(shopify, "update_shopify_product_prices_with_skus", return_value="failed"):
+            with self.assertRaises(HTTPException) as error:
+                ns["sync_mapped_product_price"]("mapped-ae", db)
+        self.assertEqual(error.exception.status_code, 502)
+        self.assertEqual(mapping.price_mode, "variant_increase")
+        self.assertEqual(mapping.price_increase, 4)
+        db.commit.assert_not_called()
+
+    def test_mapping_separate_increases_without_locks_reset_to_auto(self):
+        mapping, db, ns = self.mapping_context("variant_increase")
+        for vid in (1, 2, 3, 4):
+            self.increase(vid, vid * 3)
+        with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
+            result = ns["sync_mapped_product_price"]("mapped-ae", db)
+        self.assertEqual(result["price_mode"], "auto")
+        self.assertEqual(self.prices(), [12] * 4)
+        self.assertEqual([float(n["increase"]["value"]) for n in self.nodes], [0] * 4)
+        self.assertIn("saved increases cleared", result["message"])
 
     def test_screenshot_mixed_locks_keep_each_manual_increase(self):
         for i, (price, increase) in enumerate(zip([110, 50, 80, 60], [10, 20, 30, 40]), 1):
@@ -498,7 +520,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(self.prices(), [110, 50, 120, 110])
         self.assertEqual(self.sync(), "unchanged")
 
-    def test_mapping_mixed_locks_do_not_disable_saved_product_adjustment(self):
+    def test_mapping_manual_reset_protects_locked_prices(self):
         mapping, db, ns = self.mapping_context("variant_manual", 10)
         self.increase(3, 20)
         self.increase(4, 30)
@@ -510,8 +532,9 @@ class VariantPriceSyncTests(unittest.TestCase):
                      for i, price in enumerate([120, 60, 90, 70], 1)]
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
             ns["sync_mapped_product_price"]("mapped-ae", db)
-        self.assertEqual(self.prices(), [110, 50, 120, 110])
-        self.assertEqual(mapping.price_increase, 10)
+        self.assertEqual(self.prices(), [110, 50, 90, 70])
+        self.assertEqual(mapping.price_increase, 0)
+        self.assertEqual(mapping.price_mode, "variant_manual")
 
     def test_imported_manual_sync_resets_unlocked_prices_after_hourly_sync(self):
         product, db, ns = self.mapping_context("variant_manual", 10)
@@ -590,7 +613,8 @@ class VariantPriceSyncTests(unittest.TestCase):
                     if imported:
                         ns["sync_product_price"](1, db)
                     else:
-                        ns["sync_mapped_product_price"]("mapped-ae", db)
+                        with patch("app.database.SessionLocal", return_value=db):
+                            ns["sync_all_mapped_products_background"]()
                 self.assertEqual(self.prices(), [10, 107, 107, 107])
 
     def test_mapping_delete_verifies_ownership_and_protects_final_variant(self):
