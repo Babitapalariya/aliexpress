@@ -151,8 +151,23 @@ class VariantPriceSyncTests(unittest.TestCase):
     def test_missing_sku_does_not_take_sibling_price(self):
         self.nodes[0]["aeSku"]["value"] = "removed"
         self.nodes[0]["selectedOptions"][0]["value"] = "Removed option"
-        self.assertEqual(self.sync(), "failed")
-        self.assertEqual(self.prices(), [10, 12, 12, 12])
+        with self.assertRaises(HTTPException) as error:
+            self.sync()
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertIn("Removed option (1)", error.exception.detail)
+        self.bulk.assert_not_called()
+        self.assertEqual(self.prices(), [10, 10, 10, 10])
+
+    def test_signed_adjustment_survives_supplier_increases_and_decreases(self):
+        shopify.save_variant_price_edits("123", [{"variant_id": 1, "price": "7", "price_increase": "-3"}])
+        self.sync()
+        self.assertEqual(self.prices()[0], 9)
+        for sku in self.skus:
+            if sku["sku_id"] == "ae-1":
+                sku["sale_price"] = "8"
+        self.sync()
+        self.assertEqual(self.prices()[0], 5)
+        self.assertEqual(float(shopify.get_variant_sync_state("123")[1]["price_increase"]), -3)
 
     def controller_fixture(self):
         supplier = [

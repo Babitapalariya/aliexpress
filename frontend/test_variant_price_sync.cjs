@@ -117,6 +117,73 @@ async function checkMatchingTables() {
   assert.match(mapped, /deleteMappedVariant\(1\)/);
 }
 
+function checkSignedAdjustments() {
+  let answer = '10';
+  const errors = [];
+  const cell = {};
+  const input = {value: '45.54', dataset: {priceIncrease: '10.74', originalPrice: '45.54'},
+    closest: () => ({querySelector: () => cell})};
+  const button = {closest: () => ({querySelector: () => input})};
+  const context = vm.createContext({prompt: () => answer, showToast: message => errors.push(message),
+    document: {querySelectorAll: () => [input]}});
+  for (const name of ['formatIncrease', 'getDraftVariantIncrease', 'refreshManualIncrease',
+    'addVariantPriceIncrease', 'setVariantAdjustment', 'decreaseVariantPrice', 'increaseAllVariants',
+    'increaseAllMappingVariants']) load(name, context);
+  context.setVariantAdjustment(button);
+  assert.equal(input.value, '44.80');
+  assert.equal(cell.textContent, '+$10.00');
+  answer = '12';
+  context.decreaseVariantPrice(button);
+  assert.equal(input.value, '32.80');
+  assert.equal(cell.textContent, '-$2.00');
+  answer = '-1';
+  context.increaseAllVariants();
+  context.increaseAllMappingVariants();
+  assert.equal(input.value, '30.80');
+  assert.equal(cell.textContent, '-$4.00');
+  answer = '31';
+  context.decreaseVariantPrice(button);
+  assert.equal(input.value, '30.80');
+  assert.match(errors.at(-1), /cannot be negative/);
+  input.dataset.productPriceIncrease = '5';
+  answer = '10';
+  context.setVariantAdjustment(button);
+  assert.equal(context.getDraftVariantIncrease(input), 5);
+  assert.equal(cell.textContent, '+$10.00');
+}
+
+function checkLatestVariantAdjustment() {
+  for (const handler of ['increaseVariantPrice', 'increaseMappingVariantPrice']) {
+    let answer;
+    const cell = {};
+    const input = {value: '40.00', dataset: {variantId: '1', originalPrice: '40.00', priceIncrease: '0'},
+      closest: () => ({querySelector: () => cell})};
+    const button = {closest: () => ({querySelector: () => input})};
+    const context = vm.createContext({prompt: () => answer,
+      showToast: message => {throw Error(message);},
+      document: {querySelectorAll: () => [input], querySelector: () => null}});
+    const collect = handler === 'increaseVariantPrice' ? 'getEditedVariantPrices' : 'getEditedMappingVariantPrices';
+    for (const name of ['formatIncrease', 'getDraftVariantIncrease', 'refreshManualIncrease',
+      'addVariantPriceIncrease', 'setVariantAdjustment', handler, collect]) load(name, context);
+    for (const [amount, price] of [['5', '45.00'], ['2', '42.00'], ['-2', '38.00'], ['0', '40.00']]) {
+      answer = amount;
+      context[handler](button, 1);
+      assert.equal(input.value, price);
+      assert.equal(context[collect]()[0].price_increase, Number(amount));
+    }
+    // Reopening a saved +$5 adjustment must still replace it with +$2.
+    input.value = '45.00';
+    input.dataset.originalPrice = '45.00';
+    input.dataset.priceIncrease = '5';
+    delete input.dataset.pendingIncrease;
+    answer = '2';
+    context[handler](button, 1);
+    assert.equal(input.value, '42.00');
+    assert.equal(cell.textContent, '+$2.00');
+    assert.equal(context[collect]()[0].price_increase, 2);
+  }
+}
+
 (async () => {
   const routing = vm.createContext({});
   load('formatIncrease', routing);
@@ -137,5 +204,7 @@ async function checkMatchingTables() {
   await checkForm(false);
   await checkForm(true);
   await checkMatchingTables();
+  checkSignedAdjustments();
+  checkLatestVariantAdjustment();
   console.log('Both forms preserve individual increases through lock/unlock; JavaScript syntax passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

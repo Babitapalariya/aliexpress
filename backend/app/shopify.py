@@ -1028,6 +1028,11 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         if not variants:
             return "failed"
         matched = _match_supplier_variants(variants, aliexpress_skus)
+        missing = [f"{v['label']} ({vid})" for vid, v in variants.items()
+                   if not v["locks"]["price"] and vid not in matched]
+        if missing:
+            raise HTTPException(409, "Cannot sync prices: missing or ambiguous AliExpress SKU links for "
+                                + ", ".join(missing) + ". Repair the SKU links and retry.")
         for sku in aliexpress_skus:
             raw = sku.get("sale_price") or sku.get("price")
             if raw is None:
@@ -1083,6 +1088,8 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
                 print(f"[PriceSync] Shopify update incomplete: {result}")
                 return "failed"
         return "failed" if unmatched else "updated" if any("price" in row for row in updates) else "unchanged"
+    except HTTPException:
+        raise
     except Exception as exc:
         print(f"[PriceSync] Product {shopify_product_id} failed: {exc}")
         return "failed"

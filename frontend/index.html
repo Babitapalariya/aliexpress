@@ -1322,7 +1322,7 @@ async function syncProductPrice(productId){
   //       </table>
   //       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
   //         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
-  //         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Increase All</button>
+  //         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
   //         <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
   //       </div>
   //       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)"><i class="ti ti-info-circle"></i> Locked variants (<i class="ti ti-lock" style="font-size:10px"></i>) are skipped by all automatic price, inventory, and image syncs.</div>`;
@@ -1369,9 +1369,11 @@ async function syncProductPrice(productId){
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right"><div class="variant-price-controls">
           <input type="number" step="0.01" min="0" class="variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-product-price-increase="${v.product_price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
-          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
+          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseVariantPrice(this, '${v.variant_id}')" aria-label="Adjust variant price" title="Increase or decrease: enter a positive or negative amount"><i class="ti ti-plus"></i></button>
         </div></td>
-        <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
+        <td class="manual-increase">
+          <span data-manual-increase>${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</span>
+        </td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
@@ -1398,10 +1400,10 @@ async function syncProductPrice(productId){
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual increase.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
-        <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Increase All</button>
+        <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
         <button type="button" class="btn btn-xs" onclick="repairImportedOptions(this)">Repair option groups</button>
       </div>
@@ -1488,11 +1490,35 @@ function getDraftVariantIncrease(input) {
   return saved + Number(input.value) - Number(input.dataset.originalPrice || input.value);
 }
 function addVariantPriceIncrease(input, amount) {
+  const finalPrice = Math.round(Number(input.value) * 100) + Math.round(amount * 100);
+  if (!input.value.trim() || !Number.isFinite(finalPrice) || finalPrice < 0) {
+    showToast("The final price cannot be negative", "err");
+    return false;
+  }
   input.dataset.pendingIncrease = (getDraftVariantIncrease(input) + amount).toFixed(2);
-  input.value = (Number(input.value) + amount).toFixed(2);
+  input.value = (finalPrice / 100).toFixed(2);
   input.dataset.dirty = "true";
   input.dataset.editMode = "increase";
   refreshManualIncrease(input);
+  return true;
+}
+function setVariantAdjustment(btn) {
+  const input = btn.closest('tr').querySelector('.variant-price-input, .mm-variant-price-input');
+  const shared = Number(input.dataset.productPriceIncrease || 0);
+  const current = shared + getDraftVariantIncrease(input);
+  const value = prompt('Set manual adjustment in USD. This replaces the previous amount (10 = +$10, -10 = -$10, 0 = none)', current.toFixed(2));
+  if (value === null) return;
+  const amount = Number(value);
+  if (!value.trim() || !Number.isFinite(amount)) { showToast('Enter a valid amount', 'err'); return; }
+  addVariantPriceIncrease(input, Math.round((amount - current) * 100) / 100);
+}
+function decreaseVariantPrice(btn) {
+  const input = btn.closest('tr').querySelector('.variant-price-input, .mm-variant-price-input');
+  const value = prompt('Decrease this variant by (USD)', '1.00');
+  if (value === null) return;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) { showToast('Enter a positive amount to subtract', 'err'); return; }
+  addVariantPriceIncrease(input, -amount);
 }
 function refreshManualIncrease(input) {
   const cell = input.closest("tr")?.querySelector("[data-manual-increase]");
@@ -2452,30 +2478,21 @@ async function pushInventoryToShopify() {
 
   // ── PER-VARIANT INCREASE ──
   function increaseVariantPrice(btn, variantId) {
-    const row = btn.closest('tr');
-    const priceInput = row.querySelector('.variant-price-input');
-    if (!priceInput) return;
-    const currentPrice = parseFloat(priceInput.value) || 0;
-    const amount = prompt(`Enter amount to add to this variant's price (current: $${currentPrice.toFixed(2)})`, "1.00");
-    if (amount === null) return;
-    const inc = parseFloat(amount);
-    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
-    const newPrice = currentPrice + inc;
-    addVariantPriceIncrease(priceInput, inc);
-    showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
+    setVariantAdjustment(btn);
   }
 
   function increaseAllVariants() {
     const inputs = document.querySelectorAll(".variant-price-input");
     if (!inputs.length) return;
-    const amount = prompt("Enter amount to add to ALL variant prices", "1.00");
+    const amount = prompt("Adjust ALL variant prices: positive to increase, negative to decrease", "1.00");
     if (amount === null) return;
-    const inc = parseFloat(amount);
-    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
+    const inc = Number(amount);
+    if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a positive amount to increase or a negative amount to decrease", "err"); return; }
+    if (Array.from(inputs).some(inp => Number(inp.value) + inc < 0)) { showToast("The final price cannot be negative", "err"); return; }
     inputs.forEach(inp => {
       addVariantPriceIncrease(inp, inc);
     });
-    showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
+    showToast(`All variants adjusted by ${formatIncrease(inc)}`, "ok");
   }
 
   // ── BACKFILL SKUS ──
@@ -2816,9 +2833,11 @@ async function loadVariantsForMappingModal(mappingId) {
         <td style="padding:8px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">${v.sku || "—"}</td>
         <td style="padding:6px 8px;text-align:right"><div class="variant-price-controls">
           <input type="number" step="0.01" min="0" class="mm-variant-price-input" data-variant-id="${v.variant_id}" data-original-price="${v.price}" data-price-increase="${v.price_increase || 0}" data-product-price-increase="${v.product_price_increase || 0}" data-price-locked="${flags.price ? 'true' : 'false'}" data-dirty="false" value="${v.price}" oninput="markMappingVariantPriceEdited(this)" style="width:80px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
-          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" title="Increase this variant by a custom amount"><i class="ti ti-plus"></i></button>
+          <button type="button" class="btn btn-xs btn-icon" style="padding:4px;width:24px;height:24px;font-size:12px" onclick="increaseMappingVariantPrice(this, '${v.variant_id}')" aria-label="Adjust variant price" title="Increase or decrease: enter a positive or negative amount"><i class="ti ti-plus"></i></button>
         </div></td>
-        <td data-manual-increase class="manual-increase">${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</td>
+        <td class="manual-increase">
+          <span data-manual-increase>${formatIncrease(Number(v.price_increase || 0) + Number(v.product_price_increase || 0))}</span>
+        </td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
           <input type="number" step="1" min="0" class="mm-variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
@@ -2845,10 +2864,10 @@ async function loadVariantsForMappingModal(mappingId) {
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Manual increase is the amount you added to this variant. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual increase.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress change compares the latest two successful checks: + means an increase, - means a decrease, and $0.00 means unchanged. A dash means a new baseline. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
-        <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Increase All</button>
+        <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncMappingInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
@@ -2924,30 +2943,21 @@ function applyPriceToAllMappingVariants(){
 }
 
 function increaseMappingVariantPrice(btn, variantId) {
-    const row = btn.closest('tr');
-    const priceInput = row.querySelector('.mm-variant-price-input');
-    if (!priceInput) return;
-    const currentPrice = parseFloat(priceInput.value) || 0;
-    const amount = prompt(`Enter amount to add to this variant's price (current: $${currentPrice.toFixed(2)})`, "1.00");
-    if (amount === null) return;
-    const inc = parseFloat(amount);
-    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
-    const newPrice = currentPrice + inc;
-    addVariantPriceIncrease(priceInput, inc);
-    showToast(`Variant increased by $${inc.toFixed(2)} → $${newPrice.toFixed(2)}`, "ok");
+    setVariantAdjustment(btn);
   }
 
 function increaseAllMappingVariants() {
     const inputs = document.querySelectorAll(".mm-variant-price-input");
     if (!inputs.length) return;
-    const amount = prompt("Enter amount to add to ALL variant prices", "1.00");
+    const amount = prompt("Adjust ALL variant prices: positive to increase, negative to decrease", "1.00");
     if (amount === null) return;
-    const inc = parseFloat(amount);
-    if (!Number.isFinite(inc) || inc <= 0) { showToast("Please enter a positive number", "err"); return; }
+    const inc = Number(amount);
+    if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a positive amount to increase or a negative amount to decrease", "err"); return; }
+    if (Array.from(inputs).some(inp => Number(inp.value) + inc < 0)) { showToast("The final price cannot be negative", "err"); return; }
     inputs.forEach(inp => {
       addVariantPriceIncrease(inp, inc);
     });
-    showToast(`All variants increased by $${inc.toFixed(2)}`, "ok");
+    showToast(`All variants adjusted by ${formatIncrease(inc)}`, "ok");
   }
 
 async function refreshMappingDetails(){

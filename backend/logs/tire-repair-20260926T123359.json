@@ -1,0 +1,59 @@
+{
+  "48284037054601": {
+    "id": 48284037054601,
+    "price": "45.54",
+    "ae_sku_id": null,
+    "price_increase": "10.74",
+    "supplier_history": {
+      "price": "34.80",
+      "change": null,
+      "changed_at": null
+    },
+    "supplier_history_id": "gid://shopify/Metafield/52061419405449",
+    "increase_metafield_id": "gid://shopify/Metafield/52061901291657",
+    "label": "Inner Outer Tires Set",
+    "locks": {
+      "price": false,
+      "inventory": false,
+      "image": false
+    }
+  },
+  "48284037087369": {
+    "id": 48284037087369,
+    "price": "6.17",
+    "ae_sku_id": "12000048851963708",
+    "price_increase": "0.0",
+    "supplier_history": {
+      "price": "6.17",
+      "change": "0.00",
+      "changed_at": null
+    },
+    "supplier_history_id": "gid://shopify/Metafield/52061419438217",
+    "increase_metafield_id": "gid://shopify/Metafield/51886940618889",
+    "label": "Inner Tube",
+    "locks": {
+      "price": false,
+      "inventory": false,
+      "image": false
+    }
+  },
+  "48284037120137": {
+    "id": 48284037120137,
+    "price": "36.37",
+    "ae_sku_id": "12000048851963709",
+    "price_increase": "0.0",
+    "supplier_history": {
+      "price": "36.37",
+      "change": "0.00",
+      "changed_at": null
+    },
+    "supplier_history_id": "gid://shopify/Metafield/52061419470985",
+    "increase_metafield_id": "gid://shopify/Metafield/52061901324425",
+    "label": "Cover Tyre",
+    "locks": {
+      "price": false,
+      "inventory": false,
+      "image": false
+    }
+  }
+}

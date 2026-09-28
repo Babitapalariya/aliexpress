@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 
 $Process = Start-Process `
     -FilePath $VenvPython `
-    -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000") `
+    -ArgumentList @("-m", "uvicorn", "app.main:root_app", "--host", "0.0.0.0", "--port", "8001") `
     -WorkingDirectory $ProjectRoot `
     -RedirectStandardOutput $OutLog `
     -RedirectStandardError $ErrLog `
@@ -32,6 +32,6 @@ $Process = Start-Process `
 
 Set-Content -Path $PidFile -Value $Process.Id
 
-Write-Host "AliExpress FastAPI started on http://localhost:8000"
+Write-Host "AliExpress FastAPI started on http://localhost:8001/api"
 Write-Host "PID: $($Process.Id)"
 Write-Host "Logs: $LogDir"

@@ -5288,3 +5288,9 @@ def _safe_int(value) -> int | None:
         return int(float(digits) * multiplier)
     except (ValueError, TypeError):
         return None
+
+
+# Export the mounted application for both supported Uvicorn entry points.
+# Keep this after all route declarations: those belong to the child API app.
+api_app = app
+app = root_app
