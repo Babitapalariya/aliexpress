@@ -1202,7 +1202,7 @@ def sync_mapping_inventory(mapping_id: int, db: Session = Depends(get_db)):
     if not skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
 
-    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus)
+    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus, strict=True)
 
     return {
         "message": (
@@ -2644,67 +2644,21 @@ def update_variant_prices(product_id: int, payload: dict, db: Session = Depends(
         raise HTTPException(400, "No variants provided")
 
     from .shopify import (
-        _base, _h, _shopify_request, bulk_set_inventory_quantities,
         get_locked_variant_ids, get_variant_price_increase_map, save_variant_price_edits,
     )
-    price_updates = save_variant_price_edits(product.shopify_product_id, variants_payload)
+    inventory_updates = _parse_inventory_edits(variants_payload)
+    price_edits = [v for v in variants_payload if "price" in v]
+    if not price_edits:
+        if not inventory_updates:
+            raise HTTPException(400, "No price or inventory edits provided")
+        count = _set_variant_inventory_levels(product.shopify_product_id, inventory_updates)
+        return {"message": f"Updated {count} variant stock quantity(s)", "updated": 0,
+                "inventory_updated": count, "price_mode": product.price_mode}
+    price_updates = save_variant_price_edits(product.shopify_product_id, price_edits)
     has_price_locks = bool(get_locked_variant_ids(product.shopify_product_id, "price"))
     has_variant_increases = bool(get_variant_price_increase_map(product.shopify_product_id))
 
-    inventory_updates = {}
-    for v in variants_payload:
-        vid = v.get("variant_id")
-        qty = v.get("inventory_quantity")
-        if vid is not None and qty is not None:
-            try:
-                inventory_updates[int(vid)] = int(qty)
-            except (ValueError, TypeError):
-                continue
-
-    inventory_updated_count = 0
-    if inventory_updates:
-        vres = _shopify_request(
-            "GET", f"{_base()}/products/{product.shopify_product_id}.json",
-            params={"fields": "id,variants"}, headers=_h(), timeout=15,
-        )
-        if vres.status_code == 200:
-            shopify_variants = vres.json().get("product", {}).get("variants", [])
-            variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
-
-            loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
-            locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
-
-            if locations:
-                primary_location_id = locations[0]["id"]
-                other_location_ids = [loc["id"] for loc in locations[1:]]
-
-                # Build ALL quantity entries (primary = qty, others = 0) for ONE mutation
-                bulk_quantities = []
-                for vid, qty in inventory_updates.items():
-                    inv_item_id = variant_inv_item_map.get(vid)
-                    if not inv_item_id:
-                        continue
-                    bulk_quantities.append({
-                        "inventory_item_id": inv_item_id,
-                        "location_id": primary_location_id,
-                        "quantity": qty,
-                    })
-                    for other_loc_id in other_location_ids:
-                        bulk_quantities.append({
-                            "inventory_item_id": inv_item_id,
-                            "location_id": other_loc_id,
-                            "quantity": 0,
-                        })
-
-                inv_result = bulk_set_inventory_quantities(bulk_quantities)
-                if inv_result["success"]:
-                    inventory_updated_count = len(inventory_updates)
-                else:
-                    print(f"[VariantEdit] Bulk inventory errors: {inv_result['errors']}")
-            else:
-                print("[VariantEdit] No Shopify location found — skipping inventory update")
-        else:
-            print(f"[VariantEdit] Failed to fetch variants for inventory update: {vres.text}")
+    inventory_updated_count = _set_variant_inventory_levels(product.shopify_product_id, inventory_updates) if inventory_updates else 0
 
     # Per-variant customization is protected by that variant's price lock.
     # Do not switch the whole product to manual mode, otherwise automatic
@@ -3683,7 +3637,7 @@ def sync_product_inventory(product_id: int, db: Session = Depends(get_db)):
     if not skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
  
-    inventory_updated = update_shopify_product_inventory_with_skus(product.shopify_product_id, skus)
+    inventory_updated = update_shopify_product_inventory_with_skus(product.shopify_product_id, skus, strict=True)
  
     # Keep local cache in sync too
     new_total_stock = raw.get("total_stock")
@@ -5044,45 +4998,26 @@ def get_mapping_variant_locks(mapping_id: int, db: Session = Depends(get_db)):
 #             print(f"[Inventory] Error for variant {vid}: {e}")
 #     return updated
 
-def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: dict) -> int:
-    """inventory_updates: {variant_id:int -> qty:int}. Returns count updated."""
-    from .shopify import _base, _h, _shopify_request
-    vres = _shopify_request("GET", f"{_base()}/products/{shopify_product_id}.json",
-        params={"fields": "id,variants"}, headers=_h(), timeout=15)
-    if vres.status_code != 200:
-        return 0
-    shopify_variants = vres.json().get("product", {}).get("variants", [])
-    variant_inv_item_map = {v["id"]: v.get("inventory_item_id") for v in shopify_variants}
-
-    loc_res = _shopify_request("GET", f"{_base()}/locations.json", headers=_h(), timeout=15)
-    locations = loc_res.json().get("locations", []) if loc_res.status_code == 200 else []
-    if not locations:
-        return 0
-    primary_location_id = locations[0]["id"]
-    other_location_ids = [loc["id"] for loc in locations[1:]]
-
-    updated = 0
-    for vid, qty in inventory_updates.items():
-        inventory_item_id = variant_inv_item_map.get(vid)
-        if not inventory_item_id:
+def _parse_inventory_edits(edits):
+    updates = {}
+    for edit in edits:
+        if "inventory_quantity" not in edit:
             continue
         try:
-            set_res = _shopify_request("POST", f"{_base()}/inventory_levels/set.json",
-                json={"location_id": primary_location_id, "inventory_item_id": inventory_item_id, "available": qty},
-                headers=_h(), timeout=20)
-            ok = set_res.status_code == 200
-            for other_loc_id in other_location_ids:
-                try:
-                    _shopify_request("POST", f"{_base()}/inventory_levels/set.json",
-                        json={"location_id": other_loc_id, "inventory_item_id": inventory_item_id, "available": 0},
-                        headers=_h(), timeout=20)
-                except Exception as e:
-                    print(f"[Inventory] Error zeroing location {other_loc_id}: {e}")
-            if ok:
-                updated += 1
-        except Exception as e:
-            print(f"[Inventory] Error for variant {vid}: {e}")
-    return updated
+            vid = int(edit["variant_id"])
+            raw = edit["inventory_quantity"]
+            qty = int(raw)
+            if isinstance(raw, bool) or str(qty) != str(raw) or qty < 0 or vid in updates:
+                raise ValueError()
+            updates[vid] = qty
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise HTTPException(400, "Stock must be a non-negative whole number for each unique variant")
+    return updates
+
+
+def _set_variant_inventory_levels(shopify_product_id: str, inventory_updates: dict) -> int:
+    from .shopify import set_variant_inventory_quantities
+    return set_variant_inventory_quantities(shopify_product_id, inventory_updates)
 
 
 @app.get("/mappings/{mapping_id}/variants")
@@ -5165,18 +5100,18 @@ def update_mapping_variant_prices(mapping_id: int, payload: dict, db: Session = 
     from .shopify import (
         get_locked_variant_ids, get_variant_price_increase_map, save_variant_price_edits,
     )
-    updated_variants = save_variant_price_edits(mapping.shopify_product_id, variants_payload)
+    inventory_updates = _parse_inventory_edits(variants_payload)
+    price_edits = [v for v in variants_payload if "price" in v]
+    if not price_edits:
+        if not inventory_updates:
+            raise HTTPException(400, "No price or inventory edits provided")
+        count = _set_variant_inventory_levels(mapping.shopify_product_id, inventory_updates)
+        return {"message": f"Updated {count} variant stock quantity(s)", "updated": 0,
+                "inventory_updated": count, "price_mode": mapping.price_mode}
+    updated_variants = save_variant_price_edits(mapping.shopify_product_id, price_edits)
     has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
     has_variant_increases = bool(get_variant_price_increase_map(mapping.shopify_product_id))
 
-    inventory_updates = {}
-    for v in variants_payload:
-        vid, qty = v.get("variant_id"), v.get("inventory_quantity")
-        if vid is not None and qty is not None:
-            try:
-                inventory_updates[int(vid)] = int(qty)
-            except (ValueError, TypeError):
-                continue
     inventory_updated_count = _set_variant_inventory_levels(mapping.shopify_product_id, inventory_updates) if inventory_updates else 0
 
     # Variant-specific locks, not product-wide manual mode, protect edited

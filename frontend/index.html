@@ -1308,7 +1308,7 @@ async function syncProductPrice(productId){
   //         </td>
   //         <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--orange);font-family:var(--mono);font-weight:600">${increaseDisplay}</td>
   //         <td style="padding:6px 8px;text-align:right">
-  //           <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+  //           <input type="number" step="1" min="0" class="variant-stock-input" data-dirty="false" oninput="this.dataset.dirty='true'" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
   //         </td>
   //         <td style="padding:6px 8px;text-align:center">${lockBtn}</td>
   //       </tr>`;
@@ -1376,7 +1376,7 @@ async function syncProductPrice(productId){
         </td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
-          <input type="number" step="1" min="0" class="variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="1" min="0" class="variant-stock-input" data-dirty="false" oninput="this.dataset.dirty='true'" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
         <td style="padding:6px 8px;text-align:center;white-space:nowrap">${lockIcons}</td>
         <td style="padding:6px 8px;text-align:center">
@@ -1533,12 +1533,16 @@ function refreshManualIncrease(input) {
   }
   function getEditedVariantPrices() {
     const priceInputs = Array.from(document.querySelectorAll(".variant-price-input"));
-    return priceInputs.filter(i => i.dataset.dirty === "true").map(i => {
+    return priceInputs.filter(i => i.dataset.dirty === "true" || document.querySelector(`.variant-stock-input[data-variant-id="${i.dataset.variantId}"]`)?.dataset.dirty === "true").map(i => {
       const vid = i.dataset.variantId;
       const stockInput = document.querySelector(`.variant-stock-input[data-variant-id="${vid}"]`);
-      const out = { variant_id: vid, price: i.value };
-      out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2));
-      if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
+      const out = { variant_id: vid };
+      if (i.dataset.dirty === "true") { out.price = i.value; out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2)); }
+      if (stockInput?.dataset.dirty === "true") {
+        const qty = Number(stockInput.value);
+        if (!stockInput.value.trim() || !Number.isSafeInteger(qty) || qty < 0) throw new Error("Stock must be a whole number of zero or more");
+        out.inventory_quantity = qty;
+      }
       return out;
     });
   }
@@ -2840,7 +2844,7 @@ async function loadVariantsForMappingModal(mappingId) {
         </td>
         <td class="supplier-change" title="${v.supplier_price_changed_at ? 'Changed on latest check: ' + new Date(v.supplier_price_changed_at).toLocaleString() : v.supplier_price_change == null ? 'Baseline only; waiting for the next supplier check' : 'Supplier price unchanged on latest check'}">${formatIncrease(v.supplier_price_change)}</td>
         <td style="padding:6px 8px;text-align:right">
-          <input type="number" step="1" min="0" class="mm-variant-stock-input" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
+          <input type="number" step="1" min="0" class="mm-variant-stock-input" data-dirty="false" oninput="this.dataset.dirty='true'" data-variant-id="${v.variant_id}" value="${v.inventory_quantity ?? 0}" style="width:70px;text-align:right;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--mono)">
         </td>
         <td style="padding:6px 8px;text-align:center;white-space:nowrap">${lockIcons}</td>
         <td style="padding:6px 8px;text-align:center">
@@ -2918,12 +2922,16 @@ function buildMappingLockIcons(variantId, flags) {
 
 function getEditedMappingVariantPrices() {
   const priceInputs = Array.from(document.querySelectorAll(".mm-variant-price-input"));
-  return priceInputs.filter(i => i.dataset.dirty === "true").map(i => {
+  return priceInputs.filter(i => i.dataset.dirty === "true" || document.querySelector(`.mm-variant-stock-input[data-variant-id="${i.dataset.variantId}"]`)?.dataset.dirty === "true").map(i => {
     const vid = i.dataset.variantId;
     const stockInput = document.querySelector(`.mm-variant-stock-input[data-variant-id="${vid}"]`);
-    const out = { variant_id: vid, price: i.value };
-    out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2));
-    if (stockInput && stockInput.value !== "") { out.inventory_quantity = parseInt(stockInput.value, 10); }
+    const out = { variant_id: vid };
+    if (i.dataset.dirty === "true") { out.price = i.value; out.price_increase = Number(getDraftVariantIncrease(i).toFixed(2)); }
+    if (stockInput?.dataset.dirty === "true") {
+        const qty = Number(stockInput.value);
+        if (!stockInput.value.trim() || !Number.isSafeInteger(qty) || qty < 0) throw new Error("Stock must be a whole number of zero or more");
+        out.inventory_quantity = qty;
+      }
     return out;
   });
 }

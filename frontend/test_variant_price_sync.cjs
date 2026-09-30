@@ -184,6 +184,24 @@ function checkLatestVariantAdjustment() {
   }
 }
 
+function checkStockOnlyEdits() {
+  for (const collect of ['getEditedVariantPrices', 'getEditedMappingVariantPrices']) {
+    const price = {value: '155.86', dataset: {variantId: '123', dirty: 'false'}};
+    const stock = {value: '100', dataset: {dirty: 'true'}};
+    const context = vm.createContext({document: {querySelectorAll: () => [price], querySelector: () => stock}});
+    load(collect, context);
+    assert.equal(JSON.stringify(context[collect]()), '[{"variant_id":"123","inventory_quantity":100}]');
+    stock.value = '0';
+    assert.equal(context[collect]()[0].inventory_quantity, 0);
+    for (const value of ['', '-1', '1.5', 'abc']) {
+      stock.value = value;
+      assert.throws(() => context[collect](), /whole number/);
+    }
+    stock.dataset.dirty = 'false';
+    assert.equal(context[collect]().length, 0);
+  }
+}
+
 (async () => {
   const routing = vm.createContext({});
   load('formatIncrease', routing);
@@ -206,5 +224,6 @@ function checkLatestVariantAdjustment() {
   await checkMatchingTables();
   checkSignedAdjustments();
   checkLatestVariantAdjustment();
+  checkStockOnlyEdits();
   console.log('Both forms preserve individual increases through lock/unlock; JavaScript syntax passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

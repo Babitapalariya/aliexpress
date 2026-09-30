@@ -1518,7 +1518,7 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
 
 
 
-def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list) -> bool:
+def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list, *, strict: bool = False) -> bool:
     """
     Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
 
@@ -1546,9 +1546,13 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         res.raise_for_status()
         shopify_variants = res.json().get("product", {}).get("variants", [])
         if not shopify_variants:
+            if strict:
+                raise HTTPException(409, "No Shopify variants found")
             return False
     except Exception as e:
         print(f"[Inventory] Fetch error: {e}")
+        if strict:
+            raise HTTPException(502, "Could not read Shopify variants for stock sync") from e
         return False
 
     # ── Skip variants the client has manually locked ──
@@ -1563,10 +1567,14 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         locations = loc_res.json().get("locations", [])
     except Exception as e:
         print(f"[Inventory] Failed to fetch locations: {e}")
+        if strict:
+            raise HTTPException(502, "Could not read Shopify inventory locations") from e
         return False
 
     if not locations:
         print("[Inventory] No Shopify locations found")
+        if strict:
+            raise HTTPException(409, "No Shopify inventory locations found")
         return False
 
     primary_location_id = locations[0]["id"]
@@ -1606,6 +1614,29 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     matches = _match_supplier_variants({v["id"]: {
         "label": _variant_label(v), "ae_sku_id": variant_ae_map.get(v["id"]),
     } for v in shopify_variants}, aliexpress_skus)
+
+    if strict:
+        missing = [v.get("title") or _variant_label(v) for v in shopify_variants
+                   if v["id"] not in locked_variant_ids and
+                   (v["id"] not in matches or matches[v["id"]].get("stock") is None)]
+        if missing:
+            raise HTTPException(409, "Cannot push stock: missing supplier SKU links or stock for "
+                                + ", ".join(missing) + ". Repair the supplier links and retry.")
+        targets = {}
+        for variant in shopify_variants:
+            if variant["id"] in locked_variant_ids:
+                continue
+            raw = matches[variant["id"]]["stock"]
+            try:
+                qty = int(raw)
+                if isinstance(raw, bool) or str(qty) != str(raw) or qty < 0:
+                    raise ValueError()
+            except (TypeError, ValueError, OverflowError):
+                raise HTTPException(409, f"Invalid supplier stock for variant {variant['id']}")
+            targets[variant["id"]] = qty
+        if not targets:
+            raise HTTPException(409, "All variant inventory is locked; unlock inventory to push supplier stock")
+        return bool(set_variant_inventory_quantities(shopify_product_id, targets))
 
     for variant in shopify_variants:
         if variant["id"] in locked_variant_ids:
@@ -1681,6 +1712,48 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
 
 
 
+
+
+def set_variant_inventory_quantities(shopify_product_id: str, inventory_updates: dict) -> int:
+    """Explicit stock edits bypass automatic inventory locks and report failures."""
+    if not inventory_updates:
+        return 0
+
+    def read(path, **params):
+        response = _shopify_request("GET", f"{_base()}/{path}", params=params, headers=_h(), timeout=20)
+        if response.status_code != 200:
+            raise HTTPException(502, f"Shopify inventory read failed: HTTP {response.status_code}")
+        return response.json()
+
+    variants = {v["id"]: v for v in read(f"products/{shopify_product_id}.json", fields="id,variants")["product"]["variants"]}
+    for vid, qty in inventory_updates.items():
+        if vid not in variants or not variants[vid].get("inventory_item_id"):
+            raise HTTPException(400, f"Inventory variant {vid} is not in this product")
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty < 0:
+            raise HTTPException(400, "Stock must be a non-negative whole number")
+        if variants[vid].get("inventory_management") != "shopify":
+            raise HTTPException(409, f"Enable Shopify inventory tracking for variant {vid} before updating stock")
+    locations = [loc for loc in read("locations.json")["locations"] if loc.get("active", True) and not loc.get("legacy", False)]
+    if not locations:
+        raise HTTPException(409, "No active Shopify inventory location available")
+    primary = locations[0]["id"]
+    # Read actual connected levels before writing. Never create zero levels at
+    # unrelated fulfillment-service locations merely because they exist.
+    planned = []
+    for vid, qty in inventory_updates.items():
+        iid = variants[vid]["inventory_item_id"]
+        levels = read("inventory_levels.json", inventory_item_ids=str(iid), limit=250)["inventory_levels"]
+        planned.append((vid, iid, primary, qty))
+        planned.extend((vid, iid, level["location_id"], 0) for level in levels
+                       if level["location_id"] != primary and level.get("available") != 0)
+    for vid, iid, location, qty in planned:
+        response = _shopify_request("POST", f"{_base()}/inventory_levels/set.json",
+            json={"location_id": location, "inventory_item_id": iid, "available": qty}, headers=_h(), timeout=20)
+        if response.status_code != 200:
+            raise HTTPException(502, f"Shopify stock update failed for variant {vid}: {response.text[:500]}")
+        if response.json().get("inventory_level", {}).get("available") != qty:
+            raise HTTPException(502, f"Shopify did not confirm stock {qty} for variant {vid}")
+    return len(inventory_updates)
 
 
 def set_product_out_of_stock(shopify_product_id: str) -> bool:

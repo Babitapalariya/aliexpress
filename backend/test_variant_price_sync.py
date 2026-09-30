@@ -22,7 +22,7 @@ def load_main_functions(namespace, *names):
     tree = ast.parse(Path(__file__).with_name("app").joinpath("main.py").read_text(encoding="utf-8"))
     functions = []
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in names:
+        if isinstance(node, ast.FunctionDef) and node.name in (*names, "_parse_inventory_edits"):
             node.decorator_list = []
             node.returns = None
             node.args.defaults = []
