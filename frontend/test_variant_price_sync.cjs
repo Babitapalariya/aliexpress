@@ -113,6 +113,7 @@ async function checkMatchingTables() {
     assert.match(table, /Supplier price unchanged on latest check/);
     assert.match(table, />\$0\.00<\/td>/);
     assert.match(table, /Change This Check/);
+    assert.match(table, /Repair supplier links/);
   }
   assert.match(mapped, /deleteMappedVariant\(1\)/);
 }

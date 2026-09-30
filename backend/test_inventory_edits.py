@@ -49,6 +49,7 @@ class InventoryEditsTests(TestCase):
              patch.object(shopify.requests, "get", side_effect=[product, locations]), \
              patch.object(shopify, "_shopify_request", return_value=metadata), \
              patch.object(shopify, "get_locked_variant_ids", return_value=set()), \
+             patch.object(shopify, "get_variant_sync_state", return_value={12: {"ae_sku_id": None}}), \
              patch.object(shopify, "set_variant_inventory_quantities") as writer:
             with self.assertRaises(HTTPException) as error:
                 shopify.update_shopify_product_inventory_with_skus("123",

@@ -1406,12 +1406,87 @@ async function syncProductPrice(productId){
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
         <button type="button" class="btn btn-xs" onclick="repairImportedOptions(this)">Repair option groups</button>
+        <button type="button" class="btn btn-xs" onclick="openSupplierLinkRepair('products', ${productId})">Repair supplier links</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
         <i class="ti ti-info-circle"></i> Lock icons: <i class="ti ti-currency-dollar" style="font-size:10px"></i> Price · <i class="ti ti-box" style="font-size:10px"></i> Inventory · <i class="ti ti-photo" style="font-size:10px"></i> Image. Locked = skipped by auto-sync for that field only.
       </div>`;
   } catch (e) {
     wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--red);font-size:12px"><i class="ti ti-alert-circle"></i> Failed to load variants: ${e.message}<div style="margin-top:10px"><button type="button" class="btn btn-xs" onclick="loadVariantsForModal(${productId})"><i class="ti ti-refresh"></i> Retry variants</button></div></div>`;
+  }
+}
+
+async function openSupplierLinkRepair(kind, recordId) {
+  const dialog = document.createElement('dialog');
+  dialog.style.cssText = 'width:min(720px,90vw);max-height:85vh;overflow:auto;border:1px solid var(--border);border-radius:12px;padding:24px;background:var(--card,#fff);color:var(--t1)';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Repair supplier links';
+  const note = document.createElement('p');
+  note.textContent = 'Match each Shopify variant to its AliExpress option. These selections are saved for future syncs. Prices, stock and locks are unchanged when you save links.';
+  const rows = document.createElement('div');
+  rows.textContent = 'Loading supplier options…';
+  const status = document.createElement('p');
+  status.setAttribute('role', 'status');
+  const save = document.createElement('button');
+  save.className = 'btn btn-primary';
+  save.textContent = 'Save supplier links';
+  save.disabled = true;
+  const close = document.createElement('button');
+  close.className = 'btn';
+  close.textContent = 'Close';
+  close.style.marginLeft = '8px';
+  close.onclick = () => dialog.close();
+  dialog.append(heading, note, rows, status, save, close);
+  dialog.setAttribute('aria-label', 'Repair supplier links');
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  try {
+    const url = `${API}/supplier-links/${kind}/${recordId}`;
+    const response = await fetch(url);
+    const data = await safeJson(response);
+    if (!response.ok) throw new Error(data.detail || 'Could not load supplier links');
+    rows.textContent = '';
+    const selectors = data.variants.map(variant => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:14px 0';
+      const title = document.createElement('div');
+      title.textContent = variant.label;
+      const select = document.createElement('select');
+      select.style.cssText = 'width:100%;padding:8px;margin-top:5px';
+      select.append(new Option('Select matching AliExpress option', ''));
+      for (const sku of data.supplier_options) select.append(new Option(`${sku.label} (${sku.sku_id})`, sku.sku_id));
+      select.value = variant.suggested_sku_id || '';
+      label.append(title, select);
+      rows.append(label);
+      return {variant, select};
+    });
+    save.disabled = !selectors.length;
+    save.onclick = async () => {
+      const links = selectors.map(({variant, select}) => ({variant_id: variant.variant_id,
+        sku_id: select.value, current_sku_id: variant.current_sku_id}));
+      if (links.some(link => !link.sku_id) || new Set(links.map(link => link.sku_id)).size !== links.length) {
+        status.textContent = 'Choose a different supplier option for each variant.';
+        return;
+      }
+      save.disabled = true;
+      close.disabled = true;
+      status.textContent = 'Saving supplier links…';
+      try {
+        const result = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({links})});
+        const saved = await safeJson(result);
+        if (!result.ok) throw new Error(saved.detail || 'Could not save supplier links');
+        showToast(saved.message, 'ok');
+        dialog.close();
+      } catch (error) {
+        status.textContent = error.message;
+        save.disabled = false;
+        close.disabled = false;
+      }
+    };
+  } catch (error) {
+    rows.textContent = '';
+    status.textContent = error.message;
   }
 }
 
@@ -2873,6 +2948,7 @@ async function loadVariantsForMappingModal(mappingId) {
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncMappingInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
+        <button type="button" class="btn btn-xs" onclick="openSupplierLinkRepair('mappings', ${mappingId})">Repair supplier links</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
         <i class="ti ti-info-circle"></i> Lock icons: <i class="ti ti-currency-dollar" style="font-size:10px"></i> Price · <i class="ti ti-box" style="font-size:10px"></i> Inventory · <i class="ti ti-photo" style="font-size:10px"></i> Image. Locked = skipped by auto-sync for that field only.

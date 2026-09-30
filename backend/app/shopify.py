@@ -326,6 +326,7 @@ def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
             selectedOptions { name value }
             image { id }
             skuId: metafield(namespace: "aliexpress", key: "sku_id") { value }
+            skuVerified: metafield(namespace: "aliexpress", key: "sku_link_verified") { value }
           }
           pageInfo { hasNextPage endCursor }
         }
@@ -355,6 +356,7 @@ def _get_all_variants_for_image_sync(shopify_product_id: str) -> list:
                     int(_numeric_id_from_gid(image["id"]))
                     if image.get("id") else None
                 ),
+                "sku_link_verified": (node.get("skuVerified") or {}).get("value") == "true",
                 "aliexpress_sku_id": (
                     str(sku_metafield["value"])
                     if sku_metafield.get("value") is not None else None
@@ -409,7 +411,8 @@ def backfill_sku_images(shopify_product_id: str, aliexpress_skus: list) -> dict:
 
     url_to_image_id: dict[str, int] = {}
     matches = _match_supplier_variants({v["id"]: {
-        "ae_sku_id": v.get("aliexpress_sku_id"), "label": v.get("label", "")
+        "ae_sku_id": v.get("aliexpress_sku_id"), "label": v.get("label", ""),
+        "sku_link_verified": v.get("sku_link_verified", False)
     } for v in shopify_variants}, aliexpress_skus)
     attached = 0
     unmatched = 0
@@ -987,7 +990,11 @@ def _match_supplier_variants(variants, skus):
     A unique complete option label repairs stale or previously positional links.
     Existing IDs still support custom Shopify titles. Ambiguities fail closed.
     """
-    by_label, by_id = {}, {}
+    by_label, by_id, by_alias = {}, {}, {}
+    def alias(label):
+        return _sku_label_key(" / ".join(re.sub(r"^(?:design|style|option)\s+", "", part.strip(), flags=re.I)
+                                        for part in str(label or "").split("/")))
+    supplier_labels = {alias(s.get("label")) for s in skus}
     for index, sku in enumerate(skus):
         # Also recognize option values produced by older imports (e.g. 29#72v lcd).
         legacy_label = " / ".join(part.split(":")[-1].strip()
@@ -997,12 +1004,22 @@ def _match_supplier_variants(variants, skus):
                 by_label.setdefault(label, []).append(index)
         if sku.get("sku_id") is not None:
             by_id.setdefault(str(sku["sku_id"]), []).append(index)
+        label = sku.get("label") or ""
+        keys = {alias(label)}
+        # Infer an explicitly absent nozzle only when the supplier also lists
+        # the same design WITH a nozzle. Never infer A/B or sizes by position.
+        if label and alias(label + " with nozzle") in supplier_labels:
+            keys.add(alias(label + " no nozzle"))
+        for key in keys - {("",)}:
+            by_alias.setdefault(key, []).append(index)
     proposed = {}
     for vid, variant in variants.items():
         label = _sku_label_key(variant.get("label"))
         candidates = by_label.get(label, [])
         id_candidates = by_id.get(str(variant.get("ae_sku_id")), [])
-        if len(candidates) > 1:
+        if variant.get("sku_link_verified") and id_candidates:
+            candidates = id_candidates
+        elif len(candidates) > 1:
             candidates = [i for i in candidates if i in id_candidates]
         elif not candidates:
             candidates = id_candidates
@@ -1010,10 +1027,26 @@ def _match_supplier_variants(variants, skus):
                 candidates = [0]
         if len(candidates) == 1:
             proposed[vid] = candidates[0]
+    verified_indices = {index for vid, index in proposed.items() if variants[vid].get("sku_link_verified")}
+    proposed = {vid: index for vid, index in proposed.items()
+                if index not in verified_indices or variants[vid].get("sku_link_verified")}
     counts = {}
     for index in proposed.values():
         counts[index] = counts.get(index, 0) + 1
-    return {vid: skus[index] for vid, index in proposed.items() if counts[index] == 1}
+    matched = {vid: index for vid, index in proposed.items() if counts[index] == 1}
+    # Only try presentation aliases after exact matches and saved IDs. Reject
+    # collisions, including an alias claiming an already assigned supplier SKU.
+    aliases = {}
+    for vid, variant in variants.items():
+        if vid in proposed:
+            continue
+        candidates = by_alias.get(alias(variant.get("label")), [])
+        if len(candidates) == 1 and candidates[0] not in proposed.values():
+            aliases[vid] = candidates[0]
+    for vid, index in aliases.items():
+        if list(aliases.values()).count(index) == 1:
+            matched[vid] = index
+    return {vid: skus[index] for vid, index in matched.items()}
 
 
 def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list, *, reset_increases: bool = False) -> str:
@@ -1032,7 +1065,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
                    if not v["locks"]["price"] and vid not in matched]
         if missing:
             raise HTTPException(409, "Cannot sync prices: missing or ambiguous AliExpress SKU links for "
-                                + ", ".join(missing) + ". Repair the SKU links and retry.")
+                                + ", ".join(missing) + ". Open Edit > Repair supplier links, select the matching options, then retry.")
         for sku in aliexpress_skus:
             raw = sku.get("sale_price") or sku.get("price")
             if raw is None:
@@ -1584,20 +1617,8 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
         print(f"[Inventory] Multi-location store detected ({len(locations)} locations). "
               f"Primary={primary_location_id}, zeroing others={other_location_ids}")
 
-    variant_ae_map = {}
-    for variant in shopify_variants:
-        vid = variant["id"]
-        try:
-            mf_res = _shopify_request(
-                "GET", f"{_base()}/variants/{vid}/metafields.json",
-                params={"namespace": "aliexpress", "key": "sku_id"}, headers=_h(),
-            )
-            if mf_res.status_code == 200:
-                mfs = mf_res.json().get("metafields", [])
-                if mfs:
-                    variant_ae_map[vid] = mfs[0].get("value")
-        except Exception as e:
-            print(f"[Inventory] Metafield error for variant {vid}: {e}")
+    pricing_state = get_variant_sync_state(shopify_product_id)
+    variant_ae_map = {vid: row["ae_sku_id"] for vid, row in pricing_state.items()}
 
     def _variant_label(variant: dict) -> str:
         parts = [
@@ -1613,7 +1634,17 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
 
     matches = _match_supplier_variants({v["id"]: {
         "label": _variant_label(v), "ae_sku_id": variant_ae_map.get(v["id"]),
+        "sku_link_verified": pricing_state.get(v["id"], {}).get("sku_link_verified", False),
     } for v in shopify_variants}, aliexpress_skus)
+
+    link_updates = [{"variant_id": vid, "ae_sku_id": str(sku["sku_id"]), "supplier_history": None,
+                     "supplier_history_id": pricing_state.get(vid, {}).get("supplier_history_id")}
+                    for vid, sku in matches.items() if sku.get("sku_id") is not None
+                    and str(variant_ae_map.get(vid)) != str(sku["sku_id"])]
+    for offset in range(0, len(link_updates), 100):
+        result = bulk_update_variant_prices(shopify_product_id, link_updates[offset:offset + 100])
+        if not result["success"]:
+            raise HTTPException(502, "Failed to save resolved supplier SKU links")
 
     if strict:
         missing = [v.get("title") or _variant_label(v) for v in shopify_variants
@@ -1621,7 +1652,7 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
                    (v["id"] not in matches or matches[v["id"]].get("stock") is None)]
         if missing:
             raise HTTPException(409, "Cannot push stock: missing supplier SKU links or stock for "
-                                + ", ".join(missing) + ". Repair the supplier links and retry.")
+                                + ", ".join(missing) + ". Open Edit > Repair supplier links, select the matching options, then retry.")
         targets = {}
         for variant in shopify_variants:
             if variant["id"] in locked_variant_ids:
@@ -1974,6 +2005,7 @@ def get_variant_sync_state(shopify_product_id: str) -> dict:
           edges { node {
             id price selectedOptions { name value }
             aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value }
+            skuVerified: metafield(namespace: "aliexpress", key: "sku_link_verified") { value }
             increase: metafield(namespace: "sync", key: "price_increase") { id value }
             supplierHistory: metafield(namespace: "sync", key: "supplier_price_history") { id value }
             priceLock: metafield(namespace: "sync", key: "price_locked") { value }
@@ -2001,6 +2033,7 @@ def get_variant_sync_state(shopify_product_id: str) -> dict:
             state[vid] = {
                 "id": vid, "price": node["price"],
                 "ae_sku_id": (node.get("aeSku") or {}).get("value"),
+                "sku_link_verified": (node.get("skuVerified") or {}).get("value") == "true",
                 "price_increase": increase,
                 "supplier_history": json.loads(node["supplierHistory"]["value"]) if node.get("supplierHistory") else None,
                 "supplier_history_id": (node.get("supplierHistory") or {}).get("id"),
@@ -2257,7 +2290,8 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
       productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
         productVariants { id price priceIncrease: metafield(namespace: "sync", key: "price_increase") { value }
-          aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value } }
+          aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value }
+            skuVerified: metafield(namespace: "aliexpress", key: "sku_link_verified") { value } }
         userErrors { field message }
       }
     }
@@ -2285,6 +2319,9 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
         if "ae_sku_id" in edit:
             row.setdefault("metafields", []).append({"namespace": "aliexpress", "key": "sku_id",
                 "type": "single_line_text_field", "value": str(edit["ae_sku_id"])})
+        if "sku_link_verified" in edit:
+            row.setdefault("metafields", []).append({"namespace": "aliexpress", "key": "sku_link_verified",
+                "type": "boolean", "value": "true" if edit["sku_link_verified"] else "false"})
         variants_input.append(row)
     try:
         data = _graphql(mutation, {
@@ -2297,6 +2334,10 @@ def bulk_update_variant_prices(shopify_product_id: str, variant_prices: list) ->
         updated = len(returned)
         from decimal import Decimal
         for edit in variant_prices:
+            if "sku_link_verified" in edit:
+                saved = returned.get(_variant_gid(edit["variant_id"]), {})
+                if (saved.get("skuVerified") or {}).get("value") != ("true" if edit["sku_link_verified"] else "false"):
+                    errors.append({"message": f"Supplier link verification was not saved for variant {edit['variant_id']}"})
             if "ae_sku_id" in edit:
                 saved = returned.get(_variant_gid(edit["variant_id"]), {})
                 if (saved.get("aeSku") or {}).get("value") != str(edit["ae_sku_id"]):

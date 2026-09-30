@@ -5225,6 +5225,34 @@ def _safe_int(value) -> int | None:
         return None
 
 
+def _supplier_link_record(kind, record_id, db):
+    model = ImportedProduct if kind == "products" else ProductMapping if kind == "mappings" else None
+    if model is None:
+        raise HTTPException(404, "Unknown product type")
+    record = db.query(model).filter(model.id == record_id).first()
+    if not record or not record.shopify_product_id:
+        raise HTTPException(404, "Linked Shopify product not found")
+    return record
+
+
+@app.get("/supplier-links/{kind}/{record_id}")
+def inspect_supplier_links(kind: str, record_id: int, db: Session = Depends(get_db)):
+    from .sku_links import inspect_links
+    record = _supplier_link_record(kind, record_id, db)
+    skus = get_product(record.aliexpress_id, db).get("skus", [])
+    if not skus:
+        raise HTTPException(409, "AliExpress has no supplier options available for this product")
+    return inspect_links(record.shopify_product_id, skus)
+
+
+@app.post("/supplier-links/{kind}/{record_id}")
+def repair_supplier_links(kind: str, record_id: int, payload: dict, db: Session = Depends(get_db)):
+    from .sku_links import save_links
+    record = _supplier_link_record(kind, record_id, db)
+    skus = get_product(record.aliexpress_id, db).get("skus", [])
+    return save_links(record.shopify_product_id, skus, payload.get("links"))
+
+
 # Export the mounted application for both supported Uvicorn entry points.
 # Keep this after all route declarations: those belong to the child API app.
 api_app = app
