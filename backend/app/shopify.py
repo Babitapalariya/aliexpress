@@ -68,15 +68,15 @@ def check_product_exists_in_shopify(title: str) -> bool:
     if not settings.SHOPIFY_STORE:
         return False
     try:
-        res = requests.get(
-            f"{_base()}/products.json",
+        res = _shopify_request(
+            "GET", f"{_base()}/products.json",
             params={"title": title, "limit": 1, "fields": "id,title"},
             headers=_h(), timeout=15,
         )
         res.raise_for_status()
         return len(res.json().get("products", [])) > 0
-    except Exception:
-        return False
+    except Exception as exc:
+        raise HTTPException(502, "Could not check Shopify for an existing product; please retry shortly") from exc
 
 def get_shopify_product_by_aliexpress_id(aliexpress_id: str) -> dict | None:
     if not settings.SHOPIFY_STORE:
@@ -589,7 +589,13 @@ def create_shopify_product(product: dict) -> dict:
         raise HTTPException(409, f"Product '{title}' already exists in Shopify.")
     try:
         payload = normalize_aliexpress_product(product)
-        res = requests.post(f"{_base()}/products.json", json={"product": payload}, headers=_h(), timeout=30)
+        # A 429 means Shopify rejected the request, so retrying is safe.
+        # A timeout/5xx may follow a successful creation: never blindly repeat it.
+        res = _shopify_request("POST", f"{_base()}/products.json", json={"product": payload},
+                               headers=_h(), timeout=30, retry_ambiguous=False)
+        if res.status_code == 429:
+            raise HTTPException(429, "Shopify is still rate-limiting product imports after automatic retries. Please wait and try again.",
+                                headers={"Retry-After": res.headers.get("Retry-After", "5")})
         res.raise_for_status()
         shopify_data = res.json()
         shopify_product = shopify_data["product"]
@@ -611,7 +617,7 @@ def create_shopify_product(product: dict) -> dict:
         raise
     except Exception as e:
         detail = getattr(e, "response", None)
-        detail = detail.text if detail else str(e)
+        detail = detail.text if detail is not None else str(e)
         raise HTTPException(502, f"Shopify create error: {detail}")
 
 # ─────────────────────────────────────────────
@@ -2190,14 +2196,14 @@ def _throttle():
         _last_call_time = time.time()
 
 
-def _shopify_request(method: str, url: str, max_retries: int = 5, **kwargs) -> requests.Response:
+def _shopify_request(method: str, url: str, max_retries: int = 5, *, retry_ambiguous: bool = True, **kwargs) -> requests.Response:
     kwargs.setdefault("timeout", 20)
     for attempt in range(max_retries):
         _throttle()
         try:
             res = requests.request(method, url, **kwargs)
         except requests.RequestException as exc:
-            if attempt == max_retries - 1:
+            if not retry_ambiguous or attempt == max_retries - 1:
                 raise
             delay = min(float(attempt + 1), 5.0)
             print(f"[Shopify][Retry] {method} request failed: {exc}; retrying in {delay:.1f}s")
@@ -2205,12 +2211,20 @@ def _shopify_request(method: str, url: str, max_retries: int = 5, **kwargs) -> r
             continue
         if res.status_code != 429 and res.status_code not in (500, 502, 503, 504):
             return res
+        if res.status_code != 429 and not retry_ambiguous:
+            return res
+        if attempt == max_retries - 1:
+            return res
         retry_after = res.headers.get("Retry-After")
         try:
-            delay = float(retry_after) if retry_after else 1.0
+            import math
+            delay = float(retry_after)
+            if not math.isfinite(delay) or delay < 0:
+                raise ValueError("Invalid Retry-After")
         except (ValueError, TypeError):
-            delay = 1.0
-        delay = min(max(delay, 0.5) * (attempt + 1), 5.0)
+            delay = min(2 ** attempt, 10.0)
+        # Never cap Shopify's requested wait to five seconds.
+        delay = max(delay, 0.5)
         print(f"[Shopify][Retry] HTTP {res.status_code} on {method} {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
         time.sleep(delay)
     print(f"[Shopify][RateLimit] Giving up after {max_retries} retries: {method} {url}")
