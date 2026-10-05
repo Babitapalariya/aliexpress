@@ -53,7 +53,7 @@ class ImportedProduct(Base):
     replacement_aliexpress_id = Column(String(64), nullable=True, index=True)
     is_dead_listing = Column(Boolean, default=False, nullable=False)
 
- 
+
 class ProductMapping(Base):
     __tablename__ = "product_mappings"
 
@@ -73,7 +73,7 @@ class ProductMapping(Base):
 
 # models.py (add after ImportedProduct)
 
- 
+
 #pending imports
 class PendingImport(Base):
     __tablename__ = "pending_imports"
@@ -87,4 +87,12 @@ class PendingImport(Base):
     last_checked  = Column(DateTime(timezone=True), nullable=True)
     retry_count   = Column(Integer, default=0)
     status        = Column(String(20), default='pending')  # pending / imported / failed
-    
+
+
+class AliExpressIdHistory(Base):
+    __tablename__ = "aliexpress_id_history"
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(16), nullable=False, index=True)
+    record_id = Column(Integer, nullable=False, index=True)
+    aliexpress_id = Column(String(64), nullable=False, index=True)

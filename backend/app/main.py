@@ -10,6 +10,7 @@ import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from .models import ProductMapping
+from .remap_history import history_matches, remember_supplier_ids
 
 from .database import get_db, engine
 from .models import ImportedProduct, Base, PendingImport
@@ -597,6 +598,7 @@ def list_products(
            (ImportedProduct.custom_title.ilike(search_term)) |
            (ImportedProduct.aliexpress_id.ilike(search_term)) |
            (ImportedProduct.replacement_aliexpress_id.ilike(search_term)) |
+           history_matches(ImportedProduct, "imported", search_term) |
            (ImportedProduct.shopify_product_id.ilike(search_term)) 
        )
     total = query.count()
@@ -1146,6 +1148,7 @@ def list_mappings(
         search_term = f"%{search}%"
         query = query.filter(
             (ProductMapping.aliexpress_id.ilike(search_term)) |
+            history_matches(ProductMapping, "mapping", search_term) |
             (ProductMapping.shopify_product_id.ilike(search_term)) |
             (ProductMapping.shopify_product_title.ilike(search_term))
         )
@@ -4006,6 +4009,7 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
                                  f"Please verify the correct new listing ID on AliExpress.")
  
     old_id = product.aliexpress_id
+    remember_supplier_ids(db, "imported", product)
  
     # 2. Update DB — store old ID so it stays searchable
     product.replacement_aliexpress_id = old_id
@@ -4569,7 +4573,8 @@ def lookup_product(
                 add_imported(p, "Partial AliExpress ID match (current ID)")
 
             for p in db.query(ImportedProduct).filter(
-                ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")
+                (ImportedProduct.replacement_aliexpress_id.ilike(f"%{q}%")) |
+                history_matches(ImportedProduct, "imported", f"%{q}%")
             ).all():
                 add_imported(p, f"Partial old AliExpress ID match — current ID is {p.aliexpress_id}")
 
@@ -4593,6 +4598,11 @@ def lookup_product(
                 ProductMapping.aliexpress_id.ilike(f"%{q}%")
             ).all():
                 add_mapping(m, "Partial AliExpress ID match (mapping)")
+
+            for m in db.query(ProductMapping).filter(
+                history_matches(ProductMapping, "mapping", term)
+            ).all():
+                add_mapping(m, f"Old AliExpress ID match - current ID is {m.aliexpress_id}")
 
             mapping_title_filter = ProductMapping.shopify_product_title.ilike(term)
             if hasattr(ProductMapping, "custom_title"):
@@ -4751,6 +4761,7 @@ def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(
         raise HTTPException(400, f"New ID {new_id} also appears dead. Please verify the correct listing ID.")
 
     old_id = mapping.aliexpress_id
+    remember_supplier_ids(db, "mapping", mapping)
     mapping.aliexpress_id = new_id
     mapping.is_dead_listing = False
     mapping.price_mode = "auto"
