@@ -93,7 +93,7 @@ async function checkMatchingTables() {
     buildLockIcons: () => 'locks', buildMappingLockIcons: () => 'locks',
   });
   // Locate active definitions (the source retains a commented older loader).
-  for (const name of ['formatIncrease', 'loadVariantsForModal', 'loadVariantsForMappingModal']) {
+  for (const name of ['formatIncrease', 'supplierPriceChangeTitle', 'loadVariantsForModal', 'loadVariantsForMappingModal']) {
     if (name === 'loadVariantsForModal') {
       const start = html.indexOf('  async function loadVariantsForModal(');
       const end = html.indexOf('\nasync function deleteImportedVariant', start);
@@ -110,9 +110,9 @@ async function checkMatchingTables() {
     assert.match(table, /-\$2\.00/);
     assert.match(table, /supplier-change-heading/);
     assert.match(table, /variant-table-scroll/);
-    assert.match(table, /Supplier price unchanged on latest check/);
+    assert.match(table, /No supplier price movement recorded/);
     assert.match(table, />\$0\.00<\/td>/);
-    assert.match(table, /Change This Check/);
+    assert.match(table, /Price Changes/);
     assert.match(table, /Repair supplier links/);
   }
   assert.match(mapped, /deleteMappedVariant\(1\)/);

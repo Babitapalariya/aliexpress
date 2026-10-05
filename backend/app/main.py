@@ -2408,6 +2408,7 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
 
+    from .price_history import supplier_change_summary
     from .shopify import get_variant_sync_state
     pricing = get_variant_sync_state(product.shopify_product_id)
     result = []
@@ -2425,8 +2426,7 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
             "inventory_quantity": v.get("inventory_quantity"),
             "price_increase": float(pricing[v["id"]]["price_increase"]),
             "product_price_increase": float(product.price_increase or 0),
-            "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
-            "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
+            **supplier_change_summary(pricing[v["id"]].get("supplier_history")),
         })
 
     return {
@@ -5032,6 +5032,7 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
         raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
     shopify_product = res.json().get("product", {})
     variants = shopify_product.get("variants", [])
+    from .price_history import supplier_change_summary
     from .shopify import get_variant_sync_state
     pricing = get_variant_sync_state(mapping.shopify_product_id)
     result = []
@@ -5046,8 +5047,7 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "inventory_quantity": v.get("inventory_quantity"),
             "price_increase": float(pricing[v["id"]]["price_increase"]),
             "product_price_increase": float(mapping.price_increase or 0),
-            "supplier_price_change": (pricing[v["id"]].get("supplier_history") or {}).get("change"),
-            "supplier_price_changed_at": (pricing[v["id"]].get("supplier_history") or {}).get("changed_at"),
+            **supplier_change_summary(pricing[v["id"]].get("supplier_history")),
         })
     return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
 
