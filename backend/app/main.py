@@ -1205,14 +1205,11 @@ def sync_mapping_inventory(mapping_id: int, db: Session = Depends(get_db)):
     if not skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
 
-    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus, strict=True)
+    inventory_report = {}
+    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus, strict=True, report=inventory_report)
 
     return {
-        "message": (
-            "Inventory pushed to Shopify successfully"
-            if inventory_updated
-            else "No inventory changes detected (already up to date, or AliExpress doesn't report stock for this product)"
-        ),
+        **inventory_report,
         "inventory_updated": inventory_updated,
         "total_stock": raw.get("total_stock"),
     }
@@ -3640,7 +3637,8 @@ def sync_product_inventory(product_id: int, db: Session = Depends(get_db)):
     if not skus:
         raise HTTPException(500, "No SKUs found in AliExpress product")
  
-    inventory_updated = update_shopify_product_inventory_with_skus(product.shopify_product_id, skus, strict=True)
+    inventory_report = {}
+    inventory_updated = update_shopify_product_inventory_with_skus(product.shopify_product_id, skus, strict=True, report=inventory_report)
  
     # Keep local cache in sync too
     new_total_stock = raw.get("total_stock")
@@ -3649,11 +3647,7 @@ def sync_product_inventory(product_id: int, db: Session = Depends(get_db)):
         db.commit()
  
     return {
-        "message": (
-            "Inventory pushed to Shopify successfully"
-            if inventory_updated
-            else "No inventory changes detected (already up to date, or AliExpress doesn't report stock for this product)"
-        ),
+        **inventory_report,
         "inventory_updated": inventory_updated,
         "total_stock": new_total_stock,
     }
@@ -3975,9 +3969,9 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
     1. Verify the new ID is alive (has prices)
     2. Save old ID in replacement_aliexpress_id for future searches
     3. Update aliexpress_id in DB to new ID
-    4. Re-fetch and cache all product data (title, images, skus, price)
+    4. Refresh supplier data while preserving title and description
     5. Update the Shopify aliexpress.product_id metafield
-    6. Push fresh prices and inventory to Shopify from new listing
+    6. Replace all Shopify variants with new listing options, prices and stock
     7. Clear the is_dead_listing flag
     """
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
@@ -3987,8 +3981,6 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
     new_id = (payload.get("new_aliexpress_id") or "").strip()
     if not new_id:
         raise HTTPException(400, "new_aliexpress_id is required")
-    if new_id == product.aliexpress_id:
-        raise HTTPException(400, "new_aliexpress_id is the same as the current ID")
  
     # Check if another product already uses this new ID
     conflict = db.query(ImportedProduct).filter(
@@ -4008,16 +4000,18 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
         raise HTTPException(400, f"New ID {new_id} also appears dead (no prices). "
                                  f"Please verify the correct new listing ID on AliExpress.")
  
+    from .remap_variants import replace_supplier_variants
+    result = replace_supplier_variants(product.shopify_product_id, raw, new_id) if product.shopify_product_id else {}
     old_id = product.aliexpress_id
     remember_supplier_ids(db, "imported", product)
  
     # 2. Update DB — store old ID so it stays searchable
-    product.replacement_aliexpress_id = old_id
+    if old_id != new_id:
+        product.replacement_aliexpress_id = old_id
     product.aliexpress_id  = new_id
     product.is_dead_listing = False
  
     # 3. Refresh product data from new listing
-    product.original_title  = raw.get("title") or product.original_title
     product.original_price  = raw.get("sale_price") or raw.get("original_price") or product.original_price
     product.currency        = raw.get("currency") or product.currency
     product.main_image      = raw.get("main_image") or product.main_image
@@ -4028,81 +4022,16 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
     product.orders          = raw.get("orders") or product.orders
     product.sku_count       = raw.get("sku_count") or product.sku_count
     product.skus            = raw.get("skus") or product.skus
-    product.total_stock     = raw.get("total_stock") or product.total_stock
+    product.total_stock     = raw.get("total_stock")
+    product.price_mode = "auto"
+    product.price_increase = 0.0
     db.commit()
- 
-    # 4. Update Shopify metafield + push prices + inventory
-    shopify_mf_updated    = False
-    shopify_price_updated = False
-    shopify_inv_updated   = False
- 
-    if product.shopify_product_id:
-        try:
-            from .shopify import (
-                _base, _h,
-                update_shopify_product_prices_with_skus,
-                update_shopify_product_inventory_with_skus,
-            )
- 
-            # Update aliexpress.product_id metafield so future syncs use new ID
-            mf_res = requests.get(
-                f"{_base()}/products/{product.shopify_product_id}/metafields.json",
-                params={"namespace": "aliexpress", "key": "product_id"},
-                headers=_h(), timeout=15,
-            )
-            mfs = mf_res.json().get("metafields", []) if mf_res.status_code == 200 else []
-            mf_payload = {
-                "metafield": {
-                    "namespace": "aliexpress",
-                    "key":       "product_id",
-                    "value":     new_id,
-                    "type":      "single_line_text_field",
-                }
-            }
-            if mfs:
-                r2 = requests.put(
-                    f"{_base()}/metafields/{mfs[0]['id']}.json",
-                    json=mf_payload, headers=_h(), timeout=15,
-                )
-                shopify_mf_updated = r2.status_code == 200
-            else:
-                r2 = requests.post(
-                    f"{_base()}/products/{product.shopify_product_id}/metafields.json",
-                    json=mf_payload, headers=_h(), timeout=15,
-                )
-                shopify_mf_updated = r2.status_code == 201
- 
-            # Push prices from new listing
-            new_skus = raw.get("skus", [])
-            if new_skus:
-                price_result = update_shopify_product_prices_with_skus(
-                    product.shopify_product_id, new_skus
-                )
-                shopify_price_updated = price_result in ("updated", "unchanged")
- 
-                inv_result = update_shopify_product_inventory_with_skus(
-                    product.shopify_product_id, new_skus
-                )
-                shopify_inv_updated = bool(inv_result)
- 
-            # Also re-store SKU ID metafields for price sync matching
-            from .shopify import store_aliexpress_sku_ids
-            if new_skus:
-                store_aliexpress_sku_ids(product.shopify_product_id, new_skus)
- 
-        except Exception as e:
-            print(f"[Remap] Shopify update failed (non-fatal): {e}")
- 
-    print(f"[Remap] Product id={product_id}: {old_id} → {new_id} "
-          f"(metafield={shopify_mf_updated} price={shopify_price_updated} inv={shopify_inv_updated})")
  
     return {
         "message":                   f"Successfully remapped from {old_id} to {new_id}",
         "old_aliexpress_id":         old_id,
         "new_aliexpress_id":         new_id,
-        "shopify_metafield_updated": shopify_mf_updated,
-        "shopify_price_updated":     shopify_price_updated,
-        "shopify_inv_updated":       shopify_inv_updated,
+        **result,
         "new_title":                 raw.get("title"),
         "new_price":                 raw.get("sale_price") or raw.get("original_price"),
         "sku_count":                 raw.get("sku_count"),
@@ -4742,8 +4671,6 @@ def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(
     new_id = (payload.get("new_aliexpress_id") or "").strip()
     if not new_id:
         raise HTTPException(400, "new_aliexpress_id is required")
-    if new_id == mapping.aliexpress_id:
-        raise HTTPException(400, "new_aliexpress_id is the same as the current ID")
 
     conflict = db.query(ProductMapping).filter(
         ProductMapping.aliexpress_id == new_id,
@@ -4760,6 +4687,8 @@ def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(
     if is_listing_dead(raw):
         raise HTTPException(400, f"New ID {new_id} also appears dead. Please verify the correct listing ID.")
 
+    from .remap_variants import replace_supplier_variants
+    result = replace_supplier_variants(mapping.shopify_product_id, raw, new_id)
     old_id = mapping.aliexpress_id
     remember_supplier_ids(db, "mapping", mapping)
     mapping.aliexpress_id = new_id
@@ -4768,27 +4697,11 @@ def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(
     mapping.price_increase = 0.0
     db.commit()
 
-    price_updated = False
-    inv_updated = False
-    skus = raw.get("skus", [])
-    if skus:
-        from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus, store_aliexpress_sku_ids
-        try:
-            price_result = update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus)
-            price_updated = price_result in ("updated", "unchanged")
-            inv_updated = bool(update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus))
-            store_aliexpress_sku_ids(mapping.shopify_product_id, skus)
-        except Exception as e:
-            print(f"[RemapMapping] Shopify update failed (non-fatal): {e}")
-
-    print(f"[RemapMapping] Mapping id={mapping_id}: {old_id} → {new_id} (price={price_updated} inv={inv_updated})")
-
     return {
         "message": f"Successfully remapped mapping from {old_id} to {new_id}",
         "old_aliexpress_id": old_id,
         "new_aliexpress_id": new_id,
-        "shopify_price_updated": price_updated,
-        "shopify_inv_updated": inv_updated,
+        **result,
         "new_title": raw.get("title"),
         "new_price": raw.get("sale_price") or raw.get("original_price"),
     }

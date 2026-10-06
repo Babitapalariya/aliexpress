@@ -760,11 +760,11 @@
     <div class="modal-bd">
       <input type="hidden" id="remap-product-id">
       <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--red)">
-        <i class="ti ti-alert-triangle"></i> <strong>Change supplier listing.</strong> Enter a replacement AliExpress ID or URL for this product. The existing Shopify product stays linked.
+        <i class="ti ti-alert-triangle"></i> <strong>Change supplier listing.</strong> Enter a replacement AliExpress ID or URL for this product. All existing Shopify variants will be removed and replaced with the new listing's variants, prices, stock and SKU images. Title and description stay unchanged.
       </div>
       <div class="fg" style="margin-bottom:14px"><label>Current AliExpress ID</label><input type="text" id="remap-old-id" readonly style="background:#f8fafc;color:var(--t3);font-family:var(--mono);font-size:12px"></div>
       <div class="fg"><label>New AliExpress ID or Product URL</label><input type="text" id="remap-new-id" placeholder="e.g. 3256809945399812 or full AliExpress URL" style="font-family:var(--mono);font-size:13px"></div>
-      <div class="info-banner" style="margin-top:14px"><i class="ti ti-info-circle"></i><span>The system will: verify the new ID has prices, save your old ID for search history, update your database, push new prices + inventory to Shopify, and update the AliExpress metafield. Old ID will still be searchable.</span></div>
+      <div class="info-banner" style="margin-top:14px"><i class="ti ti-info-circle"></i><span>Remap replaces every variant, including its SKU link, price, stock and image. Old variant adjustments and locks are removed with those variants. Both old and new AliExpress IDs remain searchable. Enter the current ID again to retry an earlier incomplete remap.</span></div>
     </div>
     <div class="modal-ft"><button class="btn btn-sm" onclick="closeRemapModal()">Cancel</button><button class="btn btn-danger btn-sm" onclick="submitRemap()"><i class="ti ti-arrows-exchange"></i> Remap Listing</button></div>
   </div>
@@ -776,7 +776,7 @@
     <div class="modal-bd">
       <input type="hidden" id="mapping-remap-mapping-id">
       <div style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--red)">
-        <i class="ti ti-alert-triangle"></i> <strong>Change supplier listing.</strong> Enter a replacement AliExpress ID or URL for this mapping. The existing Shopify product stays linked.
+        <i class="ti ti-alert-triangle"></i> <strong>Change supplier listing.</strong> Enter a replacement AliExpress ID or URL for this mapping. All existing Shopify variants will be removed and replaced with the new listing's variants, prices, stock and SKU images. Title and description stay unchanged.
       </div>
       <div class="fg" style="margin-bottom:14px"><label>Current AliExpress ID</label><input type="text" id="mapping-remap-old-id" readonly style="background:#f8fafc;color:var(--t3);font-family:var(--mono);font-size:12px"></div>
       <div class="fg"><label>New AliExpress ID or Product URL</label><input type="text" id="mapping-remap-new-id" placeholder="e.g. 3256809945399812" style="font-family:var(--mono);font-size:13px"></div>
@@ -1392,7 +1392,7 @@ async function syncProductPrice(productId){
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last actual AliExpress supplier price change, excluding manual adjustments">AliExpress<br>Price Changes<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress supplier price change; resets to zero after successful price sync">AliExpress<br>Price Changes<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -1400,7 +1400,7 @@ async function syncProductPrice(productId){
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. It stays visible until the supplier price changes again. $0.00 means no recorded movement; a dash means a new baseline. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. After a successful price sync, this indication resets to $0.00. Locked prices keep their indication until unlocked and synced. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
@@ -2408,8 +2408,8 @@ async function pushInventoryToShopify() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      const synced = d.shopify_price_updated && d.shopify_inv_updated;
-      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - prices and stock synced" : " - Shopify sync is incomplete. Check supplier links and retry sync."), synced ? "ok" : "info");
+      const synced = d.shopify_price_updated && d.shopify_inv_updated && d.shopify_metafield_updated !== false && d.shopify_images_updated !== false;
+      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - variants replaced with new prices, stock and SKU images" : " - " + ((d.warnings || []).join("; ") || "Shopify sync is incomplete. Retry remap with the same ID.")), synced ? "ok" : "info");
       closeRemapModal();
       hideLookupPanel();
       loadProducts(prodPage);
@@ -2461,7 +2461,7 @@ async function pushInventoryToShopify() {
             ${isRemapped ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px"><span class="badge b-green" style="font-size:10px"><i class="ti ti-circle-check"></i> Remapped</span></div><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px"><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">Old ID:</span><span style="font-family:var(--mono);color:var(--red);text-decoration:line-through">${oldId}</span><a href="https://www.aliexpress.com/item/${oldId}.html" target="_blank" style="color:var(--t3);font-size:10px"><i class="ti ti-external-link"></i></a></div><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">New ID:</span><span style="font-family:var(--mono);color:var(--green);font-weight:700">${currentId}</span><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank" style="color:var(--green);font-size:10px"><i class="ti ti-external-link"></i></a></div></div><div style="margin-top:4px;font-size:10px;color:var(--t3)"><i class="ti ti-info-circle"></i> Still flagged as dead because the <em>old</em> ID is what was originally scanned. The product is actively syncing via the new ID.</div>` : `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><span class="badge b-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Not remapped yet</span></div><div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${currentId}</div>`}
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:flex-end">
-            ${isRemapped ? `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs btn-success" title="View new listing on AliExpress"><i class="ti ti-external-link"></i> New Listing</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify"><i class="ti ti-brand-shopify"></i></button></a>` : ""}</div><button class="btn btn-xs" style="color:var(--t3);font-size:10px" onclick="clearDeadFlag(${p.id})" title="Remove from dead listings list (product is already fixed)"><i class="ti ti-x"></i> Clear from list</button>` : `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs"><i class="ti ti-brand-shopify"></i></button></a>` : ""}</div><button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id}, '${currentId}')"><i class="ti ti-arrows-exchange"></i> Remap Now</button>`}
+            ${isRemapped ? `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs btn-success" title="View new listing on AliExpress"><i class="ti ti-external-link"></i> New Listing</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify" style="white-space:nowrap"><i class="ti ti-external-link"></i> Shopify</button></a>` : ""}</div><button class="btn btn-xs" style="color:var(--t3);font-size:10px" onclick="clearDeadFlag(${p.id})" title="Remove from dead listings list (product is already fixed)"><i class="ti ti-x"></i> Clear from list</button>` : `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify" style="white-space:nowrap"><i class="ti ti-external-link"></i> Shopify</button></a>` : ""}</div><button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id}, '${currentId}')"><i class="ti ti-arrows-exchange"></i> Remap Now</button>`}
           </div>
         </div>`;
       };
@@ -2672,8 +2672,8 @@ async function pushInventoryToShopify() {
       });
       const d = await safeJson(r);
       if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      const synced = d.shopify_price_updated && d.shopify_inv_updated;
-      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - prices and stock synced" : " - Shopify sync is incomplete. Check supplier links and retry sync."), synced ? "ok" : "info");
+      const synced = d.shopify_price_updated && d.shopify_inv_updated && d.shopify_metafield_updated !== false && d.shopify_images_updated !== false;
+      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - variants replaced with new prices, stock and SKU images" : " - " + ((d.warnings || []).join("; ") || "Shopify sync is incomplete. Retry remap with the same ID.")), synced ? "ok" : "info");
       closeMappingRemapModal();
       await loadMappings(mappingPage);
     } catch(e){ showToast("Remap failed: " + e.message, "err"); }
@@ -2746,7 +2746,7 @@ async function loadDeadMappings() {
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <a href="${m.aliexpress_url}" target="_blank"><button class="btn btn-xs" style="white-space:nowrap"><i class="ti ti-external-link"></i> AliExpress</button></a>
-          ${m.shopify_url ? `<a href="${m.shopify_url}" target="_blank"><button class="btn btn-xs btn-icon" title="View in Shopify"><i class="ti ti-brand-shopify"></i></button></a>` : ""}
+          ${m.shopify_url ? `<a href="${m.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify" style="white-space:nowrap"><i class="ti ti-external-link"></i> Shopify</button></a>` : ""}
           <button class="btn btn-danger btn-xs" style="white-space:nowrap" onclick="openMappingRemapModal(${m.id}, '${m.aliexpress_id}')"><i class="ti ti-arrows-exchange"></i> Remap Now</button>
         </div>
       </div>`).join("");
@@ -2953,7 +2953,7 @@ async function loadVariantsForMappingModal(mappingId) {
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last actual AliExpress supplier price change, excluding manual adjustments">AliExpress<br>Price Changes<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress supplier price change; resets to zero after successful price sync">AliExpress<br>Price Changes<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -2961,7 +2961,7 @@ async function loadVariantsForMappingModal(mappingId) {
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. It stays visible until the supplier price changes again. $0.00 means no recorded movement; a dash means a new baseline. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. After a successful price sync, this indication resets to $0.00. Locked prices keep their indication until unlocked and synced. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>

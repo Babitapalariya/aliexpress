@@ -1094,6 +1094,11 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
             # A repaired link may have observed a different supplier variant.
             # Establish its baseline without claiming that difference was a price move.
             history = observe_supplier_price(None if repairing_link else previous, supplier_price)
+            if not variant["locks"]["price"]:
+                # Persist the acknowledgement with the price in the same atomic
+                # variant update. Failed writes and locked prices keep the indication.
+                history.update(last_change="0.00", last_changed_at=None,
+                               last_from=None, last_to=None)
             update = {"variant_id": vid}
             if repairing_link:
                 update["ae_sku_id"] = str(sku["sku_id"])
@@ -1557,7 +1562,7 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
 
 
 
-def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list, *, strict: bool = False) -> bool:
+def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list, *, strict: bool = False, report: dict = None) -> bool:
     """
     Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
 
@@ -1653,27 +1658,36 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
             raise HTTPException(502, "Failed to save resolved supplier SKU links")
 
     if strict:
-        missing = [v.get("title") or _variant_label(v) for v in shopify_variants
-                   if v["id"] not in locked_variant_ids and
-                   (v["id"] not in matches or matches[v["id"]].get("stock") is None)]
-        if missing:
-            raise HTTPException(409, "Cannot push stock: missing supplier SKU links or stock for "
-                                + ", ".join(missing) + ". Open Edit > Repair supplier links, select the matching options, then retry.")
-        targets = {}
+        targets, skipped = {}, []
         for variant in shopify_variants:
-            if variant["id"] in locked_variant_ids:
-                continue
-            raw = matches[variant["id"]]["stock"]
-            try:
-                qty = int(raw)
-                if isinstance(raw, bool) or str(qty) != str(raw) or qty < 0:
-                    raise ValueError()
-            except (TypeError, ValueError, OverflowError):
-                raise HTTPException(409, f"Invalid supplier stock for variant {variant['id']}")
-            targets[variant["id"]] = qty
-        if not targets:
-            raise HTTPException(409, "All variant inventory is locked; unlock inventory to push supplier stock")
-        return bool(set_variant_inventory_quantities(shopify_product_id, targets))
+            vid = variant["id"]
+            label = variant.get("title") or _variant_label(variant) or str(vid)
+            reason = None
+            sku = matches.get(vid)
+            if vid in locked_variant_ids:
+                reason = "inventory locked"
+            elif sku is None:
+                reason = "no matching supplier SKU"
+            elif sku.get("stock") is None:
+                reason = "supplier stock unavailable"
+            else:
+                raw = sku["stock"]
+                try:
+                    qty = int(raw)
+                    if isinstance(raw, bool) or str(qty) != str(raw) or qty < 0:
+                        raise ValueError()
+                    targets[vid] = qty
+                except (TypeError, ValueError, OverflowError):
+                    reason = "invalid supplier stock"
+            if reason:
+                skipped.append({"variant_id": vid, "label": label, "reason": reason})
+        count = set_variant_inventory_quantities(shopify_product_id, targets) if targets else 0
+        message = f"Updated stock for {count} matching variant(s)."
+        if skipped:
+            message += " Skipped: " + "; ".join(f"{row['label']} ({row['reason']})" for row in skipped) + "."
+        if report is not None:
+            report.update(updated_count=count, skipped_variants=skipped, message=message)
+        return bool(count)
 
     for variant in shopify_variants:
         if variant["id"] in locked_variant_ids:

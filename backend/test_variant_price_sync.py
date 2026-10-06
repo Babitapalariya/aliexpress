@@ -350,6 +350,10 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(float(state[1]["price_increase"]), 3)
         self.assertEqual(self.prices()[:2], [17, 10])
         self.assertEqual(state[2]["supplier_history"]["change"], "2.00")
+        from app.price_history import supplier_change_summary
+        self.assertEqual(supplier_change_summary(state[1]["supplier_history"])["supplier_price_change"], "0.00")
+        self.assertEqual(supplier_change_summary(state[2]["supplier_history"])["supplier_price_change"], "2.00")
+
         for sku in self.skus:
             sku["sale_price"] = "9"
         self.sync()

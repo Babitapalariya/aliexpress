@@ -36,7 +36,7 @@ class InventoryEditsTests(TestCase):
             with self.assertRaises(HTTPException):
                 ns["_parse_inventory_edits"]([{"variant_id": 1, "inventory_quantity": quantity}])
 
-    def test_push_reports_missing_supplier_link_without_writing_stock(self):
+    def test_push_skips_missing_supplier_link_without_writing_stock(self):
         product = Mock()
         product.json.return_value = {"product": {"variants": [
             {"id": 12, "option1": "Controller A Rear", "inventory_item_id": 42}]}}
@@ -51,12 +51,32 @@ class InventoryEditsTests(TestCase):
              patch.object(shopify, "get_locked_variant_ids", return_value=set()), \
              patch.object(shopify, "get_variant_sync_state", return_value={12: {"ae_sku_id": None}}), \
              patch.object(shopify, "set_variant_inventory_quantities") as writer:
-            with self.assertRaises(HTTPException) as error:
-                shopify.update_shopify_product_inventory_with_skus("123",
-                    [{"sku_id": "a", "label": "Controller A", "stock": 100}], strict=True)
-            self.assertEqual(error.exception.status_code, 409)
-            self.assertIn("controller a rear", error.exception.detail)
+            report = {}
+            result = shopify.update_shopify_product_inventory_with_skus("123",
+                [{"sku_id": "a", "label": "Controller A", "stock": 100}], strict=True, report=report)
+            self.assertFalse(result)
+            self.assertIn("controller a rear", report["message"])
+            self.assertEqual(report["updated_count"], 0)
             writer.assert_not_called()
+
+    def test_matched_stock_updates_despite_unmatched_locked_or_invalid_siblings(self):
+        variants = [{"id": i, "option1": f"Option {i}"} for i in range(1, 6)]
+        product = Mock(json=lambda: {"product": {"variants": variants}})
+        locations = Mock(json=lambda: {"locations": [{"id": 7}]})
+        skus = [{"sku_id": str(i), "label": f"Option {i}", "stock": qty}
+                for i, qty in [(1, 0), (2, 10), (4, 8), (5, -1)]]
+        state = {i: {"ae_sku_id": str(i)} for i in range(1, 6)}
+        with patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
+             patch.object(shopify, "_h", return_value={}), \
+             patch.object(shopify.requests, "get", side_effect=[product, locations]), \
+             patch.object(shopify, "get_locked_variant_ids", return_value={4}), \
+             patch.object(shopify, "get_variant_sync_state", return_value=state), \
+             patch.object(shopify, "set_variant_inventory_quantities", return_value=2) as writer:
+            report = {}
+            self.assertTrue(shopify.update_shopify_product_inventory_with_skus("123", skus, strict=True, report=report))
+            writer.assert_called_once_with("123", {1: 0, 2: 10})
+            self.assertEqual(report["updated_count"], 2)
+            self.assertEqual([v["variant_id"] for v in report["skipped_variants"]], [3, 4, 5])
 
     def test_manual_writer_uses_connected_levels_and_confirms_response(self):
         def response(data, status=200):
