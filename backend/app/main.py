@@ -3983,14 +3983,9 @@ def remap_listing(product_id: int, payload: dict, db: Session = Depends(get_db))
         raise HTTPException(400, "new_aliexpress_id is required")
  
     # Check if another product already uses this new ID
-    conflict = db.query(ImportedProduct).filter(
-        ImportedProduct.aliexpress_id == new_id,
-        ImportedProduct.id != product_id
-    ).first()
-    if conflict:
-        raise HTTPException(409, f"New ID {new_id} is already in use by product id={conflict.id}")
- 
-    # 1. Verify the new ID is alive
+    from .remap_history import validate_remap_target
+    validate_remap_target(db, "imported", product, new_id)
+
     try:
         raw = get_product(new_id, db)
     except Exception as e:
@@ -4672,12 +4667,8 @@ def remap_mapping_listing(mapping_id: int, payload: dict, db: Session = Depends(
     if not new_id:
         raise HTTPException(400, "new_aliexpress_id is required")
 
-    conflict = db.query(ProductMapping).filter(
-        ProductMapping.aliexpress_id == new_id,
-        ProductMapping.id != mapping_id
-    ).first()
-    if conflict:
-        raise HTTPException(409, f"New ID {new_id} is already mapped (mapping id={conflict.id})")
+    from .remap_history import validate_remap_target
+    validate_remap_target(db, "mapping", mapping, new_id)
 
     try:
         raw = get_product(new_id, db)

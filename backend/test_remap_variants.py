@@ -52,7 +52,7 @@ class RemapVariantsTests(unittest.TestCase):
                       is_listing_dead=lambda raw: False, remember_supplier_ids=Mock())
             name = "remap_mapping_listing" if mapping else "remap_listing"
             load_main_functions(ns, name)
-            with patch.object(remap, "replace_supplier_variants", return_value={"shopify_variants_replaced": True}) as replace:
+            with patch("app.remap_history.validate_remap_target"), patch.object(remap, "replace_supplier_variants", return_value={"shopify_variants_replaced": True}) as replace:
                 result = ns[name](1, {"new_aliexpress_id": "new"}, db)
             replace.assert_called_once_with("42", self.raw, "new")
             self.assertEqual(record.custom_title, "Merchant title")
@@ -73,7 +73,7 @@ class RemapVariantsTests(unittest.TestCase):
                       is_listing_dead=lambda raw: False, remember_supplier_ids=Mock())
             name = "remap_mapping_listing" if mapping else "remap_listing"
             load_main_functions(ns, name)
-            with patch.object(remap, "replace_supplier_variants", side_effect=HTTPException(502, "Rejected")):
+            with patch("app.remap_history.validate_remap_target"), patch.object(remap, "replace_supplier_variants", side_effect=HTTPException(502, "Rejected")):
                 with self.assertRaises(HTTPException):
                     ns[name](1, {"new_aliexpress_id": "new"}, db)
             self.assertEqual(record.aliexpress_id, "old")

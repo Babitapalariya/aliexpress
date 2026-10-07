@@ -36,6 +36,31 @@ class RemapHistoryTests(unittest.TestCase):
             self.assertEqual(ns["lookup_product"]("666", "mapping", db)["count"], 1)
         engine.dispose()
 
+    def test_duplicate_validation_checks_both_tables_and_old_ids(self):
+        from app.remap_history import validate_remap_target
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            imported = ImportedProduct(aliexpress_id="111", original_title="Tire", shopify_product_id="501", replacement_aliexpress_id="110")
+            mapping = ProductMapping(aliexpress_id="222", shopify_product_id="502")
+            db.add_all([imported, mapping])
+            db.commit()
+            remember_supplier_ids(db, "mapping", mapping)
+            mapping.aliexpress_id = "333"
+            db.commit()
+            for value in ("222", "333"):
+                with self.assertRaises(HTTPException) as error:
+                    validate_remap_target(db, "imported", imported, value)
+                self.assertEqual(error.exception.status_code, 409)
+                self.assertIn("502", error.exception.detail)
+            for value in ("111", "110"):
+                with self.assertRaises(HTTPException):
+                    validate_remap_target(db, "mapping", mapping, value)
+            for source, record, value in [("imported", imported, "111"), ("mapping", mapping, "333"),
+                                          ("mapping", mapping, "222"), ("imported", imported, "999")]:
+                validate_remap_target(db, source, record, value)
+        engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

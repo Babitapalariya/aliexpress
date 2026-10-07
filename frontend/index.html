@@ -258,6 +258,11 @@
   .empty small{font-size:12px;margin-top:4px;display:block}
   .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 18px;border-radius:12px;font-size:13px;font-weight:500;display:none;align-items:center;gap:10px;z-index:9999;box-shadow:var(--shadow-lg);max-width:360px;border:1px solid rgba(255,255,255,.08);animation:slideUp .2s ease;}
   .toast.show{display:flex}
+  #remap-result{position:fixed;inset:0;margin:auto;width:min(420px,calc(100vw - 32px));max-height:80vh;border:1px solid var(--border);border-radius:16px;padding:28px;background:var(--card);color:var(--t1);box-shadow:var(--shadow-lg);text-align:center}
+  #remap-result::backdrop{background:rgba(15,23,42,.35)}
+  #remap-result h3{margin:0 0 12px}
+  #remap-result p{font-size:14px;line-height:1.6;overflow-wrap:anywhere;margin:0 0 20px}
+
   @keyframes slideUp{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
   @keyframes spin{to{transform:rotate(360deg)}}
   .spin{animation:spin .8s linear infinite;display:inline-block}
@@ -787,6 +792,11 @@
 
 <div class="toast" id="toast"></div>
 
+<dialog id="remap-result" aria-labelledby="remap-result-title" aria-describedby="remap-result-message">
+  <h3 id="remap-result-title"></h3>
+  <p id="remap-result-message"></p>
+  <form method="dialog"><button class="btn btn-primary" autofocus>OK</button></form>
+</dialog>
 <script>
   // ============================
   // ALL JAVASCRIPT
@@ -2390,6 +2400,15 @@ async function pushInventoryToShopify() {
   function closeRemapModal() {
     document.getElementById("remap-modal").classList.remove("open");
   }
+  function showRemapResult(data, newId, synced) {
+    document.getElementById("remap-result-title").textContent = synced ? "Remap successful" : "Remap needs attention";
+    document.getElementById("remap-result-message").textContent =
+      (data.message || `Remapped to ${newId}`) + (synced
+        ? ". Variants, prices, stock and SKU images updated."
+        : ". " + ((data.warnings || []).join("; ") || "Shopify sync is incomplete. Retry remap with the same ID."));
+    const dialog = document.getElementById("remap-result");
+    if (!dialog.open) dialog.showModal();
+  }
   async function submitRemap() {
     const productId = document.getElementById("remap-product-id").value;
     let newId = document.getElementById("remap-new-id").value.trim();
@@ -2409,8 +2428,8 @@ async function pushInventoryToShopify() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
       const synced = d.shopify_price_updated && d.shopify_inv_updated && d.shopify_metafield_updated !== false && d.shopify_images_updated !== false;
-      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - variants replaced with new prices, stock and SKU images" : " - " + ((d.warnings || []).join("; ") || "Shopify sync is incomplete. Retry remap with the same ID.")), synced ? "ok" : "info");
       closeRemapModal();
+      showRemapResult(d, newId, synced);
       hideLookupPanel();
       loadProducts(prodPage);
     } catch(e) { showToast("Remap failed: " + e.message, "err"); }
@@ -2673,8 +2692,8 @@ async function pushInventoryToShopify() {
       const d = await safeJson(r);
       if(!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
       const synced = d.shopify_price_updated && d.shopify_inv_updated && d.shopify_metafield_updated !== false && d.shopify_images_updated !== false;
-      showToast((d.message || `Remapped to ${newId}`) + (synced ? " - variants replaced with new prices, stock and SKU images" : " - " + ((d.warnings || []).join("; ") || "Shopify sync is incomplete. Retry remap with the same ID.")), synced ? "ok" : "info");
       closeMappingRemapModal();
+      showRemapResult(d, newId, synced);
       await loadMappings(mappingPage);
     } catch(e){ showToast("Remap failed: " + e.message, "err"); }
     finally { btn.disabled = false; btn.innerHTML = original; }
