@@ -1129,6 +1129,34 @@ async function syncProductPrice(productId){
   // ── FETCH & IMPORT ──
   function parseIds(raw){return[...new Set(raw.split(/[\s,\n]+/).map(s=>s.trim()).filter(Boolean))];}
   function syncFetchBtn(){const ids=parseIds(document.getElementById("ids-input").value);document.getElementById("btn-fetch").disabled=ids.length===0;document.getElementById("ids-det").textContent=ids.length>0?`${ids.length} product${ids.length!==1?"s":""} detected`:"";}
+  function productFetchError(body, status) {
+    const detail = body?.detail ?? body;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.map(item => item.msg || JSON.stringify(item)).join("; ");
+    if (detail && typeof detail === "object") {
+      const error = detail.raw?.error_response || {};
+      const message = detail.aliexpress_message || detail.message || detail.msg || error.msg;
+      const extra = error.sub_msg || error.sub_message;
+      const code = detail.aliexpress_error_code || detail.code || error.code;
+      if (message || extra) return [message, extra].filter(Boolean).join(": ") + (code ? ` (code ${code})` : "");
+      if (Object.keys(detail).length) return JSON.stringify(detail);
+    }
+    return `Fetch failed (HTTP ${status}). Please try again.`;
+  }
+  async function fetchProductPreview(id) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch(`${API}/product/${encodeURIComponent(id)}`);
+      const body = await response.json().catch(() => ({}));
+      if (response.ok) return body;
+      if ([429, 502, 503, 504].includes(response.status) && attempt < 2) {
+        const retry = response.headers.get("Retry-After");
+        const seconds = retry && /^\d+$/.test(retry) ? Number(retry) : 0;
+        const delay = seconds ? seconds * 1000 : Math.max(0, Date.parse(retry) - Date.now()) || 1000 * (attempt + 1);
+        if (delay <= 30000) { await new Promise(resolve => setTimeout(resolve, delay)); continue; }
+      }
+      throw new Error(productFetchError(body, response.status));
+    }
+  }
   async function doFetch(){
     const ids=parseIds(document.getElementById("ids-input").value);if(!ids.length)return;
     const btn=document.getElementById("btn-fetch");btn.disabled=true;btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Fetching…`;
@@ -1138,11 +1166,16 @@ async function syncProductPrice(productId){
     document.getElementById("fetch-status-lbl").textContent="fetching…";
     document.getElementById("pcard-grid").innerHTML=ids.map(id=>skelCard(id)).join("");
     let ok=0,fail=0;
-    await Promise.all(ids.map(async id=>{
-      try{const r=await fetch(`${API}/product/${id}`);if(!r.ok){const b=await r.json().catch(()=>({}));throw new Error(b?.detail||`HTTP ${r.status}`);}fp[id].data=await r.json();fp[id].status="ready";ok++;}
-      catch(e){fp[id].status="ferr";fp[id].err=e.message;fail++;}
-      drawCard(id);
-    }));
+    let next = 0;
+    async function worker() {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try { fp[id].data = await fetchProductPreview(id); fp[id].status = "ready"; ok++; }
+        catch (e) { fp[id].status = "ferr"; fp[id].err = e.message; fail++; }
+        drawCard(id);
+      }
+    }
+    await Promise.all(Array.from({length: Math.min(2, ids.length)}, () => worker()));
     btn.disabled=false;btn.innerHTML=`<i class="ti ti-search"></i> Fetch Products`;
     document.getElementById("fetch-status-lbl").textContent=`${ok} ready${fail>0?` · ${fail} failed`:""}`;
     showToast(`Fetched ${ok} product${ok!==1?"s":""}${fail>0?` · ${fail} failed`:""}`,fail>0?"err":"ok");
@@ -1151,7 +1184,7 @@ async function syncProductPrice(productId){
   function drawCard(id){
     const p=fp[id], el=document.getElementById("fc-"+id);
     if(!el) return;
-    if(p.status==="ferr"){el.innerHTML=`<div class="pc-body" style="padding:16px"><div class="badge b-red" style="margin-bottom:8px"><i class="ti ti-alert-circle"></i> Fetch failed</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${p.id}</div><div style="font-size:11px;color:var(--red);margin-top:6px">${p.err||""}</div></div>`;return;}
+    if(p.status==="ferr"){el.innerHTML=`<div class="pc-body" style="padding:16px"><div class="badge b-red" style="margin-bottom:8px"><i class="ti ti-alert-circle"></i> Fetch failed</div><div style="font-size:11px;color:var(--t3);font-family:var(--mono)">${p.id}</div><div style="font-size:11px;color:var(--red);margin-top:6px">${escapeHtml(p.err||"")}</div></div>`;return;}
     const d=p.data;
     const img=d.main_image?`<img src="${d.main_image}" onerror="this.parentNode.innerHTML='<i class=\\'ti ti-photo\\'></i>'" style="width:100%;height:100%;object-fit:cover;display:block">`:`<i class="ti ti-photo"></i>`;
     const cur=d.currency||"USD", price=d.sale_price||d.original_price||"—";
@@ -1172,7 +1205,7 @@ async function syncProductPrice(productId){
         </div>`;
         break;}
       case "skip": foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Already in Shopify</div>`;break;
-      case "ierr": foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${p.err||""}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;break;
+      case "ierr": foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${escapeHtml(p.err||"")}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;break;
       default: foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;
     }
     el.innerHTML=`<div class="pc-img">${img}</div><div class="pc-body"><div class="pc-title">${d.title||id}</div><div style="display:flex;align-items:baseline;gap:6px;margin-top:4px"><span class="pc-price">${cur} ${price}</span>${orig?`<span class="pc-orig">${orig}</span>`:""}</div><div class="pc-meta">${d.sku_count?`<span class="badge b-indigo" style="font-size:10px">${d.sku_count} variants</span>`:""} ${d.avg_rating?`<span style="color:var(--orange);font-size:12px">★ ${parseFloat(d.avg_rating).toFixed(1)}</span>`:""}</div></div><div class="pc-foot">${foot}</div>`;
