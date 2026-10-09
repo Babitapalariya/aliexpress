@@ -49,6 +49,28 @@ class OptionImportTests(unittest.TestCase):
             with self.subTest(kind=kind), self.assertRaises(HTTPException):
                 shopify.build_supplier_options(skus)
 
+    def test_shipping_option_first_or_last_is_removed_consistently(self):
+        tree = ast.parse(Path(__file__).with_name('app').joinpath('aliexpress.py').read_text(encoding='utf-8'))
+        ns = {"COUNTRY_CODE_TO_NAME": {"US": "United States"}, "KNOWN_SHIP_LOCATIONS": {"united states"}}
+        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                     and n.name in ('_filter_skus_by_ship_location', '_sku_stock_int')]
+        exec(compile(ast.Module(body=functions, type_ignores=[]), 'aliexpress.py', 'exec'), ns)
+        skus = []
+        for i, color in enumerate(('black', 'white', 'set')):
+            options = [dict(id='14', name='Color', value=color),
+                       dict(id='200007763', name='Ships From', value='United States')]
+            if i == 0:
+                options.reverse()
+            skus.append(dict(sku_id=str(i), options=options, label=' / '.join(o['value'] for o in options), stock=i))
+        original = copy.deepcopy(skus)
+        filtered = ns['_filter_skus_by_ship_location'](skus, 'US')
+        options, rows = shopify.build_supplier_options(filtered)
+        self.assertEqual(options, [{'name': 'Color', 'values': ['black', 'white', 'set']}])
+        self.assertEqual(rows, [['black'], ['white'], ['set']])
+        self.assertEqual([s['sku_id'] for s in filtered], ['0', '1', '2'])
+        self.assertEqual([s['stock'] for s in filtered], [0, 1, 2])
+        self.assertEqual(skus, original)
+
     def test_legacy_labels_remain_readable(self):
         options, rows = shopify.build_supplier_options([{'label': 'Red / Large'}])
         self.assertEqual(options[0]['name'], 'Variant')
@@ -144,6 +166,23 @@ class OptionImportTests(unittest.TestCase):
         upload.assert_not_called()
         self.assertEqual(result['skipped'], 2)
         self.assertEqual(result['remaining'], 1)
+
+    def test_import_retries_only_image_sync_when_images_are_missing(self):
+        with patch.object(shopify, 'backfill_sku_images', side_effect=[
+                {'attached': 1, 'remaining': 2}, {'attached': 2, 'remaining': 0}]) as sync, \
+             patch.object(shopify.time, 'sleep') as sleep, \
+             patch.object(shopify, 'create_shopify_product') as create:
+            self.assertEqual(shopify.attach_sku_images_to_product('123', self.skus, []), 3)
+            self.assertEqual(sync.call_count, 2)
+            sleep.assert_called_once_with(1)
+            create.assert_not_called()
+
+    def test_import_image_retry_is_bounded_and_stops_after_success(self):
+        for remaining, calls in [(0, 1), (2, 3)]:
+            with patch.object(shopify, 'backfill_sku_images', return_value={'attached': 0, 'remaining': remaining}) as sync, \
+                 patch.object(shopify.time, 'sleep'):
+                shopify.attach_sku_images_to_product('123', self.skus, [])
+                self.assertEqual(sync.call_count, calls)
 
     def test_upload_retries_rate_limit(self):
         throttled = Mock(status_code=429, headers={'Retry-After': '0.5'})

@@ -50,6 +50,11 @@ def _sign(secret: str, params: dict) -> str:
 
 
 def _call(method: str, app_params: dict, access_token: str) -> dict:
+    from .aliexpress_limit import guarded_call
+    return guarded_call(lambda: _call_once(method, app_params, access_token))
+
+
+def _call_once(method: str, app_params: dict, access_token: str) -> dict:
     sys_params = {
         "app_key":      settings.ALIEXPRESS_APP_KEY,
         "method":       method,
@@ -220,6 +225,20 @@ def _filter_skus_by_ship_location(skus: list, ship_to_country: str) -> list:
     if not target_name:
         return skus  # unrecognized country code — can't safely filter
     target_name_lower = target_name.lower()
+
+    # Supplier property order can differ per SKU. Normalize only the known
+    # shipping dimension, preserving all real option values and source data.
+    normalized = []
+    for sku in skus:
+        options = sku.get("options") or []
+        shipping = [o for o in options if str(o.get("id")) == "200007763"
+                    or str(o.get("name", "")).strip().lower() in ("ships from", "ship from")]
+        if len(shipping) == 1 and len(options) > 1:
+            real = [o for o in options if o is not shipping[0]]
+            sku = dict(sku, options=real + shipping,
+                       label=" / ".join(str(o["value"]).strip() for o in real + shipping))
+        normalized.append(sku)
+    skus = normalized
 
     split_labels = []
     for sku in skus:

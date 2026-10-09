@@ -235,8 +235,19 @@ def _upload_image_to_shopify(shopify_product_id: str, image_url: str, alt: str =
 
 
 def attach_sku_images_to_product(shopify_product_id: str, aliexpress_skus: list, shopify_variants: list) -> int:
-    # Use the paginated snapshot and identical matching/retry rules on import and repair.
-    return backfill_sku_images(shopify_product_id, aliexpress_skus)["attached"]
+    # A newly created product can have incomplete image attachment on the first
+    # pass. Re-read variants so retries touch only missing, unlocked images.
+    attached = 0
+    for attempt in range(3):
+        result = backfill_sku_images(shopify_product_id, aliexpress_skus)
+        attached += result["attached"]
+        if not result.get("remaining"):
+            break
+        if attempt < 2:
+            time.sleep(attempt + 1)
+    if result.get("remaining"):
+        print(f"[Shopify] {result['remaining']} variant image(s) still missing after import image retries for product {shopify_product_id}")
+    return attached
 
 
 
