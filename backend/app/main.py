@@ -1271,7 +1271,7 @@ def delete_mapping(mapping_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/mappings/sync-price")
-def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db)):
+def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db), reset_increases: bool = False):
     mapping = db.query(ProductMapping).filter(ProductMapping.aliexpress_id == aliexpress_id).first()
     if not mapping or not mapping.track_price:
         raise HTTPException(404, "Mapping not found or price tracking disabled")
@@ -1309,22 +1309,30 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db))
 
         from .shopify import update_shopify_product_prices_with_skus, update_shopify_product_inventory_with_skus
 
-        # Explicit Sync Price restores supplier prices, as in the imported table.
+        # Ordinary sync must preserve the selling-price rules saved by the user.
+        if not reset_increases and mapping.price_increase:
+            for sku in aliexpress_skus:
+                base = sku.get("sale_price") or sku.get("price")
+                if base is not None:
+                    sku.setdefault("_supplier_price", base)
+                    sku["sale_price"] = sku["price"] = str(float(base) + mapping.price_increase)
         from .shopify import get_locked_variant_ids
         has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
         price_result = update_shopify_product_prices_with_skus(
-            mapping.shopify_product_id, aliexpress_skus, reset_increases=True
+            mapping.shopify_product_id, aliexpress_skus, reset_increases=reset_increases
         )
         if price_result == "failed":
             raise HTTPException(502, "Failed to update Shopify variant prices")
 
         inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
 
-        mapping.price_mode = "variant_manual" if has_price_locks else "auto"
-        mapping.price_increase = 0.0
+        if reset_increases:
+            mapping.price_mode = "variant_manual" if has_price_locks else "auto"
+            mapping.price_increase = 0.0
         db.commit()
 
-        price_msg = "Unlocked variant prices restored to AliExpress prices; saved increases cleared"
+        price_msg = ("Unlocked variant prices restored to AliExpress prices; saved increases cleared"
+                     if reset_increases else "Prices synced; saved increases preserved")
         if has_price_locks:
             price_msg += "; locked variant prices kept unchanged"
         inv_msg = "Inventory updated" if inventory_updated else "Inventory unchanged or not available"
@@ -1507,8 +1515,8 @@ def debug_product_prices(shopify_product_id: str, db: Session = Depends(get_db))
 
 
 @app.post("/dashboard/products/{product_id}/sync-price")
-def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
-    """Restore unlocked variants to AliExpress prices and clear their increases."""
+def manual_product_price_sync(product_id: int, db: Session = Depends(get_db), reset_increases: bool = False):
+    """Sync supplier prices, preserving increases unless explicitly reset."""
     product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
     if not product:
         raise HTTPException(404, "Product not found")
@@ -1524,11 +1532,16 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if not new_skus:
             raise HTTPException(500, "No SKUs found in AliExpress product")
 
-        # Explicit Sync Price resets markups; scheduled sync retains them.
+        if not reset_increases and product.price_increase:
+            for sku in new_skus:
+                base = sku.get("sale_price") or sku.get("price")
+                if base is not None:
+                    sku.setdefault("_supplier_price", base)
+                    sku["sale_price"] = sku["price"] = str(float(base) + product.price_increase)
         from .shopify import get_locked_variant_ids
         locked_variant_ids = get_locked_variant_ids(product.shopify_product_id, "price")
         success = update_shopify_product_prices_with_skus(
-            product.shopify_product_id, new_skus, reset_increases=True
+            product.shopify_product_id, new_skus, reset_increases=reset_increases
         )
         if success == "failed":
             raise HTTPException(502, "Shopify variant price update failed")
@@ -1538,14 +1551,16 @@ def manual_product_price_sync(product_id: int, db: Session = Depends(get_db)):
         if original_price:
             product.original_price = original_price
 
-        product.price_mode = "variant_manual" if locked_variant_ids else "auto"
-        product.price_increase = 0.0
-        product.custom_price = None   # remove any manual override
+        if reset_increases:
+            product.price_mode = "variant_manual" if locked_variant_ids else "auto"
+            product.price_increase = 0.0
+            product.custom_price = None
         db.commit()
 
         return {
             "message": (
-                "Unlocked variant prices restored to AliExpress prices; saved increases cleared"
+                ("Unlocked variant prices restored to AliExpress prices; saved increases cleared"
+                 if reset_increases else "Prices synced; saved increases preserved")
                 + (f"; {len(locked_variant_ids)} locked variant(s) kept unchanged" if locked_variant_ids else "")
             ),
             "price_mode": product.price_mode
@@ -1675,15 +1690,16 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
         raise HTTPException(400, "increase_by amount is required")
     try:
         increase_by = float(increase_by)
-    except ValueError:
+    except (TypeError, ValueError):
         raise HTTPException(400, "Invalid amount format")
+    import math
+    if not math.isfinite(increase_by):
+        raise HTTPException(400, "Increase must be finite")
 
     # Accumulate the markup on top of whatever has already been applied
     previous_increase = mapping.price_increase or 0.0
    # total_increase = previous_increase + increase_by
     total_increase =  increase_by
-    mapping.price_mode = "increase"
-    mapping.price_increase = total_increase
 
     # Fetch the current AliExpress base price (NOT the current Shopify price)
     # so the new Shopify price always = AliExpress base + total accumulated markup,
@@ -1708,9 +1724,11 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
 
     from .shopify import update_shopify_product_prices_with_skus
     success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus)
-    if not success:
+    if success not in ("updated", "unchanged"):
         raise HTTPException(502, "Failed to update Shopify variant prices")
 
+    mapping.price_mode = "increase"
+    mapping.price_increase = total_increase
     db.commit()
 
     return {
@@ -1957,16 +1975,16 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
         raise HTTPException(400, "increase_by amount is required")
     try:
         increase_by = float(increase_by)
-    except ValueError:
+    except (TypeError, ValueError):
         raise HTTPException(400, "Invalid amount")
+    import math
+    if not math.isfinite(increase_by):
+        raise HTTPException(400, "Increase must be finite")
 
     # NOTE: Each "Increase Price" click SETS the markup to this amount,
     # replacing any previous increase — it does NOT stack on top of prior
     # increases. So +$5 then +$2 results in a final markup of +$2 above
     # the AliExpress base price, not +$7.
-    product.price_mode = "increase"
-    product.price_increase = increase_by
-    product.custom_price = None
 
     try:
         latest_data = get_product(product.aliexpress_id, db)
@@ -1986,9 +2004,12 @@ def increase_imported_product_price(product_id: int, payload: dict, db: Session 
             sku["price"] = str(new_price)
 
     success = update_shopify_product_prices_with_skus(product.shopify_product_id, skus)
-    if not success:
+    if success not in ("updated", "unchanged"):
         raise HTTPException(502, "Failed to update Shopify variant prices")
 
+    product.price_mode = "increase"
+    product.price_increase = increase_by
+    product.custom_price = None
     original_price = latest_data.get("sale_price") or latest_data.get("original_price")
     if original_price:
         product.original_price = original_price
@@ -2169,17 +2190,17 @@ def bulk_increase_imported_products(
 
     results = []
     for prod in products:
-        # Update stored price_increase for future syncs
-        prod.price_increase = increase_by
-        # Immediately apply increase to Shopify
-        success = increase_shopify_product_price(prod.shopify_product_id, increase_by)
-        results.append({
-            "id": prod.id,
-            "aliexpress_id": prod.aliexpress_id,
-            "success": success
-        })
-    db.commit()
-    return {"message": f"Bulk increase applied to {len(results)} products", "results": results}
+        result = {"id": prod.id, "aliexpress_id": prod.aliexpress_id}
+        try:
+            increase_imported_product_price(prod.id, {"increase_by": increase_by}, db)
+            result["success"] = True
+        except Exception as exc:
+            db.rollback()
+            result.update(success=False, error=str(getattr(exc, "detail", exc)))
+        results.append(result)
+    succeeded = sum(row["success"] for row in results)
+    return {"message": f"Increase saved for {succeeded}/{len(results)} products",
+            "failed": len(results) - succeeded, "results": results}
 
 
 # ---------- BULK INCREASE FOR MAPPED PRODUCTS ----------
@@ -2214,28 +2235,29 @@ def bulk_increase_mappings(
     if not mappings:
         raise HTTPException(404, "No active mappings found")
 
-    from .shopify import increase_shopify_product_price
-
     results = []
     for m in mappings:
         try:
-            success = increase_shopify_product_price(m.shopify_product_id, increase_by)
+            increase_mapping_price(m.id, {"increase_by": increase_by}, db)
             results.append({
                 "id": m.id,
                 "aliexpress_id": m.aliexpress_id,
                 "shopify_product_id": m.shopify_product_id,
-                "success": success
+                "success": True
             })
         except Exception as e:
+            db.rollback()
             results.append({
                 "id": m.id,
                 "aliexpress_id": m.aliexpress_id,
                 "success": False,
-                "error": str(e)
+                "error": str(getattr(e, "detail", e))
             })
 
+    succeeded = sum(row["success"] for row in results)
     return {
-        "message": f"Bulk increase processed for {len(results)} mapping(s)",
+        "message": f"Increase saved for {succeeded}/{len(results)} mapping(s)",
+        "failed": len(results) - succeeded,
         "results": results
     }
 

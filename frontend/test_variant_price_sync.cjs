@@ -88,6 +88,9 @@ async function checkMatchingTables() {
     fetchWithRetry: async () => ({ok: true, json: async () => ({variants: [
       {variant_id: 1, label: 'Red', price: '17.00', price_increase: 5, supplier_price_change: '-2.00'},
       {variant_id: 2, label: 'LCD', price: '62.92', price_increase: 10, supplier_price_change: '0.00'},
+      {variant_id: 3, label: 'Battery', price: '241.09', price_increase: 0,
+        supplier_price_change: '0.20', supplier_previous_price: '240.89', supplier_current_price: '241.09',
+        supplier_price_changed_at: '2026-10-21T04:31:54Z'},
     ]})}),
     fetch: async () => ({ok: true, json: async () => ({locks: {}})}),
     buildLockIcons: () => 'locks', buildMappingLockIcons: () => 'locks',
@@ -108,6 +111,9 @@ async function checkMatchingTables() {
   for (const table of [imported, mapped]) {
     assert.match(table, /\+\$5\.00/);
     assert.match(table, /-\$2\.00/);
+    assert.match(table, /\+\$0\.20/);
+    assert.match(table, /Supplier price: \$240\.89 to \$241\.09 on /);
+    assert.doesNotMatch(table, /resets to zero after successful price sync|indication resets/);
     assert.match(table, /supplier-change-heading/);
     assert.match(table, /variant-table-scroll/);
     assert.match(table, /No supplier price movement recorded/);
@@ -205,6 +211,12 @@ function checkStockOnlyEdits() {
 
 (async () => {
   const routing = vm.createContext({});
+  load('bulkIncreaseMessage', routing);
+  assert.equal(routing.bulkIncreaseMessage({message: 'Increase saved for 1/1 products',
+    results: [{success: true}]}), 'Increase saved for 1/1 products');
+  assert.match(routing.bulkIncreaseMessage({message: 'Increase saved for 0/1 products',
+    results: [{success: false, aliexpress_id: '3256810271608422', error: 'Shopify update failed'}]}),
+    /3256810271608422: Shopify update failed/);
   load('formatIncrease', routing);
   load('getDraftVariantIncrease', routing);
   load('refreshManualIncrease', routing);

@@ -25,7 +25,7 @@ def load_main_functions(namespace, *names):
         if isinstance(node, ast.FunctionDef) and node.name in (*names, "_parse_inventory_edits"):
             node.decorator_list = []
             node.returns = None
-            node.args.defaults = []
+            node.args.defaults = [node.args.defaults[-1]] if node.args.defaults and isinstance(node.args.defaults[-1], ast.Constant) else []
             for arg in node.args.args:
                 arg.annotation = None
             functions.append(node)
@@ -351,7 +351,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.assertEqual(self.prices()[:2], [17, 10])
         self.assertEqual(state[2]["supplier_history"]["change"], "2.00")
         from app.price_history import supplier_change_summary
-        self.assertEqual(supplier_change_summary(state[1]["supplier_history"])["supplier_price_change"], "0.00")
+        self.assertEqual(supplier_change_summary(state[1]["supplier_history"])["supplier_price_change"], "2.00")
         self.assertEqual(supplier_change_summary(state[2]["supplier_history"])["supplier_price_change"], "2.00")
 
         for sku in self.skus:
@@ -363,6 +363,9 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.sync()
         latest = shopify.get_variant_sync_state("123")[1]["supplier_history"]
         self.assertEqual(latest["change"], "0.00")
+        self.assertEqual(supplier_change_summary(latest)["supplier_price_change"], "-5.00")
+        self.assertEqual(supplier_change_summary(latest)["supplier_previous_price"], "14.00")
+        self.assertEqual(supplier_change_summary(latest)["supplier_current_price"], "9.00")
         self.assertIsNone(latest["changed_at"])
         self.bulk.reset_mock()
         self.assertEqual(self.sync(), "unchanged")
@@ -486,7 +489,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.set_lock.assert_not_called()
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True), \
              patch("app.database.SessionLocal", return_value=db):
-            ns["sync_mapped_product_price"]("mapped-ae", db)
+            ns["sync_mapped_product_price"]("mapped-ae", db, reset_increases=True)
             self.assertEqual(self.prices(), [12, 15, 12, 12])
             for sku in self.skus:
                 sku["sale_price"] = "9"
@@ -499,7 +502,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         mapping, db, ns = self.mapping_context("increase", 4)
         self.increase(1, 3)
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
-            ns["sync_mapped_product_price"]("mapped-ae", db)
+            ns["sync_mapped_product_price"]("mapped-ae", db, reset_increases=True)
         self.assertEqual(self.prices(), [12, 12, 12, 12])
         self.assertEqual(mapping.price_increase, 0)
         self.assertEqual(mapping.price_mode, "auto")
@@ -510,7 +513,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         mapping, db, ns = self.mapping_context("variant_increase", 4)
         with patch.object(shopify, "update_shopify_product_prices_with_skus", return_value="failed"):
             with self.assertRaises(HTTPException) as error:
-                ns["sync_mapped_product_price"]("mapped-ae", db)
+                ns["sync_mapped_product_price"]("mapped-ae", db, reset_increases=True)
         self.assertEqual(error.exception.status_code, 502)
         self.assertEqual(mapping.price_mode, "variant_increase")
         self.assertEqual(mapping.price_increase, 4)
@@ -521,7 +524,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         for vid in (1, 2, 3, 4):
             self.increase(vid, vid * 3)
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
-            result = ns["sync_mapped_product_price"]("mapped-ae", db)
+            result = ns["sync_mapped_product_price"]("mapped-ae", db, reset_increases=True)
         self.assertEqual(result["price_mode"], "auto")
         self.assertEqual(self.prices(), [12] * 4)
         self.assertEqual([float(n["increase"]["value"]) for n in self.nodes], [0] * 4)
@@ -550,7 +553,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         self.skus = [{"sku_id": f"ae-{i}", "sale_price": str(price)}
                      for i, price in enumerate([120, 60, 90, 70], 1)]
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
-            ns["sync_mapped_product_price"]("mapped-ae", db)
+            ns["sync_mapped_product_price"]("mapped-ae", db, reset_increases=True)
         self.assertEqual(self.prices(), [110, 50, 90, 70])
         self.assertEqual(mapping.price_increase, 0)
         self.assertEqual(mapping.price_mode, "variant_manual")
@@ -572,7 +575,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
             ns["sync_product_price"](1, db)
             self.assertEqual(self.prices(), [110, 50, 120, 110])
-            ns["manual_product_price_sync"](1, db)
+            ns["manual_product_price_sync"](1, db, reset_increases=True)
             self.assertEqual(product.price_increase, 0)
             self.assertEqual(product.price_mode, "variant_manual")
             self.assertEqual(self.prices(), [110, 50, 90, 70])
@@ -584,7 +587,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         load_main_functions(ns, "manual_product_price_sync")
         for vid in (1, 2, 3, 4):
             self.increase(vid, vid * 2)
-        result = ns["manual_product_price_sync"](1, db)
+        result = ns["manual_product_price_sync"](1, db, reset_increases=True)
         self.assertEqual(result["price_mode"], "auto")
         self.assertEqual(product.price_increase, 0)
         self.assertIsNone(product.custom_price)
@@ -598,7 +601,7 @@ class VariantPriceSyncTests(unittest.TestCase):
         ns["update_shopify_product_prices_with_skus"] = Mock(return_value="failed")
         load_main_functions(ns, "manual_product_price_sync")
         with self.assertRaises(HTTPException):
-            ns["manual_product_price_sync"](1, db)
+            ns["manual_product_price_sync"](1, db, reset_increases=True)
         self.assertEqual(product.price_mode, "variant_increase")
         self.assertEqual(product.price_increase, 4)
         db.commit.assert_not_called()
@@ -635,6 +638,80 @@ class VariantPriceSyncTests(unittest.TestCase):
                         with patch("app.database.SessionLocal", return_value=db):
                             ns["sync_all_mapped_products_background"]()
                 self.assertEqual(self.prices(), [10, 107, 107, 107])
+
+    def test_sync_now_preserves_shared_and_variant_increases_by_default(self):
+        for imported in (True, False):
+            with self.subTest(imported=imported):
+                record, db, ns = self.mapping_context("variant_increase", 25)
+                record.custom_price = None
+                ns["ImportedProduct"] = ImportedProduct
+                load_main_functions(ns, "manual_product_price_sync")
+                self.increase(1, 10)
+                self.lock(2, "price", True)
+                self.nodes[1]["price"] = "99"
+                with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
+                    if imported:
+                        result = ns["manual_product_price_sync"](1, db)
+                    else:
+                        result = ns["sync_mapped_product_price"]("mapped-ae", db)
+                self.assertEqual(self.prices(), [47, 99, 37, 37])
+                self.assertEqual(record.price_increase, 25)
+                self.assertEqual(record.price_mode, "variant_increase")
+                self.assertIn("preserved", result["message"])
+                self.assertEqual(float(self.nodes[0]["increase"]["value"]), 10)
+
+    def test_bulk_increase_survives_sync_and_repeated_amount_replaces_previous(self):
+        for imported in (True, False):
+            with self.subTest(imported=imported):
+                record, db, ns = self.mapping_context()
+                record.custom_price = None
+                record.original_price = "10"
+                ns["ImportedProduct"] = ImportedProduct
+                load_main_functions(ns, "bulk_increase_imported_products", "bulk_increase_mappings",
+                                    "increase_imported_product_price", "increase_mapping_price",
+                                    "manual_product_price_sync", "sync_product_price")
+                bulk = ns["bulk_increase_imported_products" if imported else "bulk_increase_mappings"]
+                ids = "product_ids" if imported else "mapping_ids"
+                for amount in (25, 10):
+                    result = bulk({ids: [1], "increase_by": amount}, db)
+                    self.assertEqual(result["failed"], 0)
+                    self.assertEqual(record.price_increase, amount)
+                    self.assertEqual(self.prices(), [12 + amount] * 4)
+                with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True):
+                    if imported:
+                        ns["manual_product_price_sync"](1, db)
+                    else:
+                        ns["sync_mapped_product_price"]("mapped-ae", db)
+                self.assertEqual(self.prices(), [22] * 4)
+                for sku in self.skus:
+                    sku["sale_price"] = "15"
+                with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True), \
+                     patch("app.database.SessionLocal", return_value=db):
+                    if imported:
+                        ns["sync_product_price"](1, db)
+                    else:
+                        ns["sync_all_mapped_products_background"]()
+                self.assertEqual(self.prices(), [25] * 4)
+                for sku in self.skus:
+                    sku["sale_price"] = "12"
+
+    def test_failed_increase_is_reported_and_does_not_change_saved_rule(self):
+        for imported in (True, False):
+            with self.subTest(imported=imported):
+                record, db, ns = self.mapping_context("increase", 7)
+                ns["ImportedProduct"] = ImportedProduct
+                ns["update_shopify_product_prices_with_skus"] = Mock(return_value="failed")
+                load_main_functions(ns, "bulk_increase_imported_products", "bulk_increase_mappings",
+                                    "increase_imported_product_price", "increase_mapping_price")
+                bulk = ns["bulk_increase_imported_products" if imported else "bulk_increase_mappings"]
+                ids = "product_ids" if imported else "mapping_ids"
+                with patch.object(shopify, "update_shopify_product_prices_with_skus", return_value="failed"):
+                    result = bulk({ids: [1], "increase_by": 25}, db)
+                self.assertEqual(result["failed"], 1)
+                self.assertFalse(result["results"][0]["success"])
+                self.assertEqual(record.price_increase, 7)
+                db.commit.assert_not_called()
+                db.rollback.assert_called_once()
 
     def test_mapping_delete_verifies_ownership_and_protects_final_variant(self):
         _, db, ns = self.mapping_context()

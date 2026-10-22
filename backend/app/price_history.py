@@ -3,7 +3,22 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 
+def _recover_cleared_movement(history):
+    """Recover an older sync's cleared display only when its delta still exists."""
+    history = dict(history or {})
+    delta = history.get("change")
+    if (history.get("last_change") in (None, "0.00", "0", 0)
+            and delta is not None and Decimal(str(delta)) != 0
+            and history.get("changed_at") and history.get("price") is not None):
+        current = Decimal(str(history["price"]))
+        history.update(last_change=str(delta), last_changed_at=history["changed_at"],
+                       last_from=str((current - Decimal(str(delta))).quantize(Decimal("0.01"))),
+                       last_to=str(current.quantize(Decimal("0.01"))))
+    return history
+
+
 def observe_supplier_price(previous, price):
+    previous = _recover_cleared_movement(previous)
     current = Decimal(str(price)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if not current.is_finite() or current < 0:
         raise ValueError("Invalid supplier price")
@@ -39,7 +54,7 @@ def observe_supplier_price(previous, price):
 
 
 def supplier_change_summary(history):
-    history = history or {}
+    history = _recover_cleared_movement(history)
     return {
         "supplier_price_change": history.get("last_change", history.get("change")),
         "supplier_price_changed_at": history.get("last_changed_at", history.get("changed_at")),

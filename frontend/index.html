@@ -1015,7 +1015,7 @@ function showToast(msg, type="", persistent=false){
       <td>${statusBadge}${editedBadge}${deadBadge}</td>
       <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
       <td><div class="td-actions">
-        <button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
+        <button class="btn btn-primary btn-icon sm" title="Sync AliExpress prices and keep saved increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncProductImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Increase Price" onclick="openIncreasePriceModalImported(${p.id})"><i class="ti ti-plus" style="font-size:13px"></i></button>
         <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
@@ -1435,7 +1435,7 @@ async function syncProductPrice(productId){
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress supplier price change; resets to zero after successful price sync">AliExpress<br>Price Changes<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last recorded AliExpress supplier price change; kept after syncing">AliExpress<br>Price Changes<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -1443,7 +1443,7 @@ async function syncProductPrice(productId){
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. After a successful price sync, this indication resets to $0.00. Locked prices keep their indication until unlocked and synced. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. The last actual supplier change stays visible after syncing and unchanged checks; the next supplier price movement replaces it. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
@@ -1903,7 +1903,7 @@ async function syncInventoryFromModal() {
         <td>${modeBadge}</td>
         <td class="td-actions">
           <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openMappingModal(${mj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
-          <button class="btn btn-primary btn-sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
+          <button class="btn btn-primary btn-sm" title="Sync AliExpress prices and keep saved increases" onclick="syncMappedPrice('${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-refresh"></i> Sync Now</button>
           <button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${m.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>
           <button class="btn btn-primary btn-sm" onclick="openIncreasePriceModal(${m.id},'${escapeHtml(m.shopify_product_id)}')"><i class="ti ti-plus"></i> Increase Price</button>
           ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
@@ -2126,11 +2126,15 @@ async function syncMappedPrice(aliexpressId){
     window.bulkProductIds=checked; document.getElementById("bulk-modal").classList.add("open");
   }
   function closeBulkModal(){document.getElementById("bulk-modal").classList.remove("open");}
+  function bulkIncreaseMessage(data) {
+    const failures = (data.results || []).filter(row => !row.success);
+    return data.message + (failures.length ? ": " + failures.map(row => `${row.aliexpress_id || row.id}: ${row.error || 'Save failed'}`).join('; ') : '');
+  }
   async function submitBulkIncrease(){
     const amount=document.getElementById("bulk-amount").value.trim();
     if(!amount){showToast("Enter an amount","err");return;}
     const increase_by=parseFloat(amount); if(isNaN(increase_by)){showToast("Invalid number","err");return;}
-    try{const res=await fetch(`${API}/dashboard/products/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_ids:window.bulkProductIds,increase_by})});if(!res.ok)throw new Error((await res.json()).detail);const d=await res.json();showToast(d.message,"ok");closeBulkModal();loadProducts(prodPage);}
+    try{const res=await fetch(`${API}/dashboard/products/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_ids:window.bulkProductIds,increase_by})});if(!res.ok)throw new Error((await res.json()).detail);const d=await res.json();showToast(bulkIncreaseMessage(d),d.failed?"err":"ok");closeBulkModal();loadProducts(prodPage);}
     catch(e){showToast("Bulk increase failed: "+e.message,"err");}
   }
 
@@ -2145,7 +2149,7 @@ async function syncMappedPrice(aliexpressId){
     const amount=document.getElementById("bulk-mapping-amount").value.trim();
     if(!amount){showToast("Enter an amount","err");return;}
     const increase_by=parseFloat(amount); if(isNaN(increase_by)){showToast("Invalid number","err");return;}
-    try{const res=await fetch(`${API}/mappings/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mapping_ids:window.bulkMappingIds,increase_by})});if(!res.ok){const e=await res.json();throw new Error(e.detail||"Bulk increase failed");}const d=await res.json();showToast(d.message,"ok");closeBulkMappingModal();loadMappings(mappingPage);}
+    try{const res=await fetch(`${API}/mappings/bulk-increase`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mapping_ids:window.bulkMappingIds,increase_by})});if(!res.ok){const e=await res.json();throw new Error(e.detail||"Bulk increase failed");}const d=await res.json();showToast(bulkIncreaseMessage(d),d.failed?"err":"ok");closeBulkMappingModal();loadMappings(mappingPage);}
     catch(e){showToast("Bulk increase failed: "+e.message,"err");}
   }
 
@@ -2364,8 +2368,8 @@ async function pushInventoryToShopify() {
             <td style="font-size:11px;color:var(--t3);white-space:nowrap">${date}</td>
             <td><div class="td-actions">
               ${p.source === 'mapping'
-                ? `<button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
-                : `<button class="btn btn-primary btn-icon sm" title="Restore AliExpress prices and clear unlocked increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+                ? `<button class="btn btn-primary btn-icon sm" title="Sync AliExpress prices and keep saved increases" onclick="syncMappedPrice('${p.aliexpress_id}')"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
+                : `<button class="btn btn-primary btn-icon sm" title="Sync AliExpress prices and keep saved increases" onclick="syncProductPrice(${p.id})"><i class="ti ti-refresh" style="font-size:13px"></i></button>`
               }
               ${p.source === 'mapping'
                 ? `<button class="btn btn-primary btn-icon sm" title="Sync SKU Images" onclick="syncMappingImages(${p.id})"><i class="ti ti-photo-scan" style="font-size:13px"></i></button>`
@@ -3005,7 +3009,7 @@ async function loadVariantsForMappingModal(mappingId) {
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">Variant</th>
             <th style="text-align:left;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border)">SKU</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:120px">Final Shopify Price (USD)</th>
-            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="AliExpress supplier price change; resets to zero after successful price sync">AliExpress<br>Price Changes<br>(USD)</th>
+            <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Manual Increase (USD)</th><th class="supplier-change-heading" title="Last recorded AliExpress supplier price change; kept after syncing">AliExpress<br>Price Changes<br>(USD)</th>
             <th style="text-align:right;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:90px">Stock</th>
             <th style="text-align:center;padding:8px 12px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:110px">Locks</th>
             <th style="text-align:center;padding:8px 8px;color:var(--t3);font-weight:600;font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);width:50px">Delete</th>
@@ -3013,7 +3017,7 @@ async function loadVariantsForMappingModal(mappingId) {
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>
-      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. After a successful price sync, this indication resets to $0.00. Locked prices keep their indication until unlocked and synced. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
+      <div class="variant-price-note">Click + to set the manual adjustment: positive to increase, negative to decrease, or 0 to clear. The latest amount replaces the previous adjustment (5 then 2 means +$2). Save to apply your changes. AliExpress Price Changes shows the last actual supplier price movement: + means an increase and - means a decrease. The last actual supplier change stays visible after syncing and unchanged checks; the next supplier price movement replaces it. Manual increases are kept. A dash means no supplier baseline yet. Hover over the amount to see the recorded prices and date. Unlocked Shopify prices follow supplier increases and decreases, plus your saved manual adjustment.</div>
       <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn btn-xs" onclick="applyPriceToAllMappingVariants()"><i class="ti ti-copy"></i> Apply first price to all</button>
         <button type="button" class="btn btn-xs" onclick="increaseAllMappingVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>

@@ -1105,11 +1105,8 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
             # A repaired link may have observed a different supplier variant.
             # Establish its baseline without claiming that difference was a price move.
             history = observe_supplier_price(None if repairing_link else previous, supplier_price)
-            if not variant["locks"]["price"]:
-                # Persist the acknowledgement with the price in the same atomic
-                # variant update. Failed writes and locked prices keep the indication.
-                history.update(last_change="0.00", last_changed_at=None,
-                               last_from=None, last_to=None)
+            # Keep the last actual supplier movement visible after applying it.
+            # A successful selling-price sync is not a new supplier observation.
             update = {"variant_id": vid}
             if repairing_link:
                 update["ae_sku_id"] = str(sku["sku_id"])
