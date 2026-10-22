@@ -124,6 +124,31 @@ async function checkMatchingTables() {
   assert.match(mapped, /deleteMappedVariant\(1\)/);
 }
 
+function checkBulkAdjustSkipsLockedPrices() {
+  for (const [handler, collect] of [['increaseAllVariants', 'getEditedVariantPrices'],
+    ['increaseAllMappingVariants', 'getEditedMappingVariantPrices']]) {
+    const inputs = [true, false].map((locked, i) => ({value: locked ? '1.00' : '20.00',
+      dataset: {variantId: String(i + 1), priceLocked: String(locked), dirty: 'false',
+        originalPrice: locked ? '1.00' : '20.00', priceIncrease: '0'},
+      closest: () => ({querySelector: () => ({})})}));
+    const lockedBefore = JSON.stringify(inputs[0]);
+    let prompts = 0;
+    const context = vm.createContext({prompt: () => { prompts++; return '-5'; }, showToast: () => {},
+      document: {querySelectorAll: () => inputs, querySelector: () => null}});
+    for (const name of ['formatIncrease', 'getDraftVariantIncrease', 'refreshManualIncrease',
+      'addVariantPriceIncrease', handler, collect]) load(name, context);
+    context[handler]();
+    assert.equal(JSON.stringify(inputs[0]), lockedBefore);
+    assert.equal(inputs[1].value, '15.00');
+    assert.equal(JSON.stringify(context[collect]()), '[{"variant_id":"2","price":"15.00","price_increase":-5}]');
+    inputs[1].dataset.priceLocked = 'true';
+    const before = JSON.stringify(inputs);
+    context[handler]();
+    assert.equal(prompts, 1);
+    assert.equal(JSON.stringify(inputs), before);
+  }
+}
+
 function checkSignedAdjustments() {
   let answer = '10';
   const errors = [];
@@ -236,6 +261,7 @@ function checkStockOnlyEdits() {
   await checkForm(true);
   await checkMatchingTables();
   checkSignedAdjustments();
+  checkBulkAdjustSkipsLockedPrices();
   checkLatestVariantAdjustment();
   checkStockOnlyEdits();
   console.log('Both forms preserve individual increases through lock/unlock; JavaScript syntax passed.');

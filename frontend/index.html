@@ -2628,9 +2628,9 @@ async function pushInventoryToShopify() {
   }
 
   function increaseAllVariants() {
-    const inputs = document.querySelectorAll(".variant-price-input");
-    if (!inputs.length) return;
-    const amount = prompt("Adjust ALL variant prices: positive to increase, negative to decrease", "1.00");
+    const inputs = Array.from(document.querySelectorAll(".variant-price-input")).filter(input => input.dataset.priceLocked !== "true");
+    if (!inputs.length) { showToast("No unlocked variant prices to adjust", "info"); return; }
+    const amount = prompt("Adjust all UNLOCKED variant prices: positive to increase, negative to decrease", "1.00");
     if (amount === null) return;
     const inc = Number(amount);
     if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a positive amount to increase or a negative amount to decrease", "err"); return; }
@@ -2638,7 +2638,7 @@ async function pushInventoryToShopify() {
     inputs.forEach(inp => {
       addVariantPriceIncrease(inp, inc);
     });
-    showToast(`All variants adjusted by ${formatIncrease(inc)}`, "ok");
+    showToast(`${inputs.length} unlocked variant(s) adjusted by ${formatIncrease(inc)}`, "ok");
   }
 
   // ── BACKFILL SKUS ──
@@ -3105,9 +3105,9 @@ function increaseMappingVariantPrice(btn, variantId) {
   }
 
 function increaseAllMappingVariants() {
-    const inputs = document.querySelectorAll(".mm-variant-price-input");
-    if (!inputs.length) return;
-    const amount = prompt("Adjust ALL variant prices: positive to increase, negative to decrease", "1.00");
+    const inputs = Array.from(document.querySelectorAll(".mm-variant-price-input")).filter(input => input.dataset.priceLocked !== "true");
+    if (!inputs.length) { showToast("No unlocked variant prices to adjust", "info"); return; }
+    const amount = prompt("Adjust all UNLOCKED variant prices: positive to increase, negative to decrease", "1.00");
     if (amount === null) return;
     const inc = Number(amount);
     if (!Number.isFinite(inc) || inc === 0) { showToast("Enter a positive amount to increase or a negative amount to decrease", "err"); return; }
@@ -3115,7 +3115,7 @@ function increaseAllMappingVariants() {
     inputs.forEach(inp => {
       addVariantPriceIncrease(inp, inc);
     });
-    showToast(`All variants adjusted by ${formatIncrease(inc)}`, "ok");
+    showToast(`${inputs.length} unlocked variant(s) adjusted by ${formatIncrease(inc)}`, "ok");
   }
 
 async function refreshMappingDetails(){
