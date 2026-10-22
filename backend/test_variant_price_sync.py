@@ -713,6 +713,24 @@ class VariantPriceSyncTests(unittest.TestCase):
                 db.commit.assert_not_called()
                 db.rollback.assert_called_once()
 
+    def test_mapping_renamed_variants_sync_prices_by_saved_id(self):
+        record, db, ns = self.mapping_context("increase", 5)
+        for i, node in enumerate(self.nodes):
+            node["selectedOptions"] = [{"name": "Custom name", "value": f"Color {(i + 1) % 4 + 1}"}]
+        for sku in self.skus:
+            sku["sale_price"] = str(int(sku["sku_id"].split('-')[1]) * 10)
+        self.increase(1, 2)
+        self.lock(4, "price", True)
+        with patch.object(shopify, "update_shopify_product_inventory_with_skus", return_value=True) as inventory, \
+             patch("app.database.SessionLocal", return_value=db):
+            ns["sync_mapped_product_price"]("mapped-ae", db)
+            self.assertEqual(self.prices(), [17, 25, 35, 10])
+            self.assertTrue(inventory.call_args.kwargs["prefer_sku_ids"])
+            ns["sync_all_mapped_products_background"]()
+            self.assertEqual(self.prices(), [17, 25, 35, 10])
+            self.assertTrue(inventory.call_args.kwargs["prefer_sku_ids"])
+        self.assertEqual([n["aeSku"]["value"] for n in self.nodes], [f"ae-{i}" for i in (1,2,3,4)])
+
     def test_mapping_delete_verifies_ownership_and_protects_final_variant(self):
         _, db, ns = self.mapping_context()
         response = Mock(status_code=200)

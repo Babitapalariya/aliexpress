@@ -7,6 +7,23 @@ from app import shopify, sku_links
 
 
 class DynamicSupplierLinksTests(TestCase):
+    def test_mapping_ids_win_even_when_names_are_swapped(self):
+        skus = [{"sku_id": "b", "label": "B"}, {"sku_id": "a", "label": "A"}]
+        variants = {1: {"label": "B", "ae_sku_id": "a"},
+                    2: {"label": "A", "ae_sku_id": "b"}}
+        self.assertEqual(shopify._match_supplier_variants(variants, skus, prefer_sku_ids=True),
+                         {1: skus[1], 2: skus[0]})
+
+    def test_mapping_invalid_ids_do_not_fall_back_to_names(self):
+        skus = [{"sku_id": "a", "label": "A"}, {"sku_id": "b", "label": "B"}]
+        for variants in (
+            {1: {"label": "A", "ae_sku_id": "deleted"}},
+            {1: {"label": "A", "ae_sku_id": "a"}, 2: {"label": "B", "ae_sku_id": "a"}},
+        ):
+            self.assertEqual(shopify._match_supplier_variants(variants, skus, prefer_sku_ids=True), {})
+        self.assertEqual(shopify._match_supplier_variants(
+            {1: {"label": "A", "ae_sku_id": "a"}}, skus + [skus[0]], prefer_sku_ids=True), {})
+
     def test_design_aliases_and_nozzle_absence_use_labels_not_order(self):
         skus = [{"sku_id": str(i), "label": label} for i, label in enumerate(
             ["B with nozzle", "A", "A with nozzle", "B"])]

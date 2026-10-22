@@ -3,9 +3,9 @@ from fastapi import HTTPException
 from . import shopify
 
 
-def inspect_links(product_id, skus):
+def inspect_links(product_id, skus, *, prefer_sku_ids=False):
     state = shopify.get_variant_sync_state(product_id)
-    matches = shopify._match_supplier_variants(state, skus)
+    matches = shopify._match_supplier_variants(state, skus, prefer_sku_ids=prefer_sku_ids)
     return {
         "variants": [{"variant_id": str(vid), "label": row["label"],
                       "current_sku_id": row["ae_sku_id"],

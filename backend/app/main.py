@@ -1206,7 +1206,7 @@ def sync_mapping_inventory(mapping_id: int, db: Session = Depends(get_db)):
         raise HTTPException(500, "No SKUs found in AliExpress product")
 
     inventory_report = {}
-    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus, strict=True, report=inventory_report)
+    inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, skus, strict=True, report=inventory_report, prefer_sku_ids=True)
 
     return {
         **inventory_report,
@@ -1319,12 +1319,13 @@ def sync_mapped_product_price(aliexpress_id: str, db: Session = Depends(get_db),
         from .shopify import get_locked_variant_ids
         has_price_locks = bool(get_locked_variant_ids(mapping.shopify_product_id, "price"))
         price_result = update_shopify_product_prices_with_skus(
-            mapping.shopify_product_id, aliexpress_skus, reset_increases=reset_increases
+            mapping.shopify_product_id, aliexpress_skus,
+            reset_increases=reset_increases, prefer_sku_ids=True,
         )
         if price_result == "failed":
             raise HTTPException(502, "Failed to update Shopify variant prices")
 
-        inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus)
+        inventory_updated = update_shopify_product_inventory_with_skus(mapping.shopify_product_id, aliexpress_skus, prefer_sku_ids=True)
 
         if reset_increases:
             mapping.price_mode = "variant_manual" if has_price_locks else "auto"
@@ -1381,7 +1382,7 @@ def sync_all_mapped_products(background_tasks: BackgroundTasks, db: Session = De
                                 sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                                 sku["sale_price"] = adjusted
                                 sku["price"] = adjusted
-                    result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
+                    result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus, prefer_sku_ids=True)
                     print(f"[SyncMapped] Variant price result for {m.aliexpress_id}: {result}")
                 except Exception as e:
                     print(f"[SyncMapped] Error for {m.aliexpress_id}: {e}")
@@ -1477,8 +1478,8 @@ def sync_all_mapped_products_background():
                             sku.setdefault("_supplier_price", sku.get("sale_price") or sku.get("price"))
                             sku["sale_price"] = str(float(price) + m.price_increase)
                             sku["price"] = str(float(price) + m.price_increase)
-                price_result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus)
-                update_shopify_product_inventory_with_skus(m.shopify_product_id, skus)
+                price_result = update_shopify_product_prices_with_skus(m.shopify_product_id, skus, prefer_sku_ids=True)
+                update_shopify_product_inventory_with_skus(m.shopify_product_id, skus, prefer_sku_ids=True)
                 print(f"[Hourly] Price sync for {m.aliexpress_id}: {price_result} (mode={m.price_mode})")
             except Exception as e:
                 db.rollback()
@@ -1723,7 +1724,7 @@ def increase_mapping_price(mapping_id: int, payload: dict, db: Session = Depends
             sku["price"] = str(new_price)
 
     from .shopify import update_shopify_product_prices_with_skus
-    success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus)
+    success = update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus, prefer_sku_ids=True)
     if success not in ("updated", "unchanged"):
         raise HTTPException(502, "Failed to update Shopify variant prices")
 
@@ -2313,7 +2314,7 @@ def reset_mapping_mode(mapping_id: int, db: Session = Depends(get_db)):
         raw = get_product(mapping.aliexpress_id, db)
         skus = raw.get("skus", [])
         if skus:
-            update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus)
+            update_shopify_product_prices_with_skus(mapping.shopify_product_id, skus, prefer_sku_ids=True)
     except Exception as e:
         print(f"[ResetMode] Immediate sync after reset failed (non-fatal): {e}")
 
@@ -5179,7 +5180,7 @@ def inspect_supplier_links(kind: str, record_id: int, db: Session = Depends(get_
     skus = get_product(record.aliexpress_id, db).get("skus", [])
     if not skus:
         raise HTTPException(409, "AliExpress has no supplier options available for this product")
-    return inspect_links(record.shopify_product_id, skus)
+    return inspect_links(record.shopify_product_id, skus, prefer_sku_ids=kind == "mappings")
 
 
 @app.post("/supplier-links/{kind}/{record_id}")

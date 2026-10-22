@@ -1001,11 +1001,12 @@ def _sku_label_key(label):
     return tuple(sorted(re.sub(r"\s+", "", part) for part in label.split("/")))
 
 
-def _match_supplier_variants(variants, skus):
+def _match_supplier_variants(variants, skus, *, prefer_sku_ids=False):
     """Return one-to-one matches, never assigning by supplier array position.
 
     A unique complete option label repairs stale or previously positional links.
     Existing IDs still support custom Shopify titles. Ambiguities fail closed.
+    Mapping syncs use prefer_sku_ids to keep saved links authoritative on rename.
     """
     by_label, by_id, by_alias = {}, {}, {}
     def alias(label):
@@ -1034,7 +1035,11 @@ def _match_supplier_variants(variants, skus):
         label = _sku_label_key(variant.get("label"))
         candidates = by_label.get(label, [])
         id_candidates = by_id.get(str(variant.get("ae_sku_id")), [])
-        if variant.get("sku_link_verified") and id_candidates:
+        if prefer_sku_ids and variant.get("ae_sku_id"):
+            # A mapped variant's saved identity survives any Shopify rename.
+            # Missing/duplicate supplier IDs require explicit link repair.
+            candidates = id_candidates
+        elif variant.get("sku_link_verified") and id_candidates:
             candidates = id_candidates
         elif len(candidates) > 1:
             candidates = [i for i in candidates if i in id_candidates]
@@ -1044,9 +1049,11 @@ def _match_supplier_variants(variants, skus):
                 candidates = [0]
         if len(candidates) == 1:
             proposed[vid] = candidates[0]
-    verified_indices = {index for vid, index in proposed.items() if variants[vid].get("sku_link_verified")}
+    def authoritative(vid):
+        return variants[vid].get("sku_link_verified") or (prefer_sku_ids and variants[vid].get("ae_sku_id"))
+    verified_indices = {index for vid, index in proposed.items() if authoritative(vid)}
     proposed = {vid: index for vid, index in proposed.items()
-                if index not in verified_indices or variants[vid].get("sku_link_verified")}
+                if index not in verified_indices or authoritative(vid)}
     counts = {}
     for index in proposed.values():
         counts[index] = counts.get(index, 0) + 1
@@ -1055,7 +1062,7 @@ def _match_supplier_variants(variants, skus):
     # collisions, including an alias claiming an already assigned supplier SKU.
     aliases = {}
     for vid, variant in variants.items():
-        if vid in proposed:
+        if vid in proposed or (prefer_sku_ids and variant.get("ae_sku_id")):
             continue
         candidates = by_alias.get(alias(variant.get("label")), [])
         if len(candidates) == 1 and candidates[0] not in proposed.values():
@@ -1066,7 +1073,7 @@ def _match_supplier_variants(variants, skus):
     return {vid: skus[index] for vid, index in matched.items()}
 
 
-def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list, *, reset_increases: bool = False) -> str:
+def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_skus: list, *, reset_increases: bool = False, prefer_sku_ids: bool = False) -> str:
     """Sync each unlocked variant from its own supplier price and saved increase."""
     from decimal import Decimal, ROUND_HALF_UP
     from .price_history import observe_supplier_price
@@ -1077,7 +1084,7 @@ def update_shopify_product_prices_with_skus(shopify_product_id: str, aliexpress_
         variants = get_variant_sync_state(shopify_product_id)
         if not variants:
             return "failed"
-        matched = _match_supplier_variants(variants, aliexpress_skus)
+        matched = _match_supplier_variants(variants, aliexpress_skus, prefer_sku_ids=prefer_sku_ids)
         missing = [f"{v['label']} ({vid})" for vid, v in variants.items()
                    if not v["locks"]["price"] and vid not in matched]
         if missing:
@@ -1570,7 +1577,7 @@ def increase_shopify_product_price(shopify_product_id: str, increase_by: float) 
 
 
 
-def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list, *, strict: bool = False, report: dict = None) -> bool:
+def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpress_skus: list, *, strict: bool = False, report: dict = None, prefer_sku_ids: bool = False) -> bool:
     """
     Push AliExpress per-SKU stock to matching Shopify variants' inventory_quantity.
 
@@ -1654,7 +1661,7 @@ def update_shopify_product_inventory_with_skus(shopify_product_id: str, aliexpre
     matches = _match_supplier_variants({v["id"]: {
         "label": _variant_label(v), "ae_sku_id": variant_ae_map.get(v["id"]),
         "sku_link_verified": pricing_state.get(v["id"], {}).get("sku_link_verified", False),
-    } for v in shopify_variants}, aliexpress_skus)
+    } for v in shopify_variants}, aliexpress_skus, prefer_sku_ids=prefer_sku_ids)
 
     link_updates = [{"variant_id": vid, "ae_sku_id": str(sku["sku_id"]), "supplier_history": None,
                      "supplier_history_id": pricing_state.get(vid, {}).get("supplier_history_id")}

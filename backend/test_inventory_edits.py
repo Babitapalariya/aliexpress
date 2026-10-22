@@ -9,6 +9,25 @@ from test_variant_price_sync import load_main_functions
 
 
 class InventoryEditsTests(TestCase):
+    def test_mapping_stock_uses_saved_ids_after_shopify_rename(self):
+        product = Mock(json=lambda: {"product": {"variants": [
+            {"id": 1, "option1": "B"}, {"id": 2, "option1": "A"}]}})
+        locations = Mock(json=lambda: {"locations": [{"id": 7}]})
+        state = {1: {"ae_sku_id": "a"}, 2: {"ae_sku_id": "b"}}
+        skus = [{"sku_id": "b", "label": "B", "stock": 0},
+                {"sku_id": "a", "label": "A", "stock": 17}]
+        with patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
+             patch.object(shopify, "_h", return_value={}), \
+             patch.object(shopify.requests, "get", side_effect=[product, locations]), \
+             patch.object(shopify, "get_locked_variant_ids", return_value=set()), \
+             patch.object(shopify, "get_variant_sync_state", return_value=state), \
+             patch.object(shopify, "bulk_update_variant_prices") as links, \
+             patch.object(shopify, "set_variant_inventory_quantities", return_value=2) as writer:
+            self.assertTrue(shopify.update_shopify_product_inventory_with_skus(
+                "123", skus, strict=True, prefer_sku_ids=True))
+            writer.assert_called_once_with("123", {1: 17, 2: 0})
+            links.assert_not_called()
+
     def test_stock_only_save_does_not_change_price_or_mode(self):
         for name in ("update_variant_prices", "update_mapping_variant_prices"):
             record = SimpleNamespace(shopify_product_id="123", price_mode="variant_manual")
