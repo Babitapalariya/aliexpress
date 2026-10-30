@@ -1204,19 +1204,42 @@ async function syncProductPrice(productId){
           ${nameList.length?`<div style="font-size:10px;opacity:.65">${nameList.join(", ")}${extra}</div>`:""}
         </div>`;
         break;}
-      case "skip": foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Already in Shopify</div>`;break;
+      case "skip": foot=`<div class="pc-status pcs-skip"><i class="ti ti-alert-circle"></i> Import conflict</div><div style="font-size:11px;margin-top:6px">${escapeHtml(p.err||"Please check the existing product link.")}</div>`;break;
       case "ierr": foot=`<div class="pc-status pcs-err"><i class="ti ti-circle-x"></i> Import failed</div><div style="font-size:10px;color:var(--red);text-align:center;margin-top:4px">${escapeHtml(p.err||"")}</div><button class="btn btn-xs" style="width:100%;justify-content:center;margin-top:8px" onclick="importOne('${id}')"><i class="ti ti-refresh"></i> Retry</button>`;break;
       default: foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;
     }
     el.innerHTML=`<div class="pc-img">${img}</div><div class="pc-body"><div class="pc-title">${d.title||id}</div><div style="display:flex;align-items:baseline;gap:6px;margin-top:4px"><span class="pc-price">${cur} ${price}</span>${orig?`<span class="pc-orig">${orig}</span>`:""}</div><div class="pc-meta">${d.sku_count?`<span class="badge b-indigo" style="font-size:10px">${d.sku_count} variants</span>`:""} ${d.avg_rating?`<span style="color:var(--orange);font-size:12px">★ ${parseFloat(d.avg_rating).toFixed(1)}</span>`:""}</div></div><div class="pc-foot">${foot}</div>`;
   }
   async function importOne(id){
-    const p=fp[id]; if(!p) return;
+    const p=fp[id]; if(!p || !["ready", "ierr"].includes(p.status)) return;
     p.status="importing"; drawCard(id);
     try{
       const r=await fetch(`${API}/import/${id}`,{method:"POST"});
       let res; try{res=await r.json();}catch(_){res={};}
-      if(r.status===409){p.status="skip";p.err=res.detail||"Already in Shopify";drawCard(id);showToast(p.err,"info");return;}
+      if(r.status===409){
+        // A repeated request may arrive after the first import completed.
+        // Confirm the exact local link rather than treating every conflict as
+        // evidence that the product existed before the user clicked Import.
+        let imported = null;
+        const duplicate = typeof res.detail === "string" &&
+          /already imported to Shopify|already exists in Shopify/i.test(res.detail);
+        try {
+          const lookup = duplicate ? await fetch(`${API}/dashboard/products/lookup?q=${encodeURIComponent(id)}&source=imported`) : null;
+          if (lookup?.ok) {
+            const data = await lookup.json();
+            imported = (data.results || []).find(row => row.source === "imported" &&
+              String(row.aliexpress_id) === String(id) && row.shopify_product_id);
+          }
+        } catch (_) { /* Keep the original conflict when confirmation fails. */ }
+        if (imported) {
+          p.status="ok"; p.sid=imported.shopify_product_id; p.err=null;
+          drawCard(id); showToast("Product is imported and available in Imported Products.", "ok");
+          loadStats(); updatePendingBadge(); return;
+        }
+        p.status="skip";
+        p.err=typeof res.detail === "string" ? res.detail : res.detail?.message || "Import conflict. Please check the existing product link.";
+        drawCard(id);showToast(p.err,"info");return;
+      }
       if(!r.ok){throw new Error(res.detail||`HTTP ${r.status}`);}
       if(res.status==="pending"){p.status="pending";p.oosSkus=res.out_of_stock_skus||[];p.err=res.message;drawCard(id);showToast(`${p.oosSkus.length} variant(s) OOS — added to pending queue.`,"info");updatePendingBadge();return;}
       if(res.status==="imported" && res.queued_for_inventory_sync){
