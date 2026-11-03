@@ -538,8 +538,21 @@
       <div class="page" id="pg-settings">
         <div class="pg-header"><div class="pg-header-left"><h2>Settings</h2><p>Manage your integrations and configuration.</p></div></div>
         <div class="settings-grid">
-          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-brand-aliexpress"></i></div><div><div class="card-title">AliExpress OAuth</div><div class="card-sub">Token-based authentication</div></div></div></div><div class="card-body"><div class="connection-status"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Access token saved in database</div></div></div></div></div>
-          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-green"><i class="ti ti-brand-shopify"></i></div><div><div class="card-title">Shopify API</div><div class="card-sub">Client credentials grant</div></div></div></div><div class="card-body"><div class="connection-status"><i class="ti ti-circle-check" style="font-size:20px;color:var(--green)"></i><div><div style="font-size:13px;font-weight:700;color:var(--green)">Connected</div><div style="font-size:11px;color:var(--t3)">Auto-refreshing token active</div></div></div></div></div>
+          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-orange"><i class="ti ti-brand-aliexpress"></i></div><div><div class="card-title">AliExpress OAuth</div><div class="card-sub">Token-based authentication</div></div></div></div><div class="card-body">
+            <p id="ali-connection-message" role="status" style="font-size:13px;color:var(--t3)">Connection not checked in this session.</p>
+            <div id="ali-connection-actions" style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn btn-sm" onclick="integrationAction('ali','refresh',this)">Refresh Token</button> <button class="btn btn-primary btn-sm" onclick="integrationAction('ali','reconnect',this)">Reconnect AliExpress</button></div>
+            <a id="ali-authorize-link" class="btn btn-sm" style="display:none;margin-top:12px" target="_blank" rel="noopener noreferrer">Open AliExpress authorization</a>
+            <form style="margin-top:16px" onsubmit="event.preventDefault();integrationAction('ali','code',document.getElementById('ali-save-code'))">
+              <div class="fg"><label for="ali-auth-code">AliExpress authorization code</label><input id="ali-auth-code" type="text" autocomplete="off" spellcheck="false" required maxlength="4096" placeholder="Paste your authorization code" aria-describedby="ali-code-help"></div>
+              <p id="ali-code-help" style="font-size:12px;color:var(--t3)">Paste a new, unused code from AliExpress authorization. If the callback already saved your token, you do not need to submit that code again.</p>
+              <button id="ali-save-code" class="btn btn-primary btn-sm" type="submit">Save Authorization Code</button>
+            </form>
+          </div></div>
+          <div class="card"><div class="card-header"><div class="card-header-left"><div class="card-icon ci-green"><i class="ti ti-brand-shopify"></i></div><div><div class="card-title">Shopify API</div><div class="card-sub">Client credentials grant</div></div></div></div><div class="card-body">
+            <p id="shopify-connection-message" role="status" style="font-size:13px;color:var(--t3)">Connection not checked in this session.</p>
+            <div id="shopify-connection-actions" style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn btn-primary btn-sm" onclick="integrationAction('shopify','reconnect',this)">Reconnect Shopify</button></div>
+
+          </div></div>
         </div>
 
         <div class="settings-cards">
@@ -855,6 +868,58 @@ function showToast(msg, type="", persistent=false){
       else{ls.style.opacity=".4";ls.style.pointerEvents="none";ls.className="lstep";ln.className="lstep-num";ln.textContent=i;}
     }
   }
+  async function integrationAction(provider, action, button){
+    const controls = document.getElementById(provider+"-connection-actions");
+    const buttons = provider==="ali" ? [...controls.querySelectorAll("button"), document.getElementById("ali-save-code")] : controls.querySelectorAll("button");
+    if (Array.from(buttons).some(b=>b.disabled)) return;
+    const message = document.getElementById(provider+"-connection-message");
+    const codeInput = document.getElementById("ali-auth-code");
+    const saveCode = provider==="ali" && action==="code";
+    if(saveCode && !codeInput.value.trim()){
+      message.textContent="Enter an AliExpress authorization code first.";
+      codeInput.focus();
+      return;
+    }
+    const original = button.textContent;
+    buttons.forEach(b=>b.disabled=true);
+    button.textContent = "Please wait...";
+    message.textContent = "Contacting " + (provider==="ali" ? "AliExpress" : "Shopify") + "...";
+    const authorize = provider==="ali" && action==="reconnect";
+    const link = document.getElementById("ali-authorize-link");
+    if (authorize) link.style.display="none";
+    try{
+      const path = provider==="shopify" ? "/shopify/reconnect" : authorize ? "/login" : saveCode ? "/aliexpress/authorize" : "/refresh-token";
+      const options = {method:authorize ? "GET" : "POST"};
+      if(saveCode){
+        options.headers={"Content-Type":"application/json"};
+        options.body=JSON.stringify({code:codeInput.value.trim()});
+      }
+      const response = await fetch(API+path, options);
+      const data = await safeJson(response);
+      if(!response.ok){
+        const detail = data.detail;
+        throw new Error(typeof detail==="string" ? detail : detail?.message || `Request failed (HTTP ${response.status})`);
+      }
+      if(authorize){
+        const url = new URL(data.auth_url);
+        if(url.protocol!=="https:" || url.hostname!=="api-sg.aliexpress.com") throw new Error("Invalid authorization URL");
+        link.href=url.href;
+        link.style.display="inline-flex";
+        message.textContent="Open the authorization link below and approve access. The backend saves the new token automatically. Return here afterward; you can use Refresh Token to confirm it works.";
+      }else if(saveCode){
+        codeInput.value="";
+        message.textContent="AliExpress connected. Authorization tokens saved successfully.";
+      }else{
+        message.textContent=provider==="ali" ? "AliExpress token refreshed successfully." : "Shopify reconnected successfully.";
+      }
+    }catch(error){
+      message.textContent=error.message;
+    }finally{
+      buttons.forEach(b=>b.disabled=false);
+      button.textContent=original;
+    }
+  }
+
   async function getLoginUrl(){
     const btn=document.getElementById("btn-get-url");
     btn.disabled=true; btn.innerHTML=`<i class="ti ti-loader-2 spin"></i> Getting URL…`;

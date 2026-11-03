@@ -25,9 +25,9 @@ MIN_INTERVAL = 0.55  # ~1.8 req/sec, safely under Shopify's 2/sec sustained limi
 # ─────────────────────────────────────────────
 # TOKEN
 # ─────────────────────────────────────────────
-def _get_shopify_token():
+def _get_shopify_token(force_refresh=False):
     global _cached_token, _token_expires_at
-    if _cached_token and time.time() < _token_expires_at - 60:
+    if not force_refresh and _cached_token and time.time() < _token_expires_at - 60:
         return _cached_token
     if not settings.SHOPIFY_CLIENT_ID or not settings.SHOPIFY_CLIENT_SECRET:
         raise HTTPException(500, "SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET missing")
@@ -2035,10 +2035,11 @@ def get_variant_sync_state(shopify_product_id: str) -> dict:
     query = """
     query($id: ID!, $after: String) {
       product(id: $id) {
+        title
         variants(first: 100, after: $after) {
           pageInfo { hasNextPage endCursor }
           edges { node {
-            id price selectedOptions { name value }
+            id price sku compareAtPrice inventoryQuantity selectedOptions { name value }
             aeSku: metafield(namespace: "aliexpress", key: "sku_id") { value }
             skuVerified: metafield(namespace: "aliexpress", key: "sku_link_verified") { value }
             increase: metafield(namespace: "sync", key: "price_increase") { id value }
@@ -2067,6 +2068,10 @@ def get_variant_sync_state(shopify_product_id: str) -> dict:
                 raise ValueError(f"Invalid saved increase for variant {vid}")
             state[vid] = {
                 "id": vid, "price": node["price"],
+                "product_title": data["product"].get("title"),
+                "sku": node.get("sku"),
+                "compare_at_price": node.get("compareAtPrice"),
+                "inventory_quantity": node.get("inventoryQuantity"),
                 "ae_sku_id": (node.get("aeSku") or {}).get("value"),
                 "sku_link_verified": (node.get("skuVerified") or {}).get("value") == "true",
                 "price_increase": increase,

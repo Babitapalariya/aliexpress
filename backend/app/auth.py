@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 
-import requests
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -15,6 +15,26 @@ router = APIRouter(tags=["auth"])
 settings = get_settings()
 
 logger = logging.getLogger(__name__)
+
+
+class AuthorizationCode(BaseModel):
+    code: str
+
+
+@router.post("/aliexpress/authorize")
+def authorize_aliexpress(payload: AuthorizationCode, db: Session = Depends(get_db)):
+    code = payload.code.strip()
+    if not code or len(code) > 4096:
+        raise HTTPException(400, "Enter a valid AliExpress authorization code.")
+    return callback(code, db)
+
+
+@router.post("/shopify/reconnect")
+def reconnect_shopify():
+    from .shopify import _get_shopify_token
+
+    _get_shopify_token(force_refresh=True)
+    return {"message": "Shopify reconnected successfully"}
 
 
 def save_token(db: Session, data: dict) -> AliExpressToken:
@@ -91,22 +111,19 @@ def callback(code: str, db: Session = Depends(get_db)):
         response = client.execute(request)
         data = response.body
 
-        logger.info("AliExpress token response: %s", data)
-
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(502, "AliExpress authorization request failed. Please try again.") from exc
+
+    if not isinstance(data, dict) or not data.get("access_token"):
+        raise HTTPException(400, "AliExpress rejected the authorization code. Get a new code using Reconnect AliExpress and try again.")
 
     saved = save_token(db, data)
     return {
         "message": "Token saved successfully",
         "token_id": saved.id,
-        "access_token": saved.access_token,
-        "refresh_token": saved.refresh_token,
         "expires_in": saved.expires_in,
         "created_at": saved.created_at,
         "updated_at": saved.updated_at,
-        # Raw AliExpress response (contains extra fields like user_id, expire_time, etc.)
-        "aliexpress_raw_response": data,
     }
 
 
@@ -123,24 +140,39 @@ def refresh_token(db: Session = Depends(get_db)):
             detail="No refresh token found. Visit /login first.",
         )
 
-    payload = {
-        "grant_type": "refresh_token",
-        "client_id": settings.ALIEXPRESS_APP_KEY,
-        "client_secret": settings.ALIEXPRESS_APP_SECRET,
-        "refresh_token": token.refresh_token,
-    }
-
     try:
-        response = requests.post(
-            "https://oauth.aliexpress.com/token", data=payload, timeout=30
+        client = IopClient(
+            settings.ALIEXPRESS_API_URL,
+            settings.ALIEXPRESS_APP_KEY,
+            settings.ALIEXPRESS_APP_SECRET,
         )
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        request = IopRequest("/auth/token/refresh", "POST")
+        request.add_api_param("app_key", settings.ALIEXPRESS_APP_KEY)
+        request.add_api_param("refresh_token", token.refresh_token)
+        data = client.execute(request).body
+    except Exception as exc:
         raise HTTPException(
-            status_code=502, detail=f"AliExpress refresh request failed: {exc}"
+            status_code=502,
+            detail="Could not complete the AliExpress refresh request. Please try again.",
         ) from exc
 
-    saved = save_token(db, response.json())
+    if not isinstance(data, dict):
+        raise HTTPException(502, "AliExpress returned an invalid refresh response.")
+    if not data.get("access_token"):
+        error = data.get("error_response") or data
+        if not isinstance(error, dict):
+            error = {}
+        reason = str(error.get("message") or error.get("msg") or "No access token returned")
+        # Never expose stored credentials, even if the provider echoes them.
+        for secret in (token.refresh_token, token.access_token, settings.ALIEXPRESS_APP_SECRET):
+            if secret:
+                reason = reason.replace(secret, "[redacted]")
+        raise HTTPException(
+            400,
+            detail=f"AliExpress rejected token refresh: {reason}. If authorization has expired, use Reconnect AliExpress.",
+        )
+
+    saved = save_token(db, data)
     return {
         "message": "AliExpress token refreshed",
         "token_id": saved.id,

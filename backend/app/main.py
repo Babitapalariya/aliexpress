@@ -2418,31 +2418,15 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
     if not product.shopify_product_id:
         return {"variants": [], "message": "No Shopify product linked"}
 
-    from .shopify import _base, _h, _shopify_request
-    res = _shopify_request(
-        "GET",
-        f"{_base()}/products/{product.shopify_product_id}.json",
-        params={"fields": "id,title,variants,options"},
-        headers=_h(), timeout=15,
-    )
-    if res.status_code != 200:
-        raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
-
-    shopify_product = res.json().get("product", {})
-    variants = shopify_product.get("variants", [])
-
     from .price_history import supplier_change_summary
     from .shopify import get_variant_sync_state
     pricing = get_variant_sync_state(product.shopify_product_id)
     result = []
-    for v in variants:
+    for v in pricing.values():
         # Build a readable label from option1/2/3
-        label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
-        label = " / ".join(label_parts) if label_parts else "Default"
-
         result.append({
             "variant_id": v["id"],
-            "label": label,
+            "label": v["label"] or "Default",
             "sku": v.get("sku"),
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
@@ -2454,9 +2438,10 @@ def get_product_variants(product_id: int, db: Session = Depends(get_db)):
 
     return {
         "shopify_product_id": product.shopify_product_id,
-        "title": shopify_product.get("title"),
+        "title": next(iter(pricing.values()), {}).get("product_title"),
         "variants": result,
     }
+
 
 
 @app.delete("/dashboard/products/{product_id}/variants/{variant_id}")
@@ -4963,22 +4948,14 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
     if not mapping:
         raise HTTPException(404, "Mapping not found")
-    from .shopify import _base, _h, _shopify_request
-    res = _shopify_request("GET", f"{_base()}/products/{mapping.shopify_product_id}.json",
-        params={"fields": "id,title,variants,options"}, headers=_h(), timeout=15)
-    if res.status_code != 200:
-        raise HTTPException(502, f"Shopify variant request failed (HTTP {res.status_code})")
-    shopify_product = res.json().get("product", {})
-    variants = shopify_product.get("variants", [])
     from .price_history import supplier_change_summary
     from .shopify import get_variant_sync_state
     pricing = get_variant_sync_state(mapping.shopify_product_id)
     result = []
-    for v in variants:
-        label_parts = [v.get(f"option{i}") for i in (1, 2, 3) if v.get(f"option{i}") and v.get(f"option{i}") != "Default Title"]
+    for v in pricing.values():
         result.append({
             "variant_id": v["id"],
-            "label": " / ".join(label_parts) if label_parts else "Default",
+            "label": v["label"] or "Default",
             "sku": v.get("sku"),
             "price": v.get("price"),
             "compare_at_price": v.get("compare_at_price"),
@@ -4987,7 +4964,8 @@ def get_mapping_variants(mapping_id: int, db: Session = Depends(get_db)):
             "product_price_increase": float(mapping.price_increase or 0),
             **supplier_change_summary(pricing[v["id"]].get("supplier_history")),
         })
-    return {"shopify_product_id": mapping.shopify_product_id, "title": shopify_product.get("title"), "variants": result}
+    return {"shopify_product_id": mapping.shopify_product_id, "title": next(iter(pricing.values()), {}).get("product_title"), "variants": result}
+
 
 
 @app.delete("/mappings/{mapping_id}/variants/{variant_id}")
