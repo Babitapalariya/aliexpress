@@ -5,6 +5,7 @@ Now includes per-variant SKU image upload via Shopify Images API.
 
 import re
 import time
+import logging
 import requests
 from fastapi import HTTPException
 from .config import get_settings
@@ -12,6 +13,7 @@ import time as _time
 
 import threading
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _cached_token = None
@@ -49,7 +51,7 @@ def _get_shopify_token(force_refresh=False):
         _token_expires_at = time.time() + body.get("expires_in", 86399)
         return _cached_token
     except Exception as e:
-        raise HTTPException(502, f"Shopify token error: {e}")
+        raise HTTPException(502, "Shopify token request failed") from e
 
 def get_shopify_token():
     return _get_shopify_token()
@@ -76,7 +78,38 @@ def check_product_exists_in_shopify(title: str) -> bool:
         res.raise_for_status()
         return len(res.json().get("products", [])) > 0
     except Exception as exc:
-        raise HTTPException(502, "Could not check Shopify for an existing product; please retry shortly") from exc
+        cause = exc
+        response = None
+        causes = []
+        while cause is not None and response is None:
+            causes.append(cause)
+            response = getattr(cause, "response", None)
+            cause = cause.__cause__
+        detail = "Could not check Shopify for an existing product; please retry shortly"
+        if response is not None:
+            logger.error("Shopify product existence check failed with HTTP %s", response.status_code)
+            status = response.status_code
+            if status in (400, 401):
+                detail = "Shopify rejected authentication or the request (HTTP %s). Check the server's SHOPIFY_STORE, SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET, then restart the backend." % status
+            elif status == 403:
+                detail = "Shopify denied access (HTTP 403). Check the app installation and product access permissions for the server's configured store."
+            elif status == 404:
+                detail = "Shopify endpoint not found (HTTP 404). Check the server's SHOPIFY_STORE and SHOPIFY_API_VERSION."
+            elif status == 429:
+                detail = "Shopify rate limit reached after retries. Wait briefly and retry the import."
+            elif status >= 500:
+                detail = "Shopify is unavailable (HTTP %s). Please retry shortly." % status
+        else:
+            logger.error("Shopify product existence check failed (%s)", type(causes[-1]).__name__)
+            if any(isinstance(c, requests.exceptions.SSLError) for c in causes):
+                detail = "The server could not verify Shopify's TLS certificate. Check the server CA certificates and HTTPS proxy configuration."
+            elif any(isinstance(c, requests.Timeout) for c in causes):
+                detail = "The server timed out connecting to Shopify. Check outbound HTTPS connectivity and retry."
+            elif any(isinstance(c, requests.ConnectionError) for c in causes):
+                detail = "The server could not connect to Shopify. Check SHOPIFY_STORE, DNS and outbound HTTPS access."
+            elif isinstance(exc, HTTPException) and exc.status_code == 500:
+                detail = "Shopify credentials are missing on the server. Set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET, then restart the backend."
+        raise HTTPException(502, detail) from exc
 
 def get_shopify_product_by_aliexpress_id(aliexpress_id: str) -> dict | None:
     if not settings.SHOPIFY_STORE:

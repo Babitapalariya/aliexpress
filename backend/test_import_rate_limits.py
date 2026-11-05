@@ -71,12 +71,49 @@ class ImportRateLimitTests(unittest.TestCase):
 
 
 class DuplicateCheckTests(unittest.TestCase):
+    def test_lookup_reports_actionable_http_failures(self):
+        for status, expected in [(401, "authentication"), (403, "permissions"),
+                                 (404, "SHOPIFY_STORE"), (429, "rate limit"),
+                                 (503, "unavailable")]:
+            with self.subTest(status=status), \
+                 patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
+                 patch.object(shopify, "_h", return_value={}), \
+                 patch.object(shopify, "_shopify_request", return_value=response(status)):
+                with self.assertRaises(HTTPException) as error:
+                    shopify.check_product_exists_in_shopify("Test")
+                self.assertIn(expected, error.exception.detail)
+
+    def test_token_failure_preserves_cause_without_exposing_secrets(self):
+        with patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
+             patch.object(shopify.settings, "SHOPIFY_CLIENT_ID", "id"), \
+             patch.object(shopify.settings, "SHOPIFY_CLIENT_SECRET", "secret"), \
+             patch.object(shopify, "_cached_token", None), \
+             patch.object(shopify.requests, "post", return_value=response(401)):
+            with self.assertRaises(HTTPException) as error:
+                shopify.check_product_exists_in_shopify("Test")
+        self.assertIn("authentication", error.exception.detail)
+        self.assertNotIn("secret", error.exception.detail)
+
+    def test_network_failures_are_safe_and_actionable(self):
+        for failure, expected in [(requests.exceptions.SSLError("private"), "TLS"),
+                                  (requests.Timeout("private"), "timed out"),
+                                  (requests.ConnectionError("private"), "DNS")]:
+            with self.subTest(expected=expected), \
+                 patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
+                 patch.object(shopify, "_h", side_effect=failure):
+                with self.assertRaises(HTTPException) as error:
+                    shopify.check_product_exists_in_shopify("Test")
+                self.assertIn(expected, error.exception.detail)
+                self.assertNotIn("private", error.exception.detail)
+
     def test_failed_lookup_does_not_mean_product_is_missing(self):
         with patch.object(shopify.settings, "SHOPIFY_STORE", "test"), \
              patch.object(shopify, "_h", return_value={}), \
              patch.object(shopify, "_shopify_request", return_value=response(429)):
-            with self.assertRaises(HTTPException):
-                shopify.check_product_exists_in_shopify("Test")
+            with self.assertLogs("app.shopify", level="ERROR") as logs:
+                with self.assertRaises(HTTPException):
+                    shopify.check_product_exists_in_shopify("Test")
+        self.assertIn("HTTP 429", logs.output[0])
 
 
 if __name__ == "__main__":
