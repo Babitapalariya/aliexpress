@@ -436,6 +436,39 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
 # Product parser
 # ─────────────────────────────────────────────
 
+def _pricing_summary(skus, product):
+    """Summarize a single SKU price pair; never mix currencies or variants."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+    def amount(value):
+        try:
+            parsed = Decimal(str(value))
+            return parsed if parsed.is_finite() and parsed >= 0 else None
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    candidates = []
+    for sku in skus:
+        original = amount(sku.get("price"))
+        sale = amount(sku.get("sale_price"))
+        # An absent offer means the regular SKU price is the selling price.
+        if sale is None:
+            sale = original
+        discount = None
+        if original is not None and sale is not None and original > 0:
+            discount = str((max(Decimal(0), (original-sale)/original*100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) + "%"
+        sku["discount"] = discount
+        if sale is not None and sku.get("currency"):
+            candidates.append((sale, original, sku["currency"], discount))
+    currencies = {row[2] for row in candidates}
+    if candidates and len(currencies) == 1:
+        sale, original, currency, discount = min(candidates, key=lambda row: row[0])
+        return {"original_price": str(original) if original is not None else None,
+                "sale_price": str(sale), "currency": currency, "discount": discount}
+    # No coherent single-currency SKU summary: retain only upstream summary data.
+    return {key: product.get(key) for key in ("original_price", "sale_price", "discount")} | {"currency": product.get("currency_code")}
+
+
 def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
     result = (
         raw
@@ -491,6 +524,8 @@ def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
     kept_ids = {s.get("sku_id") for s in skus}
     filtered_sku_list = [s for s in sku_list if s.get("sku_id") in kept_ids]
 
+    pricing = _pricing_summary(skus, product)
+
     shipping  = _parse_freight(result)
     inventory = _parse_inventory(result, filtered_sku_list)
 
@@ -503,10 +538,7 @@ def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
         "store_name":   store.get("store_name") or product.get("store_name"),
 
         # Pricing
-        "original_price": product.get("original_price"),
-        "sale_price":     product.get("sale_price"),
-        "currency":       product.get("currency_code"),
-        "discount":       product.get("discount"),
+        **pricing,
 
         # Media
         "main_image":  images.split(";")[0] if images else product.get("main_image"),

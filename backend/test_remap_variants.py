@@ -6,8 +6,51 @@ from app.models import ImportedProduct, ProductMapping
 from test_variant_price_sync import load_main_functions
 
 
+class ReplacementInventoryTests(unittest.TestCase):
+    def page(self, rows, more=False, cursor=None):
+        return {"product": {"variants": {"nodes": [
+            {"skuId": {"value": sid}, "inventoryItem": {"id": f"gid://shopify/InventoryItem/{iid}"}}
+            for sid, iid in rows], "pageInfo": {"hasNextPage": more, "endCursor": cursor}}}}
+
+    def test_all_pages_matched_by_sku_and_zero_stock_written(self):
+        stocks = {str(i): i for i in range(101)}
+        pages = [self.page([(str(i), i + 1000) for i in reversed(range(100))], True, "next"),
+                 self.page([("100", 1100)])]
+        def write(*args, **kwargs):
+            payload = kwargs["json"]
+            self.assertTrue(args[1].endswith("/inventory_levels/set.json"))
+            return Mock(json=lambda: {"inventory_level": payload})
+        with patch.object(remap.shopify, "_graphql", side_effect=pages) as read, \
+             patch.object(remap.shopify, "_h", return_value={}), \
+             patch.object(remap.shopify, "_shopify_request", side_effect=write) as request:
+            remap._sync_replacement_inventory("42", stocks, 7)
+        self.assertEqual(read.call_args.args[1]["after"], "next")
+        self.assertEqual(request.call_count, 101)
+        payloads = [c.kwargs["json"] for c in request.call_args_list]
+        self.assertIn({"inventory_item_id": 1000, "location_id": 7, "available": 0}, payloads)
+        self.assertIn({"inventory_item_id": 1100, "location_id": 7, "available": 100}, payloads)
+
+    def test_missing_or_duplicate_variants_prevent_stock_writes(self):
+        for rows in ([("a", 1)], [("a", 1), ("a", 2)]):
+            with patch.object(remap.shopify, "_graphql", return_value=self.page(rows)), \
+                 patch.object(remap.shopify, "_shopify_request") as write:
+                with self.assertRaises(ValueError):
+                    remap._sync_replacement_inventory("42", {"a": 0, "b": 8}, 7)
+                write.assert_not_called()
+
+    def test_unconfirmed_stock_is_not_success(self):
+        with patch.object(remap.shopify, "_graphql", return_value=self.page([("a", 1)])), \
+             patch.object(remap.shopify, "_h", return_value={}), \
+             patch.object(remap.shopify, "_shopify_request", return_value=Mock(json=lambda: {"inventory_level": {"available": 99}})):
+            with self.assertRaises(ValueError):
+                remap._sync_replacement_inventory("42", {"a": 0}, 7)
+
+
 class RemapVariantsTests(unittest.TestCase):
     def setUp(self):
+        inventory = patch.object(remap, "_sync_replacement_inventory")
+        self.inventory = inventory.start()
+        self.addCleanup(inventory.stop)
         self.raw = {"skus": [{"sku_id": "new1", "label": "black", "sale_price": "12.50", "stock": 0},
                              {"sku_id": "new2", "label": "white", "sale_price": "15", "stock": 8}]}
 
@@ -23,10 +66,24 @@ class RemapVariantsTests(unittest.TestCase):
         self.assertEqual(set(payload), {"id", "productOptions", "variants"})
         self.assertEqual(len(payload["variants"]), 2)
         self.assertTrue(all("id" not in variant for variant in payload["variants"]))
-        self.assertEqual(payload["variants"][0]["inventoryQuantities"][0]["quantity"], 0)
+        self.assertTrue(all("inventoryQuantities" not in v for v in payload["variants"]))
+        self.inventory.assert_called_once_with("42", {"new1": 0, "new2": 8}, 7)
         self.assertEqual(payload["variants"][1]["metafields"][0]["value"], "new2")
         self.assertFalse(request.call_args.kwargs["retry_ambiguous"])
         self.assertTrue(result["shopify_variants_replaced"])
+
+    def test_stock_failure_is_reported_after_successful_replacement(self):
+        self.inventory.side_effect = RuntimeError("stock rejected")
+        locations = Mock(json=lambda: {"locations": [{"id": 7}]})
+        response = Mock(json=lambda: {"data": {"productSet": {"product": {"id": "gid://shopify/Product/42"}}}})
+        with patch.object(remap.shopify, "_shopify_request", side_effect=[locations, response]), \
+             patch.object(remap.shopify, "_h", return_value={}), \
+             patch.object(remap.shopify, "_graphql", return_value={"metafieldsSet": {"userErrors": []}}):
+            result = remap.replace_supplier_variants("42", self.raw, "new")
+        self.assertTrue(result["shopify_variants_replaced"])
+        self.assertTrue(result["shopify_metafield_updated"])
+        self.assertFalse(result["shopify_inv_updated"])
+        self.assertIn("stock rejected", result["warnings"][0])
 
     def test_invalid_supplier_data_cannot_delete_variants(self):
         for raw in ({"skus": []}, {"skus": [dict(self.raw["skus"][0], stock=None)]},
