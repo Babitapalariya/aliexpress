@@ -399,6 +399,8 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
         except (ValueError, TypeError):
             stock = None
 
+        if stock is not None and stock < 0:
+            stock = None
         if stock is not None and stock > 0:
             total_stock += stock
             any_stock = True
@@ -417,6 +419,16 @@ def _parse_inventory(result: dict, sku_list: list) -> dict:
             "sku_inventory":   sku_inventory,
             "sales_count":     sales_count,
             "note":            f"{total_stock} units across {len(sku_inventory)} SKU(s)",
+        }
+
+    if sku_inventory and all(row["stock"] == 0 for row in sku_inventory):
+        return {
+            "total_stock": 0,
+            "stock_available": False,
+            "stock_source": "sku_available_stock",
+            "sku_inventory": sku_inventory,
+            "sales_count": sales_count,
+            "note": "AliExpress API reports zero stock for the requested shipping destination.",
         }
 
     return {
