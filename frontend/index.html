@@ -1321,7 +1321,7 @@ async function syncProductPrice(productId){
         p.sid=res?.shopify_product?.id||null;
         p.status="ok";
         drawCard(id);
-        showToast("Imported to Shopify successfully!","ok");
+        showToast(res.warnings?.length ? res.warnings.join("; ") : "Imported to Shopify successfully!", res.warnings?.length ? "info" : "ok");
         loadStats();
         return;
       }
@@ -1902,7 +1902,7 @@ async function syncInventoryFromModal() {
       const r=await fetch(`${API}/pending/retry?aliexpress_id=${encodeURIComponent(aliexpressId)}`,{method:"POST"});
       const data=await r.json();
       if(!r.ok) throw new Error(data.detail||"Retry failed");
-      if(data.status==="imported"){showToast(data.message,"ok");}
+      if(data.status==="imported"){showToast(data.warnings?.length ? data.warnings.join("; ") : data.message, data.warnings?.length ? "info" : "ok");}
       else if(data.status==="oos"){
         const oosList=data.out_of_stock_labels||[];
         const preview=oosList.slice(0,3).join(", ")+(oosList.length>3?` +${oosList.length-3} more`:"");

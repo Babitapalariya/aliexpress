@@ -1000,6 +1000,7 @@ def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
                 f"added to pending queue and will auto-update inventory when stock returns."
             ),
             "queued_for_inventory_sync": True,
+            "warnings": getattr(product, "_import_warnings", []),
         }
 
     # 5. All variants in stock — clean import
@@ -1010,6 +1011,7 @@ def import_to_shopify(aliexpress_id: str, db: Session = Depends(get_db)):
         "shopify_product": shopify_info,
         "message": "Imported successfully" if created else "Linked to existing Shopify product",
         "queued_for_inventory_sync": False,
+        "warnings": getattr(product, "_import_warnings", []),
     }
 
 
@@ -3030,6 +3032,7 @@ def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tupl
     shopify_id = str(shopify_product_new.get("id"))
     shopify_status = shopify_product_new.get("status", "draft")
     created = True
+    import_warnings = shopify_resp.get("warnings", [])
 
     if existing:
         existing.shopify_product_id = shopify_id
@@ -3048,6 +3051,7 @@ def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tupl
         existing.track_price = True
         db.commit()
         db.refresh(existing)
+        existing._import_warnings = import_warnings
         return existing, created
     else:
         new_product = ImportedProduct(
@@ -3070,6 +3074,7 @@ def import_aliexpress_product_to_shopify(raw_product: dict, db: Session) -> tupl
         db.add(new_product)
         db.commit()
         db.refresh(new_product)
+        new_product._import_warnings = import_warnings
         return new_product, created
 
 def process_pending_imports():
@@ -3250,6 +3255,7 @@ def retry_pending_import(aliexpress_id: str, db: Session = Depends(get_db)):
                 "shopify_product_id": product.shopify_product_id,
                 "out_of_stock_skus": stock_info["out_of_stock"],
                 "can_retry": bool(stock_info["out_of_stock"]),
+                "warnings": getattr(product, "_import_warnings", []),
             }
         except HTTPException as e:
             if e.status_code == 409:

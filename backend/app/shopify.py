@@ -633,6 +633,9 @@ def create_shopify_product(product: dict) -> dict:
         raise HTTPException(409, f"Product '{title}' already exists in Shopify.")
     try:
         payload = normalize_aliexpress_product(product)
+        if len(payload['variants']) > 100:
+            from .large_product_import import create_large_product
+            return create_large_product(product, payload)
         # A 429 means Shopify rejected the request, so retrying is safe.
         # A timeout/5xx may follow a successful creation: never blindly repeat it.
         res = _shopify_request("POST", f"{_base()}/products.json", json={"product": payload},
