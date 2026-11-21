@@ -281,6 +281,12 @@ def sync_product_price(product_id: int, db: Session) -> bool:
 def sync_existing_shopify_products_to_db():
     """Fetch all Shopify products with tag 'aliexpress-import' and create local DB records if missing."""
     db = SessionLocal()
+    def mapped_product(sp, aliexpress_id):
+        return db.query(ProductMapping).filter(
+            (ProductMapping.aliexpress_id == aliexpress_id) |
+            (ProductMapping.shopify_product_id == str(sp["shopify_id"]))
+        ).first()
+
     try:
         shopify_products = get_all_shopify_imported_products()
         for sp in shopify_products:
@@ -289,7 +295,16 @@ def sync_existing_shopify_products_to_db():
                 print(f"[Sync] Skipping Shopify product {sp['shopify_id']} - no aliexpress_id metafield")
                 continue
 
-            existing = db.query(ImportedProduct).filter(ImportedProduct.aliexpress_id == aliexpress_id).first()
+            # Mappings already own these products; a Shopify scan must not
+            # recreate them in ImportedProduct, even after a supplier remap.
+            if mapped_product(sp, aliexpress_id):
+                print(f"[Sync] Skipping mapped Shopify product {sp['shopify_id']}")
+                continue
+
+            existing = db.query(ImportedProduct).filter(
+                (ImportedProduct.aliexpress_id == aliexpress_id) |
+                (ImportedProduct.shopify_product_id == str(sp["shopify_id"]))
+            ).first()
             if existing:
                 if not existing.shopify_product_id:
                     existing.shopify_product_id = sp["shopify_id"]
@@ -305,6 +320,16 @@ def sync_existing_shopify_products_to_db():
                 continue
 
             try:
+                # Supplier requests can take time. Re-read ownership in a fresh
+                # transaction before inserting, in case a mapping was added.
+                db.rollback()
+                if mapped_product(sp, aliexpress_id):
+                    continue
+                if db.query(ImportedProduct).filter(
+                    (ImportedProduct.aliexpress_id == aliexpress_id) |
+                    (ImportedProduct.shopify_product_id == str(sp["shopify_id"]))
+                ).first():
+                    continue
                 new_product = ImportedProduct(
                     aliexpress_id=aliexpress_id,
                     original_title=raw_product.get("title") or sp["title"],
