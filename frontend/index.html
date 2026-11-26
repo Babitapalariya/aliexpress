@@ -1537,6 +1537,7 @@ async function syncProductPrice(productId){
         <button type="button" class="btn btn-xs" onclick="increaseAllVariants()"><i class="ti ti-plus"></i> Adjust All (+/-)</button>
         <button type="button" class="btn btn-xs btn-primary" onclick="syncInventoryFromModal()"><i class="ti ti-refresh"></i> Pull live stock from AliExpress</button>
         <button type="button" class="btn btn-xs" onclick="repairImportedOptions(this)">Repair option groups</button>
+        <button type="button" class="btn btn-xs" onclick="restoreMissingVariants(this)">Add missing variants</button>
         <button type="button" class="btn btn-xs" onclick="openSupplierLinkRepair('products', ${productId})">Repair supplier links</button>
       </div>
       <div style="padding:8px 12px;font-size:11px;color:var(--t3);border-top:1px solid var(--border-2)">
@@ -1635,6 +1636,28 @@ async function repairImportedOptions(btn) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "Option repair failed");
     showToast(data.message, "ok");
+    await loadVariantsForModal(productId);
+  } catch (e) {
+    showToast(e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function restoreMissingVariants(btn) {
+  const productId = document.getElementById("m-dbid").value;
+  if (!productId) return;
+  if (document.querySelector('#m-variants-wrap input[data-dirty="true"]')) {
+    showToast("Save your variant edits before adding missing variants", "err");
+    return;
+  }
+  btn.disabled = true;
+  showToast("Adding missing AliExpress variants to Shopify...", "loading", true);
+  try {
+    const response = await fetch(`${API}/dashboard/products/${productId}/restore-missing-variants`, {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Variant repair failed");
+    showToast([data.message, ...(data.warnings || [])].join(". "), data.warnings?.length ? "info" : "ok");
     await loadVariantsForModal(productId);
   } catch (e) {
     showToast(e.message, "err");

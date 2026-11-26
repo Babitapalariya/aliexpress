@@ -1617,6 +1617,20 @@ def repair_imported_product_options(product_id: int, db: Session = Depends(get_d
         raise HTTPException(502, f"Option repair failed: {exc}")
 
 
+@app.post("/dashboard/products/{product_id}/restore-missing-variants")
+def restore_imported_missing_variants(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(ImportedProduct).filter(ImportedProduct.id == product_id).first()
+    if not product or not product.shopify_product_id:
+        raise HTTPException(404, "Imported Shopify product not found")
+    from .missing_variants import restore_missing_variants
+    latest = get_product(product.aliexpress_id, db)
+    result = restore_missing_variants(product.shopify_product_id, latest, product.price_increase)
+    product.skus = latest["skus"]
+    product.sku_count = len(latest["skus"])
+    db.commit()
+    return result
+
+
 @app.post("/mappings/{mapping_id}/update-price")
 def update_mapping_price(mapping_id: int, payload: dict, db: Session = Depends(get_db)):
     mapping = db.query(ProductMapping).filter(ProductMapping.id == mapping_id).first()
