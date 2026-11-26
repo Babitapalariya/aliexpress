@@ -136,6 +136,7 @@ def _resolve_sku_info(sku: dict) -> dict:
                 "id": str(prop.get("sku_property_id") or prop.get("attr_name_id") or prop.get("sku_property_name") or len(options)),
                 "name": str(prop.get("sku_property_name") or prop.get("attr_name") or f"Option {len(options) + 1}"),
                 "value": str(val).strip(),
+                "value_id": str(prop.get("property_value_id") or prop.get("attr_value_id") or ""),
             })
 
         # Keep the image's option identity so sizes can share their color image.
@@ -521,6 +522,21 @@ def _parse_product(raw: dict, ship_to_country: str = "US") -> dict:
             "stock":        sku.get("sku_available_stock"),
             "currency":     sku.get("currency_code"),
         })
+
+    # Suppliers can reuse a display name for distinct choices (for example,
+    # three battery packs all named "for DeWalt"). Keep the supplier value ID
+    # so warehouse collapsing and Shopify's unique option values retain them.
+    identities = {}
+    for sku in skus:
+        for option in sku["options"]:
+            key = (option["id"], option["value"])
+            identities.setdefault(key, set()).add(option["value_id"])
+    for sku in skus:
+        for option in sku["options"]:
+            if len(identities[(option["id"], option["value"])]) > 1:
+                option["value"] = f'{option["value"]} ({option["value_id"]})'
+        if sku["options"]:
+            sku["label"] = " / ".join(o["value"] for o in sku["options"])
 
     # Collapse SKU combinations for other ship-from warehouses down to one
     # per real variant — the DS API returns combos for every location, but
