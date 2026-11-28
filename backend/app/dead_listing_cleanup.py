@@ -5,6 +5,21 @@ from .shopify_links import product_id
 from . import shopify
 
 
+def supplier_confirms_dead(raw, aliexpress_id, is_dead):
+    if not isinstance(raw, dict) or raw.get("error_response"):
+        return False
+    # DS product.get returns this explicit business response without a result,
+    # product ID or SKU list when all supplier SKUs are unsaleable. This is
+    # different from a timeout, auth failure, empty response or rate limit.
+    response = raw.get("aliexpress_ds_product_get_response")
+    if isinstance(response, dict) and not response.get("result"):
+        return (str(response.get("rsp_code")) == "604" and
+                str(response.get("rsp_msg", "")).strip().casefold() == "all sku unsaleable")
+    if str(raw.get("product_id")) != str(aliexpress_id) or not isinstance(raw.get("skus"), list):
+        return False
+    return is_dead(raw)
+
+
 def delete_dead_listings(db, items, fetch_supplier, is_dead):
     if not isinstance(items, list) or not 1 <= len(items) <= 10:
         raise HTTPException(400, "Select between 1 and 10 listings per request")
@@ -29,10 +44,8 @@ def delete_dead_listings(db, items, fetch_supplier, is_dead):
             if not sid:
                 raise ValueError("No valid Shopify ID to verify; review this record manually")
             raw = fetch_supplier(row.aliexpress_id, db)
-            if not isinstance(raw, dict) or str(raw.get("product_id")) != str(row.aliexpress_id) or "skus" not in raw:
-                raise ValueError("AliExpress did not return a verifiable product response")
-            if not is_dead(raw):
-                raise ValueError("AliExpress listing has usable prices and is not dead")
+            if not supplier_confirms_dead(raw, row.aliexpress_id, is_dead):
+                raise ValueError("AliExpress did not confirm a dead listing; it may be active or the response could not be verified")
             data = shopify._graphql(
                 "query CleanupProduct($id: ID!) { product(id: $id) { id } }",
                 {"id": f"gid://shopify/Product/{sid}"})

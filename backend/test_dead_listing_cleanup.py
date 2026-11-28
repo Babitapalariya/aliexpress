@@ -46,6 +46,31 @@ class DeadCleanupTests(unittest.TestCase):
         self.assertEqual(len(self.run_delete()["skipped"]), 1)
         self.assertIsNotNone(self.db.get(ImportedProduct, 1))
 
+    def test_explicit_unsaleable_response_allows_local_cleanup(self):
+        self.fetch.side_effect = None
+        self.fetch.return_value = {"aliexpress_ds_product_get_response": {
+            "rsp_code": 604, "rsp_msg": "All SKU Unsaleable", "request_id": "example"},
+            "shipping_info": {"cost": "Calculated at checkout"}}
+        self.assertEqual(len(self.run_delete()["deleted"]), 1)
+        self.assertIsNone(self.db.get(ImportedProduct, 1))
+        self.graphql.assert_called_once()
+
+    def test_unsaleable_still_requires_shopify_absence(self):
+        self.fetch.side_effect = None
+        self.fetch.return_value = {"aliexpress_ds_product_get_response": {
+            "rsp_code": 604, "rsp_msg": "All SKU Unsaleable"}}
+        self.graphql.return_value = {"product": {"id": "gid://shopify/Product/501"}}
+        self.assertFalse(self.run_delete()["deleted"])
+        self.assertIsNotNone(self.db.get(ImportedProduct, 1))
+
+    def test_other_supplier_errors_cannot_authorize_deletion(self):
+        self.fetch.side_effect = None
+        for code, message in [(429, "Rate limited"), (500, "Internal error"), (604, "Unknown error"), (None, "All SKU Unsaleable")]:
+            self.fetch.return_value = {"aliexpress_ds_product_get_response": {"rsp_code": code, "rsp_msg": message}}
+            self.assertFalse(self.run_delete()["deleted"])
+        self.graphql.assert_not_called()
+        self.assertIsNotNone(self.db.get(ImportedProduct, 1))
+
     def test_api_errors_and_incomplete_responses_retain_record(self):
         for response in ({}, {"errors": ["denied"], "product": None}):
             self.graphql.return_value = response
