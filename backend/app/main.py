@@ -4207,6 +4207,12 @@ def get_dead_listings(db: Session = Depends(get_db)):
     }
     verify_flagged_shopify_links(response["products"])
     return response
+
+
+@app.post("/dead-listings/delete")
+def delete_verified_dead_listings(payload: dict, db: Session = Depends(get_db)):
+    from .dead_listing_cleanup import delete_dead_listings
+    return delete_dead_listings(db, payload.get("items"), get_product, is_listing_dead)
  
 # ─────────────────────────────────────────────
 # ENDPOINT: Smart product lookup
