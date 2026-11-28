@@ -519,6 +519,8 @@ app = FastAPI(title="AliShopify Backend")
 # )
 
 app.include_router(auth_router)
+from .shopify_links import router as shopify_links_router
+app.include_router(shopify_links_router)
 
 app.include_router(db_export_router)
 
@@ -4178,11 +4180,12 @@ def get_dead_listings(db: Session = Depends(get_db)):
       - OR have been remapped (replacement_aliexpress_id is not null)
     This ensures remapped products remain visible with a 'Remapped' badge.
     """
+    from .shopify_links import shopify_product_url, verify_flagged_shopify_links
     products = db.query(ImportedProduct).filter(
         (ImportedProduct.is_dead_listing == True) |
         (ImportedProduct.replacement_aliexpress_id.isnot(None))
     ).all()
-    return {
+    response = {
         "count": len(products),
         "products": [
             {
@@ -4192,7 +4195,7 @@ def get_dead_listings(db: Session = Depends(get_db)):
                 "title":                     p.custom_title or p.original_title,
                 "main_image":                p.main_image,
                 "shopify_product_id":        p.shopify_product_id,
-                "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+                "shopify_url":               shopify_product_url(p.shopify_product_id)
                                              if p.shopify_product_id else None,
                 "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
                 "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
@@ -4202,6 +4205,8 @@ def get_dead_listings(db: Session = Depends(get_db)):
             for p in products
         ],
     }
+    verify_flagged_shopify_links(response["products"])
+    return response
  
 # ─────────────────────────────────────────────
 # ENDPOINT: Smart product lookup
@@ -4464,6 +4469,7 @@ def lookup_product(
     source: str = Query(None, description="Filter results: 'imported' or 'mapping'. Omit for both."),
     db: Session = Depends(get_db)
 ):
+    from .shopify_links import shopify_product_url
     try:
         q = q.strip()
         if not q:
@@ -4492,7 +4498,7 @@ def lookup_product(
                 "imported_at":               p.imported_at.isoformat() if p.imported_at else None,
                 "match_reason":              reason,
                 "aliexpress_url":            f"https://www.aliexpress.com/item/{p.aliexpress_id}.html",
-                "shopify_url":               f"https://admin.shopify.com/products/{p.shopify_product_id}"
+                "shopify_url":               shopify_product_url(p.shopify_product_id)
                                              if p.shopify_product_id else None,
                 "avg_rating":                p.custom_rating or p.avg_rating,
                 "rating":                    p.custom_rating or p.avg_rating,
@@ -4522,7 +4528,7 @@ def lookup_product(
                 "imported_at":               m.created_at.isoformat() if m.created_at else None,
                 "match_reason":              reason,
                 "aliexpress_url":            f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
-                "shopify_url":               f"https://admin.shopify.com/products/{m.shopify_product_id}"
+                "shopify_url":               shopify_product_url(m.shopify_product_id)
                                              if m.shopify_product_id else None,
             })
 
@@ -4835,10 +4841,11 @@ def scan_dead_mappings(
 @app.get("/dead-mappings")
 def get_dead_mappings(db: Session = Depends(get_db)):
     """Returns all mappings currently flagged as dead (is_dead_listing=True)."""
+    from .shopify_links import shopify_product_url, verify_flagged_shopify_links
     mappings = db.query(ProductMapping).filter(
         ProductMapping.is_dead_listing == True
     ).all()
-    return {
+    response = {
         "count": len(mappings),
         "mappings": [
             {
@@ -4846,7 +4853,7 @@ def get_dead_mappings(db: Session = Depends(get_db)):
                 "aliexpress_id":      m.aliexpress_id,
                 "shopify_product_id": m.shopify_product_id,
                 "title":              m.shopify_product_title,
-                "shopify_url":        f"https://admin.shopify.com/products/{m.shopify_product_id}"
+                "shopify_url":        shopify_product_url(m.shopify_product_id)
                                       if m.shopify_product_id else None,
                 "aliexpress_url":     f"https://www.aliexpress.com/item/{m.aliexpress_id}.html",
                 "created_at":         m.created_at.isoformat() if m.created_at else None,
@@ -4854,6 +4861,8 @@ def get_dead_mappings(db: Session = Depends(get_db)):
             for m in mappings
         ],
     }
+    verify_flagged_shopify_links(response["mappings"])
+    return response
 
 
 @app.post("/dashboard/variants/{variant_id}/toggle-lock/{lock_type}")

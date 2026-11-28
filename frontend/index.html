@@ -1086,7 +1086,7 @@ function showToast(msg, type="", persistent=false){
         <button class="btn btn-primary btn-icon sm" title="Edit" onclick='openModal(${pj})'><i class="ti ti-edit" style="font-size:13px"></i></button>
         <button class="btn btn-icon sm" title="Check if AliExpress listing is still active" onclick="checkListingStatus(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-radar" style="font-size:13px"></i></button>
         <button class="btn btn-icon sm" title="Remap to new AliExpress ID" aria-label="Remap product" onclick="openRemapModal(${p.id}, '${p.aliexpress_id}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>
-        ${p.shopify_product_id ? `<a href="https://admin.shopify.com/products/${p.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>` : ""}
+        ${p.shopify_product_id ? `<a href="${API}/shopify/products/${p.shopify_product_id}/open" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>` : ""}
         <button class="btn btn-icon sm" style="color:var(--red)" onclick="delProduct(${p.id})"><i class="ti ti-trash" style="font-size:13px"></i></button>
       </div></td>
     </tr>`;
@@ -1258,7 +1258,7 @@ async function syncProductPrice(productId){
     switch(p.status){
       case "ready": foot=`<button class="btn btn-warn" style="width:100%;justify-content:center" onclick="importOne('${id}')"><i class="ti ti-brand-shopify"></i> Import to Shopify</button>`;break;
       case "importing": foot=`<div class="pc-status pcs-loading"><i class="ti ti-loader-2 spin"></i> Importing…</div>`;break;
-      case "ok": foot=`<div class="pc-status pcs-ok"><i class="ti ti-circle-check"></i> Imported!</div>${p.sid?`<a href="https://admin.shopify.com/products/${p.sid}" target="_blank" style="font-size:11px;color:var(--blue);display:flex;align-items:center;justify-content:center;gap:4px;text-decoration:none;margin-top:6px">View in Shopify <i class="ti ti-external-link" style="font-size:10px"></i></a>`:""}`;break;
+      case "ok": foot=`<div class="pc-status pcs-ok"><i class="ti ti-circle-check"></i> Imported!</div>${p.sid?`<a href="${API}/shopify/products/${p.sid}/open" target="_blank" style="font-size:11px;color:var(--blue);display:flex;align-items:center;justify-content:center;gap:4px;text-decoration:none;margin-top:6px">View in Shopify <i class="ti ti-external-link" style="font-size:10px"></i></a>`:""}`;break;
       case "pending":{
         const oos=p.oosSkus||[], oosCount=oos.length;
         const nameList=oos.slice(0,3).map(s=>s.label||s.sku_id||"—");
@@ -2024,7 +2024,7 @@ async function syncInventoryFromModal() {
           ${m.price_mode==='manual'?`<button class="btn btn-warn btn-sm" onclick="resetMappingMode(${m.id})"><i class="ti ti-rotate"></i> Reset</button>`:""}
           <button class="btn btn-icon sm" title="Check listing status" onclick="checkMappingListingStatus(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-radar" style="font-size:13px"></i></button>
           <button class="btn btn-icon sm" title="Remap to new AliExpress ID" aria-label="Remap mapping" onclick="openMappingRemapModal(${m.id}, '${escapeHtml(m.aliexpress_id)}')"><i class="ti ti-arrows-exchange" style="font-size:13px"></i></button>
-          ${m.shopify_product_id?`<a href="https://admin.shopify.com/products/${m.shopify_product_id}" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
+          ${m.shopify_product_id?`<a href="${API}/shopify/products/${m.shopify_product_id}/open" target="_blank"><button class="btn btn-icon sm" title="View in Shopify"><i class="ti ti-external-link" style="font-size:13px"></i></button></a>`:""}
            <button class="btn btn-icon sm" onclick="toggleTrackMapping(${m.id})"><i class="ti ti-toggle"></i></button>
           <button class="btn btn-icon sm" style="color:var(--red)" onclick="deleteMapping(${m.id})"><i class="ti ti-trash"></i></button>
         </td>
@@ -2610,6 +2610,18 @@ async function pushInventoryToShopify() {
     btn.innerHTML = `<i class="ti ti-radar"></i> Scan for Dead Listings`;
   }
 
+  function shopifyLinkSummary(product) {
+    const id = escapeHtml(String(product.shopify_product_id || "Not linked"));
+    const messages = {
+      missing: "Product not found in the connected Shopify store. Stored ID retained for review.",
+      unlinked: "No valid Shopify product ID is linked.",
+      unverified: "Shopify verification is temporarily unavailable.",
+      supplier_mismatch: "Shopify supplier ID differs from this record. Review the mapping before syncing."
+    };
+    const message = messages[product.shopify_link_status];
+    return `<div style="font-size:11px;color:var(--t3);margin-top:5px">Shopify ID: <span style="font-family:var(--mono)">${id}</span></div>${message ? `<div style="font-size:11px;color:var(--orange);margin-top:4px">${message}</div>` : ""}`;
+  }
+
   async function loadDeadListings() {
     const wrap = document.getElementById("dead-listings-wrap");
     wrap.style.display = "";
@@ -2619,17 +2631,18 @@ async function pushInventoryToShopify() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (!d.count) { wrap.innerHTML = `<div class="badge b-green"><i class="ti ti-circle-check"></i> No dead listings found</div>`; return; }
-      const remapped = d.products.filter(p => p.replacement_aliexpress_id);
-      const stillDead = d.products.filter(p => !p.replacement_aliexpress_id);
+      const remapped = d.products.filter(p => !p.is_still_dead && p.replacement_aliexpress_id);
+      const stillDead = d.products.filter(p => p.is_still_dead || !p.replacement_aliexpress_id);
       const renderCard = (p) => {
-        const isRemapped = !!p.replacement_aliexpress_id;
+        const isRemapped = !p.is_still_dead && !!p.replacement_aliexpress_id;
         const currentId = p.aliexpress_id;
         const oldId = p.replacement_aliexpress_id || null;
         return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:${isRemapped ? "var(--green-bg)" : "var(--red-bg)"};border:1px solid ${isRemapped ? "var(--green-border)" : "var(--red-border)"};border-radius:10px;margin-bottom:8px">
           ${p.main_image ? `<img src="${p.main_image}" style="width:42px;height:42px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid ${isRemapped ? "var(--green-border)" : "var(--red-border)"};">` : `<div style="width:42px;height:42px;border-radius:8px;background:var(--border-2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-photo" style="color:var(--t3)"></i></div>`}
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.title || "—"}</div>
-            ${isRemapped ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px"><span class="badge b-green" style="font-size:10px"><i class="ti ti-circle-check"></i> Remapped</span></div><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px"><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">Old ID:</span><span style="font-family:var(--mono);color:var(--red);text-decoration:line-through">${oldId}</span><a href="https://www.aliexpress.com/item/${oldId}.html" target="_blank" style="color:var(--t3);font-size:10px"><i class="ti ti-external-link"></i></a></div><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">New ID:</span><span style="font-family:var(--mono);color:var(--green);font-weight:700">${currentId}</span><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank" style="color:var(--green);font-size:10px"><i class="ti ti-external-link"></i></a></div></div><div style="margin-top:4px;font-size:10px;color:var(--t3)"><i class="ti ti-info-circle"></i> Still flagged as dead because the <em>old</em> ID is what was originally scanned. The product is actively syncing via the new ID.</div>` : `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><span class="badge b-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Not remapped yet</span></div><div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${currentId}</div>`}
+            ${shopifyLinkSummary(p)}
+            ${isRemapped ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px"><span class="badge b-green" style="font-size:10px"><i class="ti ti-circle-check"></i> Remapped</span></div><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px"><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">Old ID:</span><span style="font-family:var(--mono);color:var(--red);text-decoration:line-through">${oldId}</span><a href="https://www.aliexpress.com/item/${oldId}.html" target="_blank" style="color:var(--t3);font-size:10px"><i class="ti ti-external-link"></i></a></div><div style="font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--t3);min-width:60px">New ID:</span><span style="font-family:var(--mono);color:var(--green);font-weight:700">${currentId}</span><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank" style="color:var(--green);font-size:10px"><i class="ti ti-external-link"></i></a></div></div><div style="margin-top:4px;font-size:10px;color:var(--t3)"><i class="ti ti-info-circle"></i> Previous ID retained for reference. The current AliExpress listing is not flagged as dead.</div>` : `<div style="margin-top:4px;display:flex;align-items:center;gap:6px"><span class="badge b-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i> Current listing needs remapping</span></div><div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${currentId}</div>`}
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:flex-end">
             ${isRemapped ? `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs btn-success" title="View new listing on AliExpress"><i class="ti ti-external-link"></i> New Listing</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify" style="white-space:nowrap"><i class="ti ti-external-link"></i> Shopify</button></a>` : ""}</div><button class="btn btn-xs" style="color:var(--t3);font-size:10px" onclick="clearDeadFlag(${p.id})" title="Remove from dead listings list (product is already fixed)"><i class="ti ti-x"></i> Clear from list</button>` : `<div style="display:flex;gap:6px"><a href="https://www.aliexpress.com/item/${currentId}.html" target="_blank"><button class="btn btn-xs"><i class="ti ti-external-link"></i> AliExpress</button></a>${p.shopify_url ? `<a href="${p.shopify_url}" target="_blank"><button class="btn btn-xs" title="View in Shopify" style="white-space:nowrap"><i class="ti ti-external-link"></i> Shopify</button></a>` : ""}</div><button class="btn btn-danger btn-xs" onclick="openRemapModal(${p.id}, '${currentId}')"><i class="ti ti-arrows-exchange"></i> Remap Now</button>`}
@@ -2885,7 +2898,7 @@ async function pushInventoryToShopify() {
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.title || "—"}</div>
             <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${m.aliexpress_id}</div>
-            <div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:2px">Shopify: ${m.shopify_product_id || "—"}</div>
+            ${shopifyLinkSummary(m)}
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;align-items:flex-end">
             <div style="display:flex;gap:6px">
@@ -2913,7 +2926,7 @@ async function loadDeadMappings() {
         <div style="flex:1;min-width:200px">
           <div style="font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.title || "—"}</div>
           <div style="font-size:11px;color:var(--red);font-family:var(--mono);margin-top:4px">Dead ID: ${m.aliexpress_id}</div>
-          <div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:2px">Shopify: ${m.shopify_product_id || "—"}</div>
+          ${shopifyLinkSummary(m)}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <a href="${m.aliexpress_url}" target="_blank"><button class="btn btn-xs" style="white-space:nowrap"><i class="ti ti-external-link"></i> AliExpress</button></a>
